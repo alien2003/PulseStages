@@ -1,0 +1,309 @@
+name: Build APKs
+
+# Reusable part of the release workflow (release.yml): builds the signed release APK and the debug APK with the same
+# versionName / versionCode, verifies both, and then either publishes them as a GitHub release (publish: true, for a
+# v* tag) or uploads the debug APK alone as a short-lived artifact (publish: false, the dry run). A dry run can build
+# any branch, so its release-signed APK never leaves the runner: release-signed APKs come from v* tags only.
+#
+# No "permissions" key on purpose: the job inherits the GITHUB_TOKEN permissions of the calling job (contents: write
+# for the release job, contents: read for the dry run). A called workflow can only lower them.
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: "true: publish a GitHub release for the v* tag; false: dry run, upload the debug APK for 3 days"
+        type: boolean
+        required: true
+    # All optional here: the "Decode signing keys" step fails with the names of every missing one of the first four.
+    secrets:
+      KEYSTORE_BASE64:
+        required: false
+      KEYSTORE_PASSWORD:
+        required: false
+      KEY_ALIAS:
+        required: false
+      KEY_PASSWORD:
+        required: false
+      DEBUG_KEYSTORE_BASE64:
+        required: false
+
+jobs:
+  apks:
+    name: Build, verify and ${{ inputs.publish && 'publish' || 'upload' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Gradle and its plugins never need the token, so it is not left in .git/config.
+          persist-credentials: false
+
+      - name: Derive version
+        id: version
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then
+            if [ "$GITHUB_REF_TYPE" != tag ]; then
+              echo "::error::Publishing needs a v* tag: run the workflow on a tag, or keep dry_run checked."
+              exit 1
+            fi
+            bash .github/scripts/version-from-tag.sh "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+          else
+            # Never published. versionCode 1 is below every release, so a release installs over a dry-run build.
+            printf 'name=0.0.0-dry.%s\ncode=1\nprerelease=true\n' "$GITHUB_RUN_NUMBER" | tee -a "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          # No Gradle User Home cache at all: this job resolves and compiles everything itself, so nothing that another
+          # workflow run saved in the cache (dependency jars, build cache entries) can end up in a signed APK.
+          cache-disabled: true
+          cache-provider: basic
+
+      - name: Install missing Android SDK packages
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          PACKAGES=()
+          [ -d "$ANDROID_HOME/platforms/android-37.0" ] || PACKAGES+=("platforms;android-37.0")
+          [ -d "$ANDROID_HOME/build-tools/36.0.0" ] || PACKAGES+=("build-tools;36.0.0")
+          if [ "${#PACKAGES[@]}" -gt 0 ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null || true
+            "$SDKMANAGER" "${PACKAGES[@]}"
+          fi
+
+      - name: Decode signing keys
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!name:-}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Repository secrets not set: ${missing[*]} (README, \"Signing secrets\")"
+            exit 1
+          fi
+          umask 077
+
+          keystore="$RUNNER_TEMP/pulsestages-release.jks"
+          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"; then
+            echo "::error::KEYSTORE_BASE64 is not valid base64"
+            exit 1
+          fi
+          chmod 600 "$keystore"
+          # Opens the key entry, so a wrong store password or alias fails here. keytool's error line names neither
+          # password, and the runner masks the alias, which is a secret.
+          if ! listing=$(keytool -list -keystore "$keystore" -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" 2>&1); then
+            reason=$(grep -m 1 '^keytool error' <<< "$listing" || true)
+            echo "::error::keytool cannot open KEY_ALIAS in KEYSTORE_BASE64 with KEYSTORE_PASSWORD: $reason"
+            exit 1
+          fi
+          echo "PULSESTAGES_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+
+          # Optional: a fixed debug key, so that the debug APKs of different releases update each other. AGP signs
+          # debug builds with $ANDROID_USER_HOME/debug.keystore (passwords "android", alias "androiddebugkey").
+          if [ -n "${DEBUG_KEYSTORE_BASE64:-}" ]; then
+            android_user_home="$RUNNER_TEMP/android-user-home"
+            mkdir -p "$android_user_home"
+            if ! printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > "$android_user_home/debug.keystore"; then
+              echo "::error::DEBUG_KEYSTORE_BASE64 is not valid base64"
+              exit 1
+            fi
+            chmod 600 "$android_user_home/debug.keystore"
+            if ! keytool -list -keystore "$android_user_home/debug.keystore" -storepass android \
+              -alias androiddebugkey > /dev/null 2>&1; then
+              echo "::error::DEBUG_KEYSTORE_BASE64 is not a debug keystore (password \"android\", alias \"androiddebugkey\")"
+              exit 1
+            fi
+            echo "ANDROID_USER_HOME=$android_user_home" >> "$GITHUB_ENV"
+          else
+            echo "::notice::DEBUG_KEYSTORE_BASE64 is not set: the debug APK is signed with a new throw-away debug key."
+          fi
+
+      - name: Build signed release and debug APKs
+        env:
+          PULSESTAGES_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          PULSESTAGES_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          PULSESTAGES_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        # No configuration cache: it would store the signing values that are read at configuration time. No build cache
+        # either: every task output of a signed build comes from this run.
+        run: >-
+          ./gradlew --no-configuration-cache --no-build-cache assembleRelease assembleDebug
+          "-PversionName=$VERSION_NAME" "-PversionCode=$VERSION_CODE"
+
+      - name: Verify APKs
+        id: apks
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          release_apk=app/build/outputs/apk/release/app-release.apk
+          debug_apk=app/build/outputs/apk/debug/app-debug.apk
+
+          # AGP names an unsigned release APK app-release-unsigned.apk.
+          if [ ! -f "$release_apk" ]; then
+            echo "::error::$release_apk is missing: the release APK was built unsigned"
+            ls -l app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          if [ ! -f "$debug_apk" ]; then
+            echo "::error::$debug_apk is missing"
+            exit 1
+          fi
+
+          # apksigner fails on an unsigned APK or a broken signature.
+          for apk in "$release_apk" "$debug_apk"; do
+            if ! "$build_tools/apksigner" verify --verbose --print-certs "$apk"; then
+              echo "::error::$apk has no valid signature"
+              exit 1
+            fi
+          done
+          signer() { "$build_tools/apksigner" verify --print-certs "$1" | sed -n "s/^Signer #1 certificate $2: //p"; }
+          release_dn=$(signer "$release_apk" DN)
+          release_cert=$(signer "$release_apk" "SHA-256 digest")
+          debug_cert=$(signer "$debug_apk" "SHA-256 digest")
+          if [ -z "$release_cert" ] || [ -z "$debug_cert" ]; then
+            echo "::error::apksigner printed no signer certificate"
+            exit 1
+          fi
+          case "$release_dn" in
+            *"CN=Android Debug"*)
+              echo "::error::The release APK is signed with an Android debug key"
+              exit 1
+              ;;
+          esac
+          if [ "$release_cert" = "$debug_cert" ]; then
+            echo "::error::The release and debug APKs are signed with the same key"
+            exit 1
+          fi
+
+          for apk in "$release_apk" "$debug_apk"; do
+            badging=$("$build_tools/aapt2" dump badging "$apk" | sed -n '1p')
+            case "$badging" in
+              *" versionCode='$VERSION_CODE' versionName='$VERSION_NAME' "*) ;;
+              *)
+                echo "::error::$apk does not have versionCode $VERSION_CODE and versionName $VERSION_NAME: $badging"
+                exit 1
+                ;;
+            esac
+          done
+
+          # The files to publish or upload. A dry run uploads the debug APK only: it can build any branch, and an APK
+          # signed with the release key must only ever come from a v* tag.
+          release_file="PulseStages-$VERSION_NAME.apk"
+          debug_file="PulseStages-$VERSION_NAME-debug.apk"
+          out="$RUNNER_TEMP/apks"
+          mkdir -p "$out"
+          files=()
+          if [ "$PUBLISH" = true ]; then
+            cp "$release_apk" "$out/$release_file"
+            files+=("$release_file")
+          fi
+          cp "$debug_apk" "$out/$debug_file"
+          files+=("$debug_file")
+          (cd "$out" && sha256sum "${files[@]}" > SHA256SUMS.txt)
+          {
+            echo "dir=$out"
+            echo "release_cert=$release_cert"
+            echo "debug_cert=$debug_cert"
+          } >> "$GITHUB_OUTPUT"
+          release_size=$(du -h "$release_apk" | cut -f1)
+          debug_size=$(du -h "$debug_apk" | cut -f1)
+          {
+            echo "### PulseStages $VERSION_NAME (versionCode $VERSION_CODE)"
+            echo
+            echo "| APK | Size | Signing certificate SHA-256 |"
+            echo "|---|---|---|"
+            echo "| \`$release_file\` | $release_size | \`$release_cert\` |"
+            echo "| \`$debug_file\` | $debug_size | \`$debug_cert\` |"
+            if [ "$PUBLISH" != true ]; then
+              echo
+              echo "Dry run: the release APK was verified, then discarded. The artifact holds the debug APK only."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dry-run debug APK
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # The signing check has passed by now. A full artifact storage quota only leaves the run without its artifact.
+        continue-on-error: true
+        with:
+          name: PulseStages-${{ steps.version.outputs.name }}-debug
+          path: ${{ steps.apks.outputs.dir }}/
+          if-no-files-found: error
+          retention-days: 3
+          # Not 0: with minSdk 28 the dex files are stored uncompressed, and zlib shrinks the debug APK to about a third.
+          compression-level: 6
+
+      - name: Publish GitHub release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          OUT_DIR: ${{ steps.apks.outputs.dir }}
+          RELEASE_CERT: ${{ steps.apks.outputs.release_cert }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          section=$(bash .github/scripts/changelog-section.sh "$VERSION_NAME" CHANGELOG.md)
+          {
+            if [ -n "$section" ]; then
+              printf '%s\n\n' "$section"
+            fi
+            cat <<EOF
+          ### Downloads
+
+          | File | Use |
+          |---|---|
+          | \`PulseStages-$VERSION_NAME.apk\` | Signed release build for everyday use. Later releases install over it as updates. |
+          | \`PulseStages-$VERSION_NAME-debug.apk\` | Debug build for testing, with the demo mode. |
+          | \`SHA256SUMS.txt\` | SHA-256 checksums of both APKs: \`sha256sum -c SHA256SUMS.txt\` |
+
+          The two APKs are signed with different keys, so neither can update the other. To switch, uninstall first.
+          The sessions PulseStages wrote stay in Health Connect; grant its permissions again after the reinstall.
+
+          Release signing certificate SHA-256: \`$RELEASE_CERT\`
+          EOF
+          } > "$notes"
+
+          args=(--verify-tag --title "PulseStages $VERSION_NAME" --notes-file "$notes")
+          if [ -z "$section" ]; then
+            # No "## [$VERSION_NAME]" section in CHANGELOG.md: GitHub's generated notes follow the downloads table.
+            args+=(--generate-notes)
+          fi
+          if [ "$PRERELEASE" = true ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$OUT_DIR/PulseStages-$VERSION_NAME.apk" \
+            "$OUT_DIR/PulseStages-$VERSION_NAME-debug.apk" \
+            "$OUT_DIR/SHA256SUMS.txt" \
+            "${args[@]}"
+
+      - name: Remove signing keys
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/pulsestages-release.jks" "$RUNNER_TEMP/android-user-home"

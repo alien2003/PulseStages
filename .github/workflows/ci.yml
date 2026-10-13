@@ -2,34 +2,108 @@ name: CI
 
 on:
   push:
+    # Branches only: a tag push is built by the release workflow.
+    branches:
+      - "**"
+    # Changes to pure documentation (files no build or test reads) skip CI. Keep this list in sync with the
+    # "changes" job below. docs/INTERCHANGE.md and docs/prereg/ are not listed: the Python tests read them.
+    paths-ignore:
+      - "*.md"
+      - LICENSE
+      - core-algo/SYNTHETIC_RESULTS.md
+      - docs/SCREENSHOTS.md
+      - docs/icon.svg
+      - docs/screenshots/**
+      - tools/train/DATASETS.md
+      - tools/train/README.md
+  # No path filter for pull requests: a workflow skipped by a path filter never reports its checks, so a docs-only pull
+  # request would wait forever for required checks. The "changes" job skips the jobs instead, and GitHub counts a
+  # skipped job as a passed check.
   pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # One group per pull request or branch: a new push cancels the run in progress. Every run on main gets a group of its
+  # own (its run id), so runs on main are never cancelled or replaced by a newer push.
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect code changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Look for changes outside the documentation
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          # Same files as on.push.paths-ignore.
+          is_doc() {
+            case "$1" in
+              LICENSE | core-algo/SYNTHETIC_RESULTS.md | docs/SCREENSHOTS.md | docs/icon.svg | docs/screenshots/*) return 0 ;;
+              tools/train/DATASETS.md | tools/train/README.md) return 0 ;;
+              */*) return 1 ;;
+              *.md) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          # Fails open: whenever the list of changed files is not complete, every job runs.
+          code=true
+          # The API lists at most 3000 files; a rename counts with its old and its new path.
+          if [ "${CHANGED_FILES:-0}" -le 3000 ] &&
+            files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+              --jq '.[] | .filename, (.previous_filename // empty)') &&
+            [ -n "$files" ]; then
+            code=false
+            while IFS= read -r file; do
+              if ! is_doc "$file"; then
+                echo "Not documentation: $file"
+                code=true
+                break
+              fi
+            done <<< "$files"
+          else
+            echo "::warning::Could not list the changed files; running every job."
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   build:
     name: Lint, test and assemble
+    needs: changes
+    # Runs unless the pull request changes documentation only (on push, "changes" is skipped and its output empty).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job needs the token, so it is not left in .git/config.
+          persist-credentials: false
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          # Fully open-source (MIT) cache implementation on top of actions/cache.
+          # Fully open-source (MIT) cache implementation on top of actions/cache. Only main writes cache entries
+          # (the action's default); other branches and pull requests read them. The release workflow uses no cache.
           cache-provider: basic
 
       - name: Install missing Android SDK packages
@@ -50,33 +124,49 @@ jobs:
       - name: Lint, test and assemble debug
         run: ./gradlew ktlintCheck detekt test assembleDebug
 
+      # Pushes to main only, kept 2 days: each upload stores about 15 MB, so even the 500 MB artifact quota of GitHub
+      # Free holds about 16 pushes to main a day. Pull requests and other branches can be built on demand with the dry
+      # run of the release workflow, and tagged builds live on the Releases page.
       - name: Upload debug APK
-        uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # A full artifact storage quota must never turn a passing build red.
+        continue-on-error: true
         with:
           name: pulsestages-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 2
+          # Not 0: with minSdk 28 the dex files are stored uncompressed, and zlib shrinks the debug APK to about a third.
+          compression-level: 6
 
       - name: Upload test and lint reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
         with:
           name: build-reports
           path: |
             **/build/reports/
             **/build/test-results/
           if-no-files-found: ignore
+          retention-days: 7
 
   python:
     name: Training tools tests (Python)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check out
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job needs the token, so it is not left in .git/config.
+          persist-credentials: false
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip

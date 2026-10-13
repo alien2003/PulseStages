@@ -10,7 +10,8 @@ plugins {
     alias(libs.plugins.android.junit)
 }
 
-// -PversionName=1.2.3 -PversionCode=10203 (CI release workflow derives both from the git tag).
+// -PversionName=1.2.3 -PversionCode=1020399 (the release workflow derives both from the git tag:
+// .github/scripts/version-from-tag.sh).
 val appVersionName: String = providers.gradleProperty("versionName").getOrElse("0.1.0-dev")
 val appVersionCode: Int = providers.gradleProperty("versionCode").map(String::toInt).getOrElse(1)
 

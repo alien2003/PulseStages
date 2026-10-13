@@ -3,8 +3,10 @@
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release tags are `vMAJOR.MINOR.PATCH`. The release
-workflow derives versionName and versionCode from the tag (see README, "GitHub: CI and releases").
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release tags are `vMAJOR.MINOR.PATCH`, and
+`vMAJOR.MINOR.PATCH-alpha.N`, `-beta.N` or `-rc.N` for pre-releases. The release workflow derives versionName and
+versionCode from the tag and takes the release notes from the tag's section of this file (see README, "GitHub: CI and
+releases").
 
 ## [Unreleased]
 
@@ -176,9 +178,12 @@ First release.
   - merged-manifest tests (no `INTERNET`) and English / Russian string parity of every module;
   - Robolectric tests of the production Hilt / WorkManager graph and of the UI wiring with a fake Health Connect.
 - **GitHub Actions**:
-  - CI runs ktlint, detekt, the tests and `assembleDebug`, uploads the debug APK as an artifact, and runs the Python
-    tests;
-  - Release on `v*` tags builds, verifies and publishes a signed APK, with the key taken from repository secrets.
+  - CI runs ktlint, detekt, the tests and `assembleDebug`, and the Python tests. It skips documentation-only changes
+    and keeps the debug APK of pushes to `main` for 2 days;
+  - Release on `v*` tags (and `-alpha.N`, `-beta.N`, `-rc.N` pre-release tags) builds the signed release APK and the
+    debug APK, verifies both and publishes them with SHA-256 checksums and the tag's changelog section, with the key
+    taken from repository secrets. A manual dry run checks the signing secrets without publishing anything;
+  - every action is pinned to a commit SHA, and Dependabot keeps the pins current.
 - **Documentation**: README (English, with a Russian section), ALGORITHM.md, PLAN.md, docs/INTERCHANGE.md,
   docs/SCREENSHOTS.md, tools/train/README.md and DATASETS.md.
 - **License**: WTFPL.

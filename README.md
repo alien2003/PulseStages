@@ -8,6 +8,9 @@ estimate.
 
 License: [WTFPL](LICENSE). Do whatever you want with the code.
 
+Ready-made APKs are on the [Releases page](https://github.com/alien2003/PulseStages/releases).
+[Downloads](#downloads) explains the release and the debug build.
+
 - [What it does](#what-it-does)
 - [How accurate it is](#how-accurate-it-is)
 - [Screenshots](#screenshots)
@@ -173,10 +176,10 @@ mise exec -- ./gradlew assembleDebug test ktlintCheck detekt
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 `./gradlew assembleRelease` writes `app/build/outputs/apk/release/app-release-unsigned.apk`. To get a signed release
-build, see [GitHub: CI and releases](#github-ci-and-releases).
+build, see [Signing secrets](#signing-secrets).
 
 Local builds use versionName `0.1.0-dev` and versionCode 1. To override them, pass
-`-PversionName=1.2.3 -PversionCode=10203`.
+`-PversionName=1.2.3 -PversionCode=1020399` (the values the release workflow derives from the tag `v1.2.3`).
 
 ## Install on the phone from WSL
 
@@ -678,32 +681,134 @@ Citations:
 
 ## GitHub: CI and releases
 
+### Downloads
+
+Ready-made APKs are on the [Releases page](https://github.com/alien2003/PulseStages/releases). Every release has
+three files:
+
+| File | What it is for |
+|---|---|
+| `PulseStages-<version>.apk` | The signed release build, for everyday use. Later releases install over it as updates. |
+| `PulseStages-<version>-debug.apk` | The debug build, for testing. It has the demo mode: Settings → **Debug build** → **Demo mode** switches the Nights list, the night detail and Compare to synthetic nights (see [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)). |
+| `SHA256SUMS.txt` | SHA-256 checksums of both APKs. Check them with `sha256sum -c SHA256SUMS.txt`. |
+
+- **Release and debug do not mix.** Both builds use the same application id, but they are signed with different keys.
+  The debug APK cannot update an installed release build, and the release APK cannot update an installed debug build.
+  To switch, uninstall first. Uninstalling deletes the app's own storage (ledger, settings, log) and revokes its
+  permissions, but **the sessions it wrote stay in Health Connect** (see [Deleting your data](#deleting-your-data)).
+  After the reinstall, grant the permissions again.
+- **Debug builds of different releases** update each other only when the optional secret `DEBUG_KEYSTORE_BASE64` is
+  set (see [Signing secrets](#signing-secrets)). Without it, every workflow run signs the debug APK with a new
+  throw-away key, so a newer debug APK needs an uninstall first, too.
+- The release notes give the SHA-256 of the release signing certificate. `apksigner verify --print-certs` prints the
+  same value for a genuine APK. The workflows publish release-signed APKs only here, built from a `v*` tag: the
+  [dry run](#dry-run) discards its release APK.
+- Pre-releases (tags `-alpha.N`, `-beta.N`, `-rc.N`) are marked "Pre-release" on GitHub and never become "Latest".
+- **CI builds.** CI runs of pushes to `main` keep their debug APK as the artifact `pulsestages-debug-apk` (a zip with
+  `app-debug.apk`) for 2 days. It has the local version (`0.1.0-dev`, versionCode 1) and a throw-away debug key. Pull
+  requests and other branches upload no APK; to get one for a branch, use the [dry run](#dry-run). Downloading artifacts
+  needs a GitHub login; releases do not.
+
 ### CI
 
-The CI workflow (`.github/workflows/ci.yml`) runs on every push and pull request.
+The CI workflow (`.github/workflows/ci.yml`) runs on every push to a branch and on every pull request. Tag pushes are
+left to the release workflow.
 
 | Job | What it does |
 |---|---|
-| `build` | Sets up Temurin 17 and Gradle, installs missing SDK packages and runs `./gradlew ktlintCheck detekt test assembleDebug`. Uploads the debug APK as the artifact `pulsestages-debug-apk`, and the test / lint reports on failure. |
+| `changes` | Pull requests only. Lists the changed files through the GitHub API and tells the other jobs whether anything outside the documentation changed. If the list cannot be read, every job runs. |
+| `build` | Sets up Temurin 17 and Gradle, installs missing SDK packages and runs `./gradlew ktlintCheck detekt test assembleDebug` (`test` also builds the minified, unsigned release APK that `ReleaseApkTest` checks). On pushes to `main`, uploads the debug APK as the artifact `pulsestages-debug-apk`, kept for 2 days. On failure, uploads the test / lint reports, kept for 7 days. A failed upload (for example a full artifact quota) does not fail the job. |
 | `python` | Sets up Python 3.12, installs `tools/train/requirements.txt` and runs `python -I -m pytest tools/train/tests -q`. The tests need no datasets and no algo-cli build. |
+
+**Documentation-only changes skip CI.** These files are read by no build and no test: the Markdown files in the
+repository root, `LICENSE`, `core-algo/SYNTHETIC_RESULTS.md`, `docs/SCREENSHOTS.md`, `docs/icon.svg`,
+`docs/screenshots/`, `tools/train/DATASETS.md` and `tools/train/README.md`. `docs/INTERCHANGE.md` and `docs/prereg/` are
+not on the list, because the Python tests read them.
+
+- A push that changes only these files starts no run (`paths-ignore`).
+- A pull request always starts a run. If it changes only these files, `changes` lets `build` and `python` skip.
+  GitHub counts a skipped job as a passed check, so a docs-only pull request can still be merged when the checks are
+  required. A `paths-ignore` on `pull_request` would not do that: a workflow that never starts never reports its
+  checks, and the pull request would wait for them forever.
+- The list is written twice, in `on.push.paths-ignore` and in the `changes` job. Keep both in sync.
+
+**Concurrency.** A new push to a branch or pull request cancels the run still in progress for it. Runs on `main` are
+never cancelled: each one gets a concurrency group of its own.
+
+**Pinned actions.** All workflows use their actions by full commit SHA, with the version in a comment
+(`actions/checkout@<sha> # v7.0.1`), so a moved or hijacked tag cannot change the code that runs next to the signing
+keys. Dependabot (`.github/dependabot.yml`) opens at most one pull request a month that moves all pins to new releases.
 
 ### Release
 
-The release workflow (`.github/workflows/release.yml`) runs on tags `v*`. The tag must have the form
-`vMAJOR.MINOR.PATCH`.
+The release workflow (`.github/workflows/release.yml`) runs when a tag `v*` is pushed. The build itself is in the
+reusable workflow `.github/workflows/build-apks.yml`, and the scripts it calls are in `.github/scripts/`.
+
+**Tags.** The tag must be `vMAJOR.MINOR.PATCH` (a release) or `vMAJOR.MINOR.PATCH-alpha.N`, `-beta.N` or `-rc.N`
+(a pre-release), without leading zeros. Any other tag fails the run before the build.
 
 - **versionName** is the tag without the `v`.
-- **versionCode** is `MAJOR · 10000 + MINOR · 100 + PATCH`. MINOR and PATCH must be ≤ 99. For example, `v1.4.2` gives
-  versionCode 10402.
+- **versionCode** is `MAJOR · 1000000 + MINOR · 10000 + PATCH · 100 + S`. S is N for `alpha.N`, 30 + N for `beta.N`,
+  60 + N for `rc.N` and 99 for the release itself. MINOR and PATCH must be ≤ 99, N ≤ 29 and MAJOR ≤ 2099.
+
+| Tag | versionName | versionCode |
+|---|---|---|
+| `v0.1.0` | 0.1.0 | 10099 |
+| `v0.2.0-alpha.1` | 0.2.0-alpha.1 | 20001 |
+| `v0.2.0-beta.2` | 0.2.0-beta.2 | 20032 |
+| `v0.2.0-rc.1` | 0.2.0-rc.1 | 20061 |
+| `v0.2.0` | 0.2.0 | 20099 |
+| `v1.4.2` | 1.4.2 | 1040299 |
+
+versionCode follows semver order, so every later tag installs over an earlier one, a release over its own
+pre-releases too. It depends only on the tag, so a re-run for the same tag gives the same versionCode. The rule is
+documented in `.github/scripts/version-from-tag.sh`.
 
 The workflow then:
 
-1. decodes the keystore;
-2. builds `assembleRelease` signed;
-3. verifies the APK with `apksigner`;
-4. publishes a GitHub release "PulseStages <version>" with `PulseStages-<version>.apk` and generated notes.
+1. decodes the release keystore (and the optional debug keystore) into the runner's temporary directory with mode 600,
+   and checks with `keytool` that the password and alias open the key;
+2. builds `assembleRelease` (signed) and `assembleDebug` with the same versionName and versionCode, with the
+   configuration cache off (it would store the signing values). It uses neither the Gradle cache that CI saves nor the
+   build cache: every dependency and every compiled class of a signed APK comes from this run;
+3. verifies both APKs with `apksigner`. It fails if the release APK is unsigned, signed with a debug key, or signed
+   with the same key as the debug APK, or if a version inside an APK differs from the tag's;
+4. names the files `PulseStages-<version>.apk` and `PulseStages-<version>-debug.apk` and writes `SHA256SUMS.txt`;
+5. publishes the GitHub release "PulseStages <version>" with these three files. The notes are the tag's
+   `## [<version>]` section of `CHANGELOG.md` and a short table of the downloads. Without such a section, GitHub's
+   generated notes follow the table instead. A pre-release tag gives a GitHub pre-release;
+6. deletes the keystores, also when an earlier step failed.
 
-It needs four repository secrets (Settings → Secrets and variables → Actions):
+Only the job that publishes gets `contents: write`; the dry run below gets `contents: read`. Release-signed APKs never
+go to Actions artifacts. The runs for one tag queue up instead of running at the same time, and a run stops after 45
+minutes.
+
+**Release** by adding the version's section to `CHANGELOG.md`, then pushing a tag:
+`git tag v0.1.0 && git push origin v0.1.0` gives versionName 0.1.0 and versionCode 10099.
+
+### Dry run
+
+The dry run builds and verifies the signed APKs without publishing anything. Use it to check the signing secrets
+before the first tag, or to get a debug APK of any branch.
+
+1. Open Actions → Release → Run workflow.
+2. Choose a branch or tag, keep **dry_run** checked (the default) and start the run.
+
+It runs steps 1–4 above with versionName `0.0.0-dry.<run number>` and versionCode 1, with all the checks of step 3.
+The job summary shows the size and signing certificate of both APKs. Then the release APK is discarded: a dry run
+can build any branch, and an APK signed with the release key must only come from a `v*` tag. The result is a single
+artifact, `PulseStages-0.0.0-dry.<run number>-debug`, with the debug APK and its `SHA256SUMS.txt`, kept for 3 days.
+Its versionCode 1 is below every release, so with the optional fixed debug key a published debug APK installs over
+it. To try a signed release build before the first tag, build it on your own computer (**Local signed build** in
+[Signing secrets](#signing-secrets)).
+
+With **dry_run** unchecked on a `v*` tag, the run publishes that tag's release, as a tag push does. On a branch, it
+fails.
+
+### Signing secrets
+
+The release workflow needs four repository secrets (Settings → Secrets and variables → Actions). A fifth one is
+optional.
 
 | Secret | Value |
 |---|---|
@@ -711,8 +816,11 @@ It needs four repository secrets (Settings → Secrets and variables → Actions
 | `KEYSTORE_PASSWORD` | keystore password |
 | `KEY_ALIAS` | key alias in the keystore |
 | `KEY_PASSWORD` | key password; for a PKCS12 keystore this is the keystore password |
+| `DEBUG_KEYSTORE_BASE64` | optional: a debug keystore, base64 without line breaks, with the standard debug passwords `android` and the alias `androiddebugkey` |
 
-**Create the keystore** outside the repository with the JDK's keytool:
+The workflow never prints these values. GitHub masks them in the log.
+
+**Create the release keystore** outside the repository with the JDK's keytool:
 
 ```sh
 mkdir -p ~/keys
@@ -733,11 +841,27 @@ gh secret set KEY_ALIAS --body pulsestages
 gh secret set KEY_PASSWORD
 ```
 
-**Release** by pushing a tag: `git tag v0.1.0 && git push origin v0.1.0` gives versionName 0.1.0 and versionCode 100.
+**Optional fixed debug key.** With `DEBUG_KEYSTORE_BASE64` set, every release signs its debug APK with the same key,
+so the debug APKs of different releases update each other. Make a separate debug keystore for this:
 
-**Never commit the keystore or its base64.** `.gitignore` excludes `*.jks`, `*.keystore` and `keystore.properties`,
-but not a `.b64` file, so keep them outside the repository. Back the keystore up: updates of an installed release
-must be signed with the same key.
+```sh
+mise exec -- keytool -genkeypair -v -storetype PKCS12 -keystore ~/keys/pulsestages-debug.keystore \
+  -storepass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=Android Debug,O=Android,C=US"
+base64 -w0 ~/keys/pulsestages-debug.keystore | gh secret set DEBUG_KEYSTORE_BASE64
+```
+
+To let the published debug APKs also update the debug builds you install from your own computer, use your local
+`~/.android/debug.keystore` instead. Anyone who has this keystore can sign an update of an installed debug build, and
+the update keeps its Health Connect permissions. Keep it as private as the release key. It must never be the release
+keystore: the workflow fails if both APKs have the same signer. Local builds have versionCode 1, below every release,
+so once a published debug APK is installed, `install -r` of a local debug build fails with
+`INSTALL_FAILED_VERSION_DOWNGRADE`. Add `-d` (`"$ADB_WIN" install -r -d …`; adb allows the downgrade for debug builds),
+or build it with `-PversionCode=` at or above the installed release's versionCode.
+
+**Never commit a keystore or its base64.** `.gitignore` excludes `*.jks`, `*.keystore` and `keystore.properties`,
+but not a `.b64` file, so keep them outside the repository. Back up the release keystore: updates of an installed
+release must be signed with the same key.
 
 **Local signed build.** Set the four signing variables, then run Gradle with the configuration cache off, as the
 workflow does:
@@ -747,11 +871,37 @@ export PULSESTAGES_KEYSTORE_PATH=~/keys/pulsestages-release.jks
 export PULSESTAGES_KEYSTORE_PASSWORD=…
 export PULSESTAGES_KEY_ALIAS=pulsestages
 export PULSESTAGES_KEY_PASSWORD=…
-mise exec -- ./gradlew --no-configuration-cache assembleRelease -PversionName=0.1.0 -PversionCode=100
+mise exec -- ./gradlew --no-configuration-cache assembleRelease -PversionName=0.1.0 -PversionCode=10099
 ```
 
 This gives `app/build/outputs/apk/release/app-release.apk`. Without all four variables, the release build stays
 unsigned.
+
+### Cost
+
+The workflows stay within GitHub's free allowances
+([GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions),
+[release limits](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases#storage-and-bandwidth-quotas)):
+
+- **Minutes.** Actions minutes on standard GitHub-hosted runners are free for public repositories.
+- **Artifacts.** GitHub Free includes 500 MB of artifact storage (shared with GitHub Packages). It is measured hourly
+  and averaged over the month, and GitHub updates the figure only every 6 to 12 hours. The billing page names no
+  exemption for public repositories, and without a payment method uploads are blocked once the quota is used up. The
+  workflows are sized for that case:
+  - one debug APK artifact is about 15 MB. With minSdk 28 the APK stores its dex files uncompressed (about 43 MB),
+    and the upload compresses it;
+  - CI uploads the debug APK on pushes to `main` only and keeps it 2 days, so the stored total is about
+    15 MB × 2 × (pushes to `main` per day). 500 MB holds about 16 pushes to `main` a day, every day;
+  - a dry run stores one debug APK (about 15 MB) for 3 days. The test / lint reports of a failed CI run are kept for
+    7 days;
+  - every upload step has `continue-on-error`: with a full quota, a run only lacks its artifact and its result stays
+    the same;
+  - release-signed APKs are never stored as artifacts.
+- **Cache.** The Gradle cache has 10 GB per repository. Only CI runs on `main` write it; other branches and pull
+  requests read it. Release and dry-run builds do not use it at all. GitHub evicts old entries by itself.
+- **Releases.** Release assets do not count as artifact storage. Each file must be under 2 GiB. There is no limit on
+  the total size of a release or on download bandwidth.
+- Documentation-only changes do not run the build at all, and a tag push does not run CI a second time.
 
 ## Project structure
 

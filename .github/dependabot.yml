@@ -1,0 +1,18 @@
+# The workflows pin every action to a full commit SHA, with its version in a comment. Dependabot moves the pins (and the
+# comments) to new releases: at most one pull request a month, with all action updates in it. Gradle and Python
+# dependencies are not managed here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # A new release waits a week before it is proposed, so a hijacked release is usually withdrawn before it gets here.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci
