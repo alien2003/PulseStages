@@ -11,6 +11,9 @@ import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.DurationModel
+import io.github.alien2003.pulsestages.algo.params.HmmParams
+import io.github.alien2003.pulsestages.algo.params.HybridParams
 import io.github.alien2003.pulsestages.algo.testing.SyntheticHybridModels
 import io.github.alien2003.pulsestages.cli.CliTestSupport.cli
 import io.github.alien2003.pulsestages.cli.CliTestSupport.ok
@@ -45,12 +48,35 @@ class EvaluateCommandTest {
 
     private fun nightsDir(extra: List<NightRecord> = emptyList()): Path = writeNights(dir.resolve("nights"), records + extra)
 
+    /**
+     * Parameters of the threshold checks below: the specification's HMM and the pre-training hybrid decoder values,
+     * with which the thresholds were set (the shipped defaults are chosen on real nights for the real bundle).
+     */
+    private val pinned =
+        AlgoParams(
+            hmm = HmmParams.PHYSIOLOGY,
+            hybrid = HybridParams(durationModel = DurationModel.EXPLICIT, timePriorWeight = 1.0, emissionWeight = 1.0),
+        )
+
+    private fun pinnedFile(): Path =
+        Files.writeString(dir.resolve("pinned-params.json"), ParamsFiles.JSON.encodeToString(AlgoParams.serializer(), pinned))
+
     @Test
     fun `evaluates labelled nights with sane metrics and counts skipped nights`() {
         val unlabelled = record(5100, subject = "s9").copy(id = "unlabelled", labels = emptyList())
         val out = dir.resolve("hmm.json")
 
-        ok("evaluate", "--nights", nightsDir(listOf(unlabelled)).toString(), "--estimator", "HMM", "--out", out.toString())
+        ok(
+            "evaluate",
+            "--nights",
+            nightsDir(listOf(unlabelled)).toString(),
+            "--estimator",
+            "HMM",
+            "--params",
+            pinnedFile().toString(),
+            "--out",
+            out.toString(),
+        )
 
         val metrics = readJson(out)
         assertEquals("HMM", checkNotNull(metrics["estimator"]).jsonPrimitive.content)
@@ -62,18 +88,28 @@ class EvaluateCommandTest {
         val pooled = metrics.obj("pooled")
         assertTrue(pooled.num("kappa") > 0.3, "HMM kappa on synthetic nights: ${pooled.num("kappa")}")
         assertEquals(4, checkNotNull(pooled["confusion"]).jsonArray.size)
+        // The per-night matrices add up to the pooled one (training pools results of several runs from them).
+        val matrices = checkNotNull(metrics["perNight"]).jsonArray.map { night -> longMatrix(night.jsonObject, "confusion") }
+        val summed = matrices.reduce { a, b -> a.zip(b) { ra, rb -> ra.zip(rb) { x, y -> x + y } } }
+        assertEquals(longMatrix(pooled, "confusion"), summed)
 
         // Pooled numbers equal the library's scoring of the same nights.
         val stager = SleepStager()
         val expected =
             records.fold(ConfusionMatrix.EMPTY) { acc, r ->
-                val estimate = (stager.run(r.input, AlgoParams(estimator = EstimatorType.HMM)) as EstimationOutcome.Estimated).estimate
+                val estimate = (stager.run(r.input, pinned.copy(estimator = EstimatorType.HMM)) as EstimationOutcome.Estimated).estimate
                 acc + IntervalScoring.score(r.labels, estimate.stages).confusion
             }
         assertEquals(expected.kappa, pooled.num("kappa"), 1e-12)
         assertEquals(3, checkNotNull(metrics.obj("perSubject")["subjects"]).jsonPrimitive.int)
         assertTrue(metrics.obj("minutesError").num("deep") >= 0.0)
     }
+
+    /** The 4×4 integer matrix under [key]. */
+    private fun longMatrix(
+        json: JsonObject,
+        key: String,
+    ): List<List<Long>> = checkNotNull(json[key]).jsonArray.map { row -> row.jsonArray.map { it.jsonPrimitive.long } }
 
     /** A JSON number or null (undefined) as a Double (NaN for null). */
     private fun JsonObject.numOrNaN(key: String): Double = checkNotNull(this[key]).jsonPrimitive.doubleOrNull ?: Double.NaN
@@ -145,6 +181,7 @@ class EvaluateCommandTest {
             assertNumber(estimates[i].coverage, night.num("coverage"), "$what coverage")
             assertNumber(estimates[i].confidence, night.num("confidence"), "$what confidence")
             assertEquals(score.confusion.total, checkNotNull(night["scoredChunks"]).jsonPrimitive.long)
+            assertEquals(score.confusion.toArray().map { it.toList() }, longMatrix(night, "confusion"), "$what confusion")
             for (stage in SleepStage.SCORED) {
                 assertNumber(score.truthMinutes[stage], night.obj("truthMinutes").num(stage.name), "$what truth $stage")
                 assertNumber(score.predictedMinutes[stage], night.obj("predictedMinutes").num(stage.name), "$what predicted $stage")
@@ -240,7 +277,20 @@ class EvaluateCommandTest {
     fun `hybrid evaluation with a model and with fold models`() {
         val model = writeModel(dir.resolve("model.json"))
         val out = dir.resolve("hybrid.json")
-        ok("evaluate", "--nights", nightsDir().toString(), "--estimator", "HYBRID", "--model", model.toString(), "--out", out.toString())
+        val params = pinnedFile().toString()
+        ok(
+            "evaluate",
+            "--nights",
+            nightsDir().toString(),
+            "--estimator",
+            "HYBRID",
+            "--model",
+            model.toString(),
+            "--params",
+            params,
+            "--out",
+            out.toString(),
+        )
 
         val metrics = readJson(out)
         assertTrue(metrics.obj("pooled").num("kappa") > 0.6, "hybrid kappa: ${metrics.obj("pooled").num("kappa")}")
@@ -269,6 +319,7 @@ class EvaluateCommandTest {
         val out = dir.resolve("grid-out.json")
         val perEpoch = dir.resolve("per-epoch.csv")
         val nights = nightsDir().toString()
+        val params = pinnedFile().toString()
 
         ok(
             "evaluate",
@@ -276,6 +327,8 @@ class EvaluateCommandTest {
             nights,
             "--model",
             model.toString(),
+            "--params",
+            params,
             "--param-grid",
             grid.toString(),
             "--out",
@@ -293,7 +346,7 @@ class EvaluateCommandTest {
         assertEquals(6, checkNotNull(blocks[3].obj("estimatorsUsed")["RULES"]).jsonPrimitive.int)
 
         val single = dir.resolve("single.json")
-        ok("evaluate", "--nights", nights, "--model", model.toString(), "--out", single.toString())
+        ok("evaluate", "--nights", nights, "--model", model.toString(), "--params", params, "--out", single.toString())
         assertEquals(readJson(single).obj("pooled"), blocks[0].obj("pooled"), "grid entry {} equals the plain run")
         assertTrue(blocks.drop(1).take(2).all { it.obj("pooled") != blocks[0].obj("pooled") })
 

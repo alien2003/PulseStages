@@ -77,4 +77,8 @@ tasks.test {
     val mainSources = layout.projectDirectory.dir("src/main")
     inputs.dir(mainSources).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("coreAlgoMainSources")
     systemProperty("pulsestages.coreAlgo.mainSrc", mainSources.asFile.absolutePath)
+    // The trained bundle shipped in the app (tools/train); BundledModelAssetTest validates it against this build.
+    val modelAsset = layout.projectDirectory.file("../app/src/main/assets/models/hybrid_model.json")
+    inputs.file(modelAsset).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("hybridModelAsset")
+    systemProperty("pulsestages.hybridModelAsset", modelAsset.asFile.absolutePath)
 }

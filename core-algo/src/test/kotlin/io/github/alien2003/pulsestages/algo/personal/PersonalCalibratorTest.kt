@@ -3,6 +3,9 @@ package io.github.alien2003.pulsestages.algo.personal
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.DurationModel
+import io.github.alien2003.pulsestages.algo.params.HmmParams
+import io.github.alien2003.pulsestages.algo.params.HybridParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticOptions
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticPerson
@@ -22,10 +25,21 @@ import kotlin.math.abs
  *
  * Observed after the review fixes (12 nights, 8 training / 4 held out, HYBRID): kappa 0.6980 → 0.7071 with the
  * default regularization (λ = 10 h), → 0.7373 with λ = 0.5 h (first run: 0.6736 → 0.6817 / 0.7255).
+ *
+ * The parameters are pinned to the pre-training decoder values and the physiology HMM ([pinned]) with which these
+ * numbers were measured; the shipped defaults were chosen on real nights for the real bundle, not for this generator.
  */
 class PersonalCalibratorTest {
     private val day = 86_400_000L
     private val model = SyntheticHybridModels.default
+
+    /** Defaults with the decoder and HMM of the synthetic reference measurements (see the class KDoc). */
+    private val pinned =
+        AlgoParams(
+            hmm = HmmParams.PHYSIOLOGY,
+            hybrid = HybridParams(durationModel = DurationModel.EXPLICIT, timePriorWeight = 1.0, emissionWeight = 1.0),
+        )
+
     private val shifted = SyntheticPerson(baselineBpm = 65.0, deepOffsetBpm = -3.5, remOffsetBpm = 12.0, awakeOffsetBpm = 15.0)
 
     private fun referenceNights(
@@ -46,7 +60,7 @@ class PersonalCalibratorTest {
     @Test
     fun `calibration on a shifted person does not decrease held-out kappa`() {
         val nights = referenceNights(12)
-        val params = AlgoParams(estimator = EstimatorType.HYBRID)
+        val params = pinned.copy(estimator = EstimatorType.HYBRID)
 
         val result = PersonalCalibrator(model).calibrate(nights, params)
         println(
@@ -74,7 +88,7 @@ class PersonalCalibratorTest {
     @Test
     fun `strong regularization keeps the global model`() {
         val nights = referenceNights(6)
-        val params = regularized(AlgoParams(estimator = EstimatorType.HYBRID), 1e7)
+        val params = regularized(pinned.copy(estimator = EstimatorType.HYBRID), 1e7)
 
         val result = PersonalCalibrator(model).calibrate(nights, params)
 
@@ -92,7 +106,7 @@ class PersonalCalibratorTest {
     @Test
     fun `HMM-only calibration fits the emission means`() {
         val nights = referenceNights(8)
-        val params = AlgoParams(estimator = EstimatorType.HMM)
+        val params = pinned.copy(estimator = EstimatorType.HMM)
 
         val result = PersonalCalibrator().calibrate(nights, params)
         println("calibration HMM shifted person: before=${result.kappaBefore} after=${result.kappaAfter}")
@@ -110,7 +124,7 @@ class PersonalCalibratorTest {
     @Test
     fun `the split is deterministic by night order`() {
         val nights = referenceNights(7)
-        val params = AlgoParams(estimator = EstimatorType.HYBRID)
+        val params = pinned.copy(estimator = EstimatorType.HYBRID)
 
         val a = PersonalCalibrator(model).calibrate(nights, params)
         val b = PersonalCalibrator(model).calibrate(nights.reversed(), params)

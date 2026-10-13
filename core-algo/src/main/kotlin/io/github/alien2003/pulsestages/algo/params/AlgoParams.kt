@@ -12,7 +12,8 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class AlgoParams(
-    val estimator: EstimatorType = EstimatorType.HYBRID,
+    /** Default: the estimator chosen by the open-dataset validation ([TrainedDefaults.ESTIMATOR]). */
+    val estimator: EstimatorType = TrainedDefaults.ESTIMATOR,
     val preprocess: PreprocessParams = PreprocessParams(),
     val features: FeatureParams = FeatureParams(),
     val hmm: HmmParams = HmmParams(),
@@ -163,27 +164,59 @@ data class TransitionWeights(
     val remToDeep: Double = 0.0,
 )
 
-/** HMM estimator (section 3). */
-@Serializable
-data class HmmParams(
-    val emissions: EmissionTable = EmissionTable.PHYSIOLOGY,
-    val meanBouts: MeanBouts = MeanBouts(),
-    val transitions: TransitionWeights = TransitionWeights(),
-    /** Replacement for zero probabilities. */
-    val epsilon: Double = 1e-4,
-    /** LIGHT→DEEP multiplier = max(deepTimeFloor, deepTimeIntercept − deepTimeSlope·t). */
+/**
+ * Time-dependent priors and initial distribution of the HMM (section 3 of the specification): the part of [HmmParams]
+ * that the supervised estimation of tools/train fits besides the emissions, mean bouts and transition shares. The
+ * defaults are the specification's values; [HmmParams] takes its defaults from [TrainedDefaults.HMM_TIME_PRIOR].
+ *
+ * @property deepTimeIntercept LIGHT→DEEP multiplier = max([deepTimeFloor], [deepTimeIntercept] − [deepTimeSlope]·t).
+ * @property deepTimeSlope decrease of the LIGHT→DEEP multiplier over the night (t = elapsed fraction).
+ * @property deepTimeFloor lower bound of the LIGHT→DEEP multiplier.
+ * @property remTimeIntercept LIGHT→REM multiplier = [remTimeIntercept] + [remTimeSlope]·t.
+ * @property remTimeSlope increase of the LIGHT→REM multiplier over the night.
+ * @property remLockoutMin minutes after the session start during which REM is suppressed.
+ * @property remLockoutFactor REM probability multiplier during the lockout.
+ * @property initialAwake initial AWAKE weight (DEEP and REM get ε).
+ * @property initialLight initial LIGHT weight.
+ */
+data class HmmTimePrior(
     val deepTimeIntercept: Double = 1.6,
     val deepTimeSlope: Double = 1.2,
     val deepTimeFloor: Double = 0.3,
-    /** LIGHT→REM multiplier = remTimeIntercept + remTimeSlope·t. */
     val remTimeIntercept: Double = 0.4,
     val remTimeSlope: Double = 1.2,
-    /** REM is suppressed (probability × remLockoutFactor) during the first remLockoutMin minutes. */
     val remLockoutMin: Double = 45.0,
     val remLockoutFactor: Double = 0.05,
-    /** Initial distribution (DEEP and REM get ε). */
     val initialAwake: Double = 0.5,
     val initialLight: Double = 0.5,
+)
+
+/**
+ * HMM estimator (section 3). The emission, bout-length, transition and time-prior defaults come from
+ * [TrainedDefaults]: the supervised estimates of the open-dataset validation if they scored higher than the physiology
+ * table and passed its validity checks, otherwise the specification's values ([EmissionTable.PHYSIOLOGY], [MeanBouts],
+ * [TransitionWeights], [HmmTimePrior]), which stay available either way ([PHYSIOLOGY]).
+ */
+@Serializable
+data class HmmParams(
+    val emissions: EmissionTable = TrainedDefaults.HMM_EMISSIONS,
+    val meanBouts: MeanBouts = TrainedDefaults.HMM_MEAN_BOUTS,
+    val transitions: TransitionWeights = TrainedDefaults.HMM_TRANSITIONS,
+    /** Replacement for zero probabilities. */
+    val epsilon: Double = 1e-4,
+    /** LIGHT→DEEP multiplier = max(deepTimeFloor, deepTimeIntercept − deepTimeSlope·t). */
+    val deepTimeIntercept: Double = TrainedDefaults.HMM_TIME_PRIOR.deepTimeIntercept,
+    val deepTimeSlope: Double = TrainedDefaults.HMM_TIME_PRIOR.deepTimeSlope,
+    val deepTimeFloor: Double = TrainedDefaults.HMM_TIME_PRIOR.deepTimeFloor,
+    /** LIGHT→REM multiplier = remTimeIntercept + remTimeSlope·t. */
+    val remTimeIntercept: Double = TrainedDefaults.HMM_TIME_PRIOR.remTimeIntercept,
+    val remTimeSlope: Double = TrainedDefaults.HMM_TIME_PRIOR.remTimeSlope,
+    /** REM is suppressed (probability × remLockoutFactor) during the first remLockoutMin minutes. */
+    val remLockoutMin: Double = TrainedDefaults.HMM_TIME_PRIOR.remLockoutMin,
+    val remLockoutFactor: Double = TrainedDefaults.HMM_TIME_PRIOR.remLockoutFactor,
+    /** Initial distribution (DEEP and REM get ε). */
+    val initialAwake: Double = TrainedDefaults.HMM_TIME_PRIOR.initialAwake,
+    val initialLight: Double = TrainedDefaults.HMM_TIME_PRIOR.initialLight,
     /** Additive log-prior weight of the ultradian-cycle phase (0 disables). */
     val cyclePriorWeight: Double = 0.5,
     /** Cycle phase (0..1 between minima) at which the DEEP and REM priors peak. */
@@ -196,7 +229,35 @@ data class HmmParams(
     val emAdapt: Boolean = true,
     val emIterations: Int = 3,
     val emPriorStrength: Double = 20.0,
-)
+) {
+    /** These parameters with the time-dependent priors and initial distribution of [prior]. */
+    fun withTimePrior(prior: HmmTimePrior): HmmParams =
+        copy(
+            deepTimeIntercept = prior.deepTimeIntercept,
+            deepTimeSlope = prior.deepTimeSlope,
+            deepTimeFloor = prior.deepTimeFloor,
+            remTimeIntercept = prior.remTimeIntercept,
+            remTimeSlope = prior.remTimeSlope,
+            remLockoutMin = prior.remLockoutMin,
+            remLockoutFactor = prior.remLockoutFactor,
+            initialAwake = prior.initialAwake,
+            initialLight = prior.initialLight,
+        )
+
+    /** Presets. */
+    companion object {
+        /**
+         * The specification's physiology defaults: [EmissionTable.PHYSIOLOGY], mean bouts AWAKE 5 / LIGHT 20 / DEEP 20 /
+         * REM 20 min, the specification's transition shares and time-dependent priors ([HmmTimePrior]), every other
+         * field at its default ("reset to the physiology table", and the fixed reference of the synthetic regression
+         * tests).
+         */
+        val PHYSIOLOGY: HmmParams
+            get() =
+                HmmParams(emissions = EmissionTable.PHYSIOLOGY, meanBouts = MeanBouts(), transitions = TransitionWeights())
+                    .withTimePrior(HmmTimePrior())
+    }
+}
 
 /** Rules estimator thresholds (section 6). */
 @Serializable
@@ -224,16 +285,20 @@ data class RulesParams(
 @Serializable
 enum class DurationModel { EXPLICIT, GEOMETRIC }
 
-/** Hybrid estimator (section 8). Model weights are not parameters; they come from the model bundle. */
+/**
+ * Hybrid estimator (section 8). Model weights are not parameters; they come from the model bundle. The decoder
+ * defaults ([durationModel], [timePriorWeight], [emissionWeight]) are the values chosen by the nested cross-validation
+ * of the open-dataset validation ([TrainedDefaults]); the pre-training values were EXPLICIT, 1.0 and 1.0.
+ */
 @Serializable
 data class HybridParams(
-    val durationModel: DurationModel = DurationModel.EXPLICIT,
+    val durationModel: DurationModel = TrainedDefaults.HYBRID_DURATION_MODEL,
     /** Weight of log P(stage | 30-min bin) relative to the class prior. */
-    val timePriorWeight: Double = 1.0,
+    val timePriorWeight: Double = TrainedDefaults.HYBRID_TIME_PRIOR_WEIGHT,
     /** Maximum bout length for the HSMM, minutes. */
     val maxBoutMin: Int = 120,
     /** Exponent applied to the scaled likelihoods (1 = as trained). */
-    val emissionWeight: Double = 1.0,
+    val emissionWeight: Double = TrainedDefaults.HYBRID_EMISSION_WEIGHT,
     /** AWAKE scaled-likelihood multiplier on elevated-HR nights. */
     val elevatedAwakeFactor: Double = 0.6,
 )

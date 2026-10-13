@@ -7,6 +7,8 @@ import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
+import io.github.alien2003.pulsestages.algo.params.HmmParams
+import io.github.alien2003.pulsestages.algo.params.HybridParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.testing.SyntheticHybridModels
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -17,7 +19,10 @@ import java.util.Locale
 /**
  * HYBRID recovery of 30 held-out synthetic nights (seeds 2001..2030) with a bundle trained by the test fixture on
  * nights 1001..1040 (softmax regression on the hybrid features, durations / transitions / time prior counted from the
- * synthetic truth), default [AlgoParams], scored with [IntervalScoring] (30-s chunks).
+ * synthetic truth), scored with [IntervalScoring] (30-s chunks). Parameters: the defaults, except that the decoder is
+ * pinned to the pre-training values (timePriorWeight 1, emissionWeight 1; durationModel as tested) and the HMM to
+ * [HmmParams.PHYSIOLOGY], because the thresholds below were measured with them; the shipped defaults were chosen on
+ * real nights for the real bundle. The hybrid with the shipped decoder defaults is printed too (not asserted).
  *
  * Observed (ALGO_VERSION 1 after the review fixes), per-night Cohen's kappa:
  *
@@ -51,9 +56,9 @@ class HybridSyntheticRecoveryTest {
     private fun evaluate(
         type: EstimatorType,
         durationModel: DurationModel = DurationModel.EXPLICIT,
+        hybrid: HybridParams = HybridParams(durationModel = durationModel, timePriorWeight = 1.0, emissionWeight = 1.0),
     ): Summary {
-        val base = AlgoParams(estimator = type)
-        val params = base.copy(hybrid = base.hybrid.copy(durationModel = durationModel))
+        val params = AlgoParams(estimator = type, hmm = HmmParams.PHYSIOLOGY, hybrid = hybrid)
         val scores =
             nights.map { night ->
                 val estimate = (stager.run(night.input, params) as EstimationOutcome.Estimated).estimate
@@ -71,6 +76,8 @@ class HybridSyntheticRecoveryTest {
         println("synthetic recovery HYBRID/EXPLICIT: $explicit")
         println("synthetic recovery HYBRID/GEOMETRIC: $geometric")
         println("synthetic recovery HMM (same nights): $hmm")
+        val shipped = evaluate(EstimatorType.HYBRID, hybrid = HybridParams())
+        println("synthetic recovery HYBRID with the shipped decoder defaults (informational): $shipped")
 
         assertTrue(explicit.mean >= EXPLICIT_MIN_MEAN_KAPPA, "HYBRID/EXPLICIT mean kappa ${explicit.mean} < $EXPLICIT_MIN_MEAN_KAPPA")
         assertTrue(geometric.mean >= GEOMETRIC_MIN_MEAN_KAPPA, "HYBRID/GEOMETRIC mean kappa ${geometric.mean} < $GEOMETRIC_MIN_MEAN_KAPPA")

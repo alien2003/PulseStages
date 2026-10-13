@@ -5,6 +5,7 @@ import io.github.alien2003.pulsestages.algo.metrics.IntervalScoring
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.HmmParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -12,8 +13,11 @@ import org.junit.jupiter.api.Test
 import java.util.Locale
 
 /**
- * Recovery of 50 seeded synthetic nights (seeds 1..50, default [AlgoParams] apart from the estimator), scored with
- * [IntervalScoring] against the generating hypnogram (30-s chunks).
+ * Recovery of 50 seeded synthetic nights (seeds 1..50), scored with [IntervalScoring] against the generating
+ * hypnogram (30-s chunks). The parameters are the defaults except the estimator and the HMM, which is pinned to the
+ * physiology table ([HmmParams.PHYSIOLOGY]): the regression thresholds below were measured with it, and the shipped
+ * HMM defaults are decided by the open-dataset validation (TrainedDefaults), never by this generator. The shipped
+ * defaults are measured too and printed (not asserted; see core-algo/SYNTHETIC_RESULTS.md).
  *
  * Observed (ALGO_VERSION 1 after the review fixes), Cohen's kappa per night:
  *
@@ -43,10 +47,13 @@ class SyntheticRecoveryTest {
             String.format(Locale.ROOT, "mean=%.4f median=%.4f min=%.4f accuracy=%.4f", mean, median, min, pooled.accuracy)
     }
 
-    private fun evaluate(type: EstimatorType): Summary {
+    private fun evaluate(
+        type: EstimatorType,
+        hmm: HmmParams = HmmParams.PHYSIOLOGY,
+    ): Summary {
         val scores =
             nights.map { night ->
-                val outcome = stager.run(night.input, AlgoParams(estimator = type))
+                val outcome = stager.run(night.input, AlgoParams(estimator = type, hmm = hmm))
                 val estimate = (outcome as EstimationOutcome.Estimated).estimate
                 assertEquals(type, estimate.estimator)
                 IntervalScoring.score(night.truth, estimate.stages).confusion
@@ -60,6 +67,8 @@ class SyntheticRecoveryTest {
         val rules = evaluate(EstimatorType.RULES)
         println("synthetic recovery HMM: $hmm")
         println("synthetic recovery RULES: $rules")
+        val shipped = evaluate(EstimatorType.HMM, HmmParams())
+        println("synthetic recovery HMM with the shipped HMM defaults (informational): $shipped")
 
         assertTrue(hmm.mean >= HMM_MIN_MEAN_KAPPA, "HMM mean kappa ${hmm.mean} < $HMM_MIN_MEAN_KAPPA")
         assertTrue(rules.mean >= RULES_MIN_MEAN_KAPPA, "RULES mean kappa ${rules.mean} < $RULES_MIN_MEAN_KAPPA")

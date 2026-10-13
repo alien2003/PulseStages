@@ -23,7 +23,7 @@ class TransitionModelTest {
 
     @Test
     fun `rows are stochastic at every epoch`() {
-        val model = TransitionModel(HmmParams(), grid(480))
+        val model = TransitionModel(HmmParams.PHYSIOLOGY, grid(480))
         for (k in 1 until 480) {
             val m = model.matrix(k)
             m.forEachIndexed { i, row -> assertEquals(1.0, row.sum(), 1e-12, "k=$k row=$i") }
@@ -33,7 +33,7 @@ class TransitionModelTest {
 
     @Test
     fun `self transitions follow the mean bout durations`() {
-        val model = TransitionModel(HmmParams(remLockoutMin = 0.0), grid(480))
+        val model = TransitionModel(HmmParams.PHYSIOLOGY.copy(remLockoutMin = 0.0), grid(480))
         val m = model.matrix(100)
 
         assertEquals(1 - 1.0 / 5, m[awake][awake], 1e-12)
@@ -41,17 +41,18 @@ class TransitionModelTest {
         assertEquals(1 - 1.0 / 20, m[deep][deep], 1e-12)
         assertEquals(1 - 1.0 / 20, m[rem][rem], 1e-12)
 
-        val twoMinute = TransitionModel(HmmParams(remLockoutMin = 0.0), grid(480, epochSec = 120)).matrix(100)
+        val twoMinute = TransitionModel(HmmParams.PHYSIOLOGY.copy(remLockoutMin = 0.0), grid(480, epochSec = 120)).matrix(100)
         assertEquals(1 - 2.0 / 5, twoMinute[awake][awake], 1e-12)
 
-        val clamped = TransitionModel(HmmParams(meanBouts = MeanBouts(awakeMin = 0.5, lightMin = 1e6)), grid(480)).matrix(100)
+        val extremeBouts = HmmParams.PHYSIOLOGY.copy(meanBouts = MeanBouts(awakeMin = 0.5, lightMin = 1e6))
+        val clamped = TransitionModel(extremeBouts, grid(480)).matrix(100)
         assertEquals(0.5, clamped[awake][awake], 1e-12)
         assertEquals(0.9999, clamped[light][light], 1e-12)
     }
 
     @Test
     fun `off-diagonal mass follows the weights and zeros become epsilon`() {
-        val model = TransitionModel(HmmParams(remLockoutMin = 0.0), grid(480))
+        val model = TransitionModel(HmmParams.PHYSIOLOGY.copy(remLockoutMin = 0.0), grid(480))
         val m = model.matrix(100)
         val eps = 1e-4
         val awakeRemainder = 1.0 / 5
@@ -66,7 +67,7 @@ class TransitionModelTest {
 
     @Test
     fun `light to deep and light to rem follow the time of night`() {
-        val params = HmmParams(remLockoutMin = 0.0)
+        val params = HmmParams.PHYSIOLOGY.copy(remLockoutMin = 0.0)
         val n = 400
         val model = TransitionModel(params, grid(n))
 
@@ -87,7 +88,7 @@ class TransitionModelTest {
 
     @Test
     fun `rem lockout suppresses transitions into rem and the rem prior`() {
-        val params = HmmParams()
+        val params = HmmParams.PHYSIOLOGY
         val model = TransitionModel(params, grid(480))
         val free = TransitionModel(params.copy(remLockoutMin = 0.0), grid(480))
 
@@ -113,7 +114,7 @@ class TransitionModelTest {
 
     @Test
     fun `initial distribution uses epsilon for deep and rem`() {
-        val initial = TransitionModel(HmmParams(remLockoutMin = 0.0), grid(60)).initial()
+        val initial = TransitionModel(HmmParams.PHYSIOLOGY.copy(remLockoutMin = 0.0), grid(60)).initial()
         val sum = 0.5 + 0.5 + 2e-4
 
         assertEquals(0.5 / sum, initial[awake], 1e-12)
@@ -123,7 +124,7 @@ class TransitionModelTest {
 
     @Test
     fun `log model matches the probability matrices`() {
-        val model = TransitionModel(HmmParams(transitions = TransitionWeights(awakeToRem = 0.0)), grid(30))
+        val model = TransitionModel(HmmParams.PHYSIOLOGY.copy(transitions = TransitionWeights(awakeToRem = 0.0)), grid(30))
         val log = model.logHmm()
 
         assertEquals(30, log.logTransitions.size)

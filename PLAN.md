@@ -14,7 +14,7 @@ from memory.
 | 3 | Versions and Health Connect docs research | §3–§5 below |
 | 4 | Gradle multi-module skeleton, CI, LICENSE, structural tests, public API contracts | green `assembleDebug test ktlintCheck detekt assembleRelease` |
 | 5a | `:core-algo` (TDD): synthetic generator → preprocessing/features → RULES → HMM → post-processing → metrics → hybrid features, classifier inference, HSMM → facade, params hash, CSV; `:algo-cli` | tests green |
-| 5b | `tools/train`: dataset download (license-checked), OHealth emulation, steps from accelerometer, LOSO training/validation through `:algo-cli`, model bundle → `app/src/main/assets/models/`, numbers → `ALGORITHM.md` | |
+| 5b | `tools/train`: dataset download (license-checked), OHealth emulation, steps from accelerometer, LOSO training/validation through `:algo-cli`, model bundle → `app/src/main/assets/models/`, numbers → `ALGORITHM.md` | done (run `loso-v2`, after the audit fixes): HYBRID-MLP (α = 1e-4, Walch + BIDSleep with BIDSleep steps coded as algo-cli computes them, EXPLICIT decoder, w_e 0.5, no time prior) κ 0.334 ± 0.133 on Walch PSG (worse 2-min variant, LOSO; 0.317 ± 0.019 over 4 seeds); HMM defaults stay the physiology table (supervised estimates fail the validity gate); `core-algo/.../params/TrainedDefaults.kt`; `ALGORITHM.md` |
 | 6 | `:data-local` (Room, DataStore, logger), `:data-hc` (repository, night pipeline, Changes API sync, backfill, fake repository, idempotency tests) | |
 | 7 | `:work` (workers, scheduling, backoff), `:app` (Compose M3 UI, adaptive layouts, permissions, rationale activity, icon) | |
 | 8 | README (en + ru), ALGORITHM.md, CHANGELOG.md, screenshots; full check; install on the phone via `$ADB_WIN` | |
@@ -38,9 +38,12 @@ from memory.
   `ALGORITHM.md` come from exactly the code that runs on the phone. Formats: `docs/INTERCHANGE.md`.
 - **Model bundle** in `app/src/main/assets/models/hybrid_model.json`; `:core-algo` receives it as a string (no
   Android assets in a JVM module); JVM tests and `algo-cli` read the same file by path.
-- **Trained HMM defaults.** If the supervised MLE estimates beat the physiology table on LOSO kappa, they become the
-  `AlgoParams()` defaults (generated Kotlin constants with a provenance header); the table stays available as
-  `EmissionTable.PHYSIOLOGY` ("reset to physiology table").
+- **Trained HMM defaults.** If the supervised estimates (emissions, bouts, transitions, time prior) beat the physiology
+  table on LOSO kappa *and* pass a validity gate (the specification's hrNorm order DEEP < LIGHT < REM < AWAKE, and
+  predicted stage shares inside the sanity corridors), they become the `AlgoParams()` defaults (generated Kotlin
+  constants with a provenance header); the table stays available as `EmissionTable.PHYSIOLOGY` /
+  `HmmParams.PHYSIOLOGY` ("reset to physiology table"). In `loso-v2` they scored higher but failed the gate, so the
+  shipped HMM defaults are the table.
 - **paramsHash** = SHA-256 of canonical JSON of `AlgoParams` + hybrid-model fingerprint + personal-model fingerprint
   + output options that change the written data (`awakeAsLight`). The title template does not change the hash.
 - **Idempotency.** `clientRecordId = "ps:" + sha256(sorted source uuids)`, `clientRecordVersion = ALGO_VERSION·1000 +

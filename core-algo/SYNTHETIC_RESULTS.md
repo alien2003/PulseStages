@@ -1,7 +1,10 @@
 # Synthetic validation of the RULES, HMM and HYBRID estimators
 
 Source: `SyntheticRecoveryTest` (`core-algo/src/test/kotlin/io/github/alien2003/pulsestages/algo/SyntheticRecoveryTest.kt`),
-ALGO_VERSION 1, default `AlgoParams` except for `estimator`.
+ALGO_VERSION 1, default `AlgoParams` except for `estimator` and the HMM, which is pinned to the specification's
+physiology parameters (`HmmParams.PHYSIOLOGY`: `EmissionTable.PHYSIOLOGY`, mean bouts 5 / 20 / 20 / 20 min, the
+specification's transition shares and time priors). These tests were calibrated with those values before the
+open-dataset training set the shipped defaults (see "Pinned parameters" at the end).
 
 Setup: 50 nights from `SyntheticNightGenerator(seed)` for seeds 1–50, run through `SleepStager.run`, scored against
 the generating hypnogram with `IntervalScoring` (each truth interval split into 30-s chunks, prediction sampled at
@@ -30,7 +33,8 @@ synthetic data; the real validation uses the open PSG datasets (leave-one-subjec
 
 Source: `HybridSyntheticRecoveryTest`
 (`core-algo/src/test/kotlin/io/github/alien2003/pulsestages/algo/hybrid/HybridSyntheticRecoveryTest.kt`), ALGO_VERSION 1,
-default `AlgoParams` except for `estimator` and `hybrid.durationModel`.
+default `AlgoParams` except for `estimator`, `hybrid.durationModel` and the pinned pre-training decoder values
+`timePriorWeight` = 1, `emissionWeight` = 1 (and `HmmParams.PHYSIOLOGY` for the HMM comparison).
 
 Setup: a bundle is trained by the test fixture `SyntheticBundleTrainer` (test sources only; it stands in for the
 Python pipeline) on 40 synthetic nights (seeds 1001–1040): multinomial logistic regression on the 40
@@ -71,3 +75,30 @@ generator's −5 / +6 / +15), seeds 3001–3012; the earliest 8 are training nig
 
 HMM-only calibration (no bundle, 8 nights: 6 training / 2 held out): 0.3116 → 0.4470. (Re-measured after the review
 fixes; the first run gave 0.6736 → 0.6817 / 0.7255 and 0.3176 → 0.3701.)
+
+## Pinned parameters and the shipped (trained) defaults
+
+The leave-one-subject-out validation on the open datasets (ALGORITHM.md, sections 12–13; run `loso-v2` of
+`tools/train`) sets the `AlgoParams` defaults through the generated `params/TrainedDefaults.kt`. It changed the hybrid
+decoder (`durationModel` EXPLICIT — the pre-training value —, `emissionWeight` 0.5, `timePriorWeight` 0). The HMM
+emissions / mean bouts / transitions / time priors also come from `TrainedDefaults`, but the supervised estimates
+failed the selection's validity gate (their hrNorm means are not ordered DEEP < LIGHT < REM < AWAKE), so they are the
+specification's values and `HmmParams()` equals `HmmParams.PHYSIOLOGY`. The synthetic tests above and
+`PersonalCalibratorTest`, `PopulationEmAdapterTest`, `TransitionModelTest`, `EstimateAssemblerTest` and the algo-cli
+`EvaluateCommandTest` pin `HmmParams.PHYSIOLOGY` and the pre-training decoder values explicitly, so their numbers and
+thresholds do not depend on what a future training run adopts (re-run after the change: identical to the tables
+above). The tests also print, without asserting, the same nights with the shipped defaults:
+
+| Estimator (50 / 30 nights as above)                         | Mean kappa | Median kappa | Min kappa | Pooled accuracy |
+|-------------------------------------------------------------|-----------:|-------------:|----------:|----------------:|
+| HMM with the shipped HMM defaults (= the physiology table)   | 0.4927     | 0.4961       | 0.3336    | 0.6556          |
+| HYBRID (synthetic bundle) with the shipped decoder defaults  | 0.7461     | 0.7590       | 0.5284    | 0.8493          |
+
+The supervised HMM estimates illustrate the caveat above: an earlier run (`loso-v1`) shipped them as HMM defaults, and
+on these synthetic nights they scored 0.2675 mean kappa, far below the physiology table (0.49), although they score
+higher on real PSG nights (0.117 vs 0.070 worse-variant mean per-subject kappa on Walch in `loso-v2`): in the 2-minute
+Walch data the per-night normalized heart rate (hrNorm) of DEEP epochs is on average *above* that of LIGHT (1.26 vs
+0.91; BIDSleep 1.29 vs 0.91). DEEP is concentrated early in the night (mean t 0.29 vs 0.51 for LIGHT), while heart
+rate is still falling, and even within each third of the night DEEP is not below LIGHT in these data; the generator,
+like the physiology table, places DEEP 5 bpm below LIGHT. Synthetic data from the assumed model family say little about
+real accuracy, which is why defaults are chosen on the open PSG data only.

@@ -1,0 +1,6 @@
+# Downloaded datasets and everything derived from them are never committed (see README.md / DATASETS.md).
+data/
+out/
+.venv/
+__pycache__/
+*.part

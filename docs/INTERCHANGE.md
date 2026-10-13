@@ -96,13 +96,16 @@ Metrics block (the whole output without `--param-grid`; with it `{"grid": [block
   "minutesError": {"deep": 21.5, "rem": 30.1, "awake": 18.0},          // mean |estimate − truth| minutes per night
   "perNight": [{"id": "...", "subject": "...", "variant": "...", "estimator": "HYBRID", "kappa": 0.3, "accuracy": 0.6,
                 "macroF1": 0.4, "coverage": 0.97, "confidence": 0.55, "scoredChunks": 900,
+                "confusion": [[...4], ...],                                    // this night's 4×4 counts
                 "truthMinutes": {"AWAKE": 40.0, "LIGHT": 230.0, "DEEP": 60.0, "REM": 90.0},
                 "predictedMinutes": {...}, "minutesError": {"deep": 5.0, "rem": 12.5, "awake": 3.0},
                 "warnings": ["DATA_GAPS"]}, ...]
 }
 ```
 
-Undefined values (e.g. the kappa of a night with a single class on both sides) are `null`. Kappas are unweighted
+The per-night `confusion` matrices add up to `pooled.confusion`, so the results of several runs (e.g. one per
+cross-validation fold) can be pooled again by the caller. Undefined values (e.g. the kappa of a night with a single
+class on both sides) are `null`. Kappas are unweighted
 Cohen's kappa over the scored 30-s chunks (UNKNOWN on either side is skipped and counted in `skippedChunks`); the
 per-subject kappa pools the subject's nights.
 

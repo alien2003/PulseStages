@@ -1,0 +1,9 @@
+# Pinned to the latest stable releases on PyPI (checked 2026-10-13 via https://pypi.org/pypi/<pkg>/json).
+# Python 3.12 (from mise, see /.mise.toml); venv: tools/train/.venv.
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.0.6
+scikit-learn==1.9.1
+# imported directly (per-worker BLAS thread limits); also a scikit-learn dependency
+threadpoolctl==3.7.0
+pytest==9.1.1

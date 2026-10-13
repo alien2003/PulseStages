@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.algo.night
 
 import io.github.alien2003.pulsestages.algo.hmm.HmmEstimator
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.HmmParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -22,7 +23,8 @@ class EstimateAssemblerTest {
                             start + 100 * minute until start + 140 * minute
                     },
             )
-        val params = AlgoParams()
+        // The specification's HMM table (the night must be decoded the same way whatever the shipped defaults are).
+        val params = AlgoParams(hmm = HmmParams.PHYSIOLOGY)
         val failSanity = params.copy(post = params.post.copy(sanityDeepMax = 0.0))
         val cases =
             listOf(

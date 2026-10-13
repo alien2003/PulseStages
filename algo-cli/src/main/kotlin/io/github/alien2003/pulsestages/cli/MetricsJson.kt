@@ -24,8 +24,9 @@ import kotlinx.serialization.json.put
  * - `meanNightKappa`, `medianNightKappa` over nights with a defined kappa;
  * - `perSubject`: `meanKappa` / `medianKappa` of the per-subject pooled kappas and the per-subject values;
  * - `minutesError`: mean absolute minutes error of DEEP, REM and AWAKE over the evaluated nights;
- * - `perNight`: id, subject, variant, estimator, kappa, accuracy, macroF1, coverage, confidence, truth and predicted
- *   minutes per stage, minute errors and warning codes.
+ * - `perNight`: id, subject, variant, estimator, kappa, accuracy, macroF1, coverage, confidence, scored chunks, the
+ *   night's 4×4 confusion matrix (the pooled matrix is their sum, so results of several runs can be combined), truth
+ *   and predicted minutes per stage, minute errors and warning codes.
  * Undefined numbers (e.g. kappa of a night with a single class) are null.
  */
 internal object MetricsJson {
@@ -91,7 +92,7 @@ internal object MetricsJson {
     fun confusion(matrix: ConfusionMatrix): JsonObject =
         buildJsonObject {
             put("labels", JsonArray(SleepStage.SCORED.map { JsonPrimitive(it.name) }))
-            put("confusion", JsonArray(matrix.toArray().map { row -> JsonArray(row.map { JsonPrimitive(it) }) }))
+            put("confusion", cells(matrix))
             putNumber("kappa", matrix.kappa)
             putNumber("accuracy", matrix.accuracy)
             putNumber("macroF1", matrix.macroF1)
@@ -116,6 +117,10 @@ internal object MetricsJson {
                 },
             )
         }
+
+    /** The 4×4 counts of [confusion] (rows = truth, columns = prediction, [SleepStage.SCORED] order). */
+    private fun cells(confusion: ConfusionMatrix): JsonArray =
+        JsonArray(confusion.toArray().map { row -> JsonArray(row.map { JsonPrimitive(it) }) })
 
     private fun perSubject(scored: List<NightResult.Scored>): JsonObject {
         val subjects =
@@ -166,6 +171,7 @@ internal object MetricsJson {
             putNumber("coverage", result.coverage)
             putNumber("confidence", result.confidence)
             put("scoredChunks", confusion.total)
+            put("confusion", cells(confusion))
             put("truthMinutes", minutes(result.score.truthMinutes))
             put("predictedMinutes", minutes(result.score.predictedMinutes))
             put(

@@ -5,6 +5,7 @@ import io.github.alien2003.pulsestages.algo.model.NightInput
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.EmissionTable
+import io.github.alien2003.pulsestages.algo.params.HmmParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticOptions
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticPerson
@@ -18,6 +19,9 @@ import kotlin.math.sqrt
 
 class PopulationEmAdapterTest {
     private val global = EmissionTable.PHYSIOLOGY
+
+    /** Defaults with the specification's HMM, whose table is [global] (the shipped HMM defaults may differ). */
+    private val physiology = AlgoParams(hmm = HmmParams.PHYSIOLOGY)
     private val rem = SleepStage.REM.index
     private val hrNorm = 0
     private val person = SyntheticPerson(remOffsetBpm = 11.0, awakeOffsetBpm = 20.0)
@@ -27,7 +31,7 @@ class PopulationEmAdapterTest {
         first: Long = 4001,
     ): List<NightInput> = (0 until count).map { SyntheticNightGenerator(first + it).generate(SyntheticOptions(person = person)).input }
 
-    private fun withStrength(tau: Double): AlgoParams = AlgoParams().let { it.copy(personal = it.personal.copy(emPriorStrength = tau)) }
+    private fun withStrength(tau: Double): AlgoParams = physiology.let { it.copy(personal = it.personal.copy(emPriorStrength = tau)) }
 
     private fun distance(
         a: StageDimValues,
@@ -117,14 +121,14 @@ class PopulationEmAdapterTest {
                 provenance = PersonalProvenance(PersonalModelKind.CALIBRATED, 3),
             )
 
-        val result = PopulationEmAdapter.adapt(nights(3, first = 4201) + empty, AlgoParams(), base)
+        val result = PopulationEmAdapter.adapt(nights(3, first = 4201) + empty, physiology, base)
 
         assertEquals(3, result.nightsUsed)
         assertEquals(1, result.nightsSkipped)
         assertEquals(base.biasDeltas, checkNotNull(result.model).biasDeltas)
         assertEquals(base.baseModelFingerprint, checkNotNull(result.model).baseModelFingerprint)
-        assertNull(PopulationEmAdapter.adapt(listOf(empty), AlgoParams()).model)
-        val noIterations = AlgoParams().let { it.copy(hmm = it.hmm.copy(emIterations = 0)) }
+        assertNull(PopulationEmAdapter.adapt(listOf(empty), physiology).model)
+        val noIterations = physiology.let { it.copy(hmm = it.hmm.copy(emIterations = 0)) }
         assertNull(PopulationEmAdapter.adapt(nights(1), noIterations).model)
     }
 }
