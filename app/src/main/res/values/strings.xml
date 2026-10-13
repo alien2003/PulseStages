@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">PulseStages</string>
+    <string name="home_title">Sleep stages</string>
+    <string name="home_body">PulseStages estimates awake, light, deep and REM sleep from the heart rate and steps your watch writes to Health Connect, and saves the stages back as its own sleep sessions.</string>
+    <string name="hc_status_checking">Checking Health Connect…</string>
+    <string name="hc_status_available">Health Connect is available.</string>
+    <string name="hc_status_update_required">Health Connect needs to be updated.</string>
+    <string name="hc_status_unavailable">Health Connect is not available on this device.</string>
+</resources>

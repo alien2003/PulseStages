@@ -1,0 +1,61 @@
+# detekt 1.23.8 configuration. Applied with buildUponDefaultConfig = true, so only deviations from the
+# default configuration are listed here. No baseline is used: the code base must pass as-is.
+
+config:
+  validation: true
+  warningsAsErrors: true
+
+complexity:
+  LongParameterList:
+    active: true
+    functionThreshold: 6
+    constructorThreshold: 8
+    ignoreDefaultParameters: true
+    # Composables legitimately take many (mostly defaulted) parameters: modifier, colors, callbacks, ...
+    ignoreAnnotated: ['Composable']
+  LongMethod:
+    active: true
+    threshold: 60
+    ignoreAnnotated: ['Composable']
+  TooManyFunctions:
+    active: true
+    ignorePrivate: true
+    # Repository boundaries (e.g. HealthRepository) are intentionally wide interfaces.
+    thresholdInInterfaces: 20
+
+naming:
+  FunctionNaming:
+    active: true
+    # @Composable functions are PascalCase by convention.
+    ignoreAnnotated: ['Composable']
+  TopLevelPropertyNaming:
+    active: true
+    constantPattern: '[A-Z][_A-Za-z0-9]*'
+
+style:
+  MagicNumber:
+    active: true
+    excludes:
+      - '**/test/**'
+      - '**/androidTest/**'
+      - '**/testFixtures/**'
+      - '**/*.kts'
+      # Colour palettes are hex literals by nature.
+      - '**/ui/theme/**'
+    ignorePropertyDeclaration: false
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreNamedArgument: true
+    # Enum entries carry fixed indices (e.g. SleepStage.index).
+    ignoreEnums: true
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  UnusedPrivateMember:
+    active: true
+    # Compose previews are private and only referenced by tooling.
+    ignoreAnnotated: ['Preview']
+  WildcardImport:
+    active: true
+    excludeImports: []
+  ForbiddenComment:
+    active: true

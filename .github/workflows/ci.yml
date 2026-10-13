@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Lint, test and assemble
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # Fully open-source (MIT) cache implementation on top of actions/cache.
+          cache-provider: basic
+
+      - name: Install missing Android SDK packages
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          # compileSdk 37 is the minor-versioned platform "android-37.0"; AGP 9.4 defaults to build-tools 36.0.0.
+          PACKAGES=()
+          [ -d "$ANDROID_HOME/platforms/android-37.0" ] || PACKAGES+=("platforms;android-37.0")
+          [ -d "$ANDROID_HOME/build-tools/36.0.0" ] || PACKAGES+=("build-tools;36.0.0")
+          if [ "${#PACKAGES[@]}" -gt 0 ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null || true
+            "$SDKMANAGER" "${PACKAGES[@]}"
+          else
+            echo "All required SDK packages are already installed."
+          fi
+
+      - name: Lint, test and assemble debug
+        run: ./gradlew ktlintCheck detekt test assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: pulsestages-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload test and lint reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-reports
+          path: |
+            **/build/reports/
+            **/build/test-results/
+          if-no-files-found: ignore

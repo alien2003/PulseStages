@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_title">Фазы сна</string>
+    <string name="home_body">PulseStages оценивает бодрствование, лёгкий, глубокий и быстрый (REM) сон по пульсу и шагам, которые часы записывают в Health Connect, и сохраняет фазы обратно как собственные сеансы сна.</string>
+    <string name="hc_status_checking">Проверка Health Connect…</string>
+    <string name="hc_status_available">Health Connect доступен.</string>
+    <string name="hc_status_update_required">Требуется обновить Health Connect.</string>
+    <string name="hc_status_unavailable">Health Connect недоступен на этом устройстве.</string>
+</resources>

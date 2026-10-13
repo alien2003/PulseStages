@@ -1,0 +1,16 @@
+[tools]
+java = "temurin-17"
+python = "3.12"
+
+[env]
+ANDROID_HOME = "{{config_root}}/.tooling/android-sdk"
+ANDROID_SDK_ROOT = "{{config_root}}/.tooling/android-sdk"
+GRADLE_USER_HOME = "{{config_root}}/.tooling/gradle"
+# Windows adb via WSL interop (found on PATH through scoop shims).
+# Fallback: /mnt/c/Users/<user>/AppData/Local/Android/Sdk/platform-tools/adb.exe
+ADB_WIN = "adb.exe"
+_.path = [
+  "{{config_root}}/.tooling/android-sdk/cmdline-tools/latest/bin",
+  "{{config_root}}/.tooling/android-sdk/platform-tools",
+]
+_.python.venv = { path = "{{config_root}}/tools/train/.venv", create = true }
