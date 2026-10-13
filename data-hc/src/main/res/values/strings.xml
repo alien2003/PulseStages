@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default title of the sleep sessions PulseStages writes to Health Connect (WriteSettings.titleTemplate = null).
+         Placeholders {estimator}, {version} and {confidence} are supported but not used by default. -->
+    <string name="default_session_title">Sleep stages from heart rate (estimate)</string>
+</resources>

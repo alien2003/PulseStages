@@ -12,6 +12,12 @@ const val DEFAULT_DAILY_TIME_MINUTES: Int = 540
 /**
  * All user settings. Persisted in DataStore as JSON, exported/imported as the same JSON.
  * Only ADD fields with defaults; never rename (old exports must keep importing).
+ *
+ * @property sources sleep sources ("Sources" screen).
+ * @property schedule background scheduling.
+ * @property write options of the written sessions.
+ * @property algo every algorithm parameter (part of the params hash).
+ * @property debug debugging options.
  */
 @Serializable
 data class AppSettings(
@@ -24,7 +30,13 @@ data class AppSettings(
 
 /** Where heart rate and steps are read from. */
 @Serializable
-enum class HrSourcesMode { SAME_AS_SLEEP, ANY }
+enum class HrSourcesMode {
+    /** From the package that wrote the sleep session. */
+    SAME_AS_SLEEP,
+
+    /** From any package. */
+    ANY,
+}
 
 /** Source selection ("Sources" screen). */
 @Serializable
@@ -35,6 +47,7 @@ data class SourceSettings(
     val sourcePriority: List<String> = listOf(OHEALTH_PACKAGE),
     /** Packages added manually by name (kept even if they never wrote sleep yet). */
     val manualPackages: List<String> = emptyList(),
+    /** Origin of heart rate and steps. */
     val hrSources: HrSourcesMode = HrSourcesMode.SAME_AS_SLEEP,
     /** Sessions shorter than this (after merging fragments) are naps and skipped. */
     val minSessionMin: Int = 90,
@@ -51,6 +64,7 @@ data class ScheduleSettings(
     val dailyTimeMinutes: Int = DEFAULT_DAILY_TIME_MINUTES,
     /** Period of the Changes-API check. */
     val periodicHours: Int = 1,
+    /** WorkManager constraint: run only when the battery is not low. */
     val runOnlyWhenNotLowBattery: Boolean = true,
 )
 
@@ -75,17 +89,31 @@ data class WriteSettings(
      * Placeholders: {estimator}, {version}, {confidence} (percent).
      */
     val titleTemplate: String? = null,
+    /** What to do with nights that already have an output session. */
     val overwritePolicy: OverwritePolicy = OverwritePolicy.SKIP_SAME_VERSION,
     /** Write AWAKE as LIGHT for readers that render awakenings poorly. Part of the params hash. */
     val awakeAsLight: Boolean = false,
 )
 
-/** Internal log level. */
+/** Internal log level, in increasing severity. */
 @Serializable
-enum class LogLevel { DEBUG, INFO, WARN, ERROR }
+enum class LogLevel {
+    /** Detailed diagnostics. */
+    DEBUG,
+
+    /** Normal progress. */
+    INFO,
+
+    /** Something unexpected that was handled. */
+    WARN,
+
+    /** A failure. */
+    ERROR,
+}
 
 /** Debugging options. */
 @Serializable
 data class DebugSettings(
+    /** Minimum level of the internal log (and of its logcat mirror). */
     val logLevel: LogLevel = LogLevel.INFO,
 )

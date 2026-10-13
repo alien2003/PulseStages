@@ -5,7 +5,7 @@ build/
 .kotlin/
 
 # Local tooling (mise-managed SDK, Gradle user home, downloads)
-.tooling/
+.tooling
 local.properties
 
 # Android Studio / IntelliJ

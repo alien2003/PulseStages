@@ -19,9 +19,21 @@ enum class HcAvailability {
 }
 
 /** Optional platform features. */
-enum class HcFeature { READ_HISTORY, READ_IN_BACKGROUND }
+enum class HcFeature {
+    /** `FEATURE_READ_HEALTH_DATA_HISTORY`: READ_HEALTH_DATA_HISTORY can be requested (data older than 30 days). */
+    READ_HISTORY,
 
-/** A stage of a sleep session as stored in Health Connect ([type] is a SleepSessionRecord.STAGE_TYPE_* value). */
+    /** `FEATURE_READ_HEALTH_DATA_IN_BACKGROUND`: READ_HEALTH_DATA_IN_BACKGROUND can be requested. */
+    READ_IN_BACKGROUND,
+}
+
+/**
+ * A stage of a sleep session as stored in Health Connect.
+ *
+ * @property startMs start, epoch ms.
+ * @property endMs end, epoch ms (exclusive).
+ * @property type a SleepSessionRecord.STAGE_TYPE_* value.
+ */
 data class HcStage(
     val startMs: Long,
     val endMs: Long,
@@ -33,6 +45,16 @@ data class HcStage(
  *
  * @property uuid Health Connect record id (metadata.id).
  * @property packageName metadata.dataOrigin.packageName.
+ * @property startMs session start, epoch ms.
+ * @property endMs session end, epoch ms.
+ * @property startZoneOffsetSec start zone offset in seconds, null when the writer gave none.
+ * @property endZoneOffsetSec end zone offset in seconds, null when the writer gave none.
+ * @property stages the stages, as stored.
+ * @property title the session title, if any.
+ * @property notes the session notes, if any.
+ * @property clientRecordId metadata.clientRecordId, if any.
+ * @property clientRecordVersion metadata.clientRecordVersion.
+ * @property lastModifiedMs metadata.lastModifiedTime, epoch ms.
  */
 data class HcSleepSession(
     val uuid: String,
@@ -49,14 +71,28 @@ data class HcSleepSession(
     val lastModifiedMs: Long,
 )
 
-/** Per-origin statistics for the "Sources" screen. */
+/**
+ * Per-origin statistics for the "Sources" screen.
+ *
+ * @property packageName the data origin.
+ * @property sessionCount sleep sessions of that origin in the scanned range.
+ * @property lastSessionEndMs end of its latest session, epoch ms.
+ */
 data class SleepOriginStats(
     val packageName: String,
     val sessionCount: Int,
     val lastSessionEndMs: Long,
 )
 
-/** One page of the Changes API, already filtered to sleep sessions. */
+/**
+ * One page of the Changes API, already filtered to sleep sessions.
+ *
+ * @property upserted sessions inserted or updated since the token.
+ * @property deletedIds Health Connect ids of deleted records (DeletionChange.recordId).
+ * @property nextToken the token for the next call (the same token when nothing changed).
+ * @property hasMore more changes are available: call again with [nextToken].
+ * @property tokenExpired the token is no longer valid: take a new one and re-read by time range.
+ */
 data class SleepChanges(
     val upserted: List<HcSleepSession>,
     val deletedIds: List<String>,
@@ -65,7 +101,19 @@ data class SleepChanges(
     val tokenExpired: Boolean,
 )
 
-/** Our own estimated session to be written. Stage types are SleepSessionRecord.STAGE_TYPE_* values. */
+/**
+ * Our own estimated session to be written. Stage types are SleepSessionRecord.STAGE_TYPE_* values.
+ *
+ * @property clientRecordId deterministic id of the night (upsert key).
+ * @property clientRecordVersion version; a stored record is only replaced by an equal or higher version.
+ * @property startMs session start, epoch ms.
+ * @property endMs session end, epoch ms.
+ * @property startZoneOffsetSec start zone offset in seconds (always explicit).
+ * @property endZoneOffsetSec end zone offset in seconds (always explicit).
+ * @property stages sorted, contiguous stages inside the session.
+ * @property title session title (≤ 1000 characters).
+ * @property notes compact JSON notes.
+ */
 data class EstimatedSessionWrite(
     val clientRecordId: String,
     val clientRecordVersion: Long,
@@ -78,7 +126,12 @@ data class EstimatedSessionWrite(
     val notes: String,
 )
 
-/** Result of a write: the Health Connect id and the version actually stored after read-back verification. */
+/**
+ * Result of a write: the Health Connect id and the version actually stored after read-back verification.
+ *
+ * @property recordId Health Connect id (metadata.id) of the stored record.
+ * @property storedVersion clientRecordVersion of the stored record.
+ */
 data class WriteResult(
     val recordId: String,
     val storedVersion: Long,
@@ -158,19 +211,21 @@ interface HealthRepository {
         packages: Set<String>?,
     ): List<StepsSample>
 
-    /** Optional channels: return an empty list when the permission is not granted. */
+    /** SpO2 measurements with time in `[startMs, endMs)`. Optional channels return an empty list when the permission is not granted. */
     suspend fun readSpo2(
         startMs: Long,
         endMs: Long,
         packages: Set<String>?,
     ): List<Spo2Sample>
 
+    /** Respiratory-rate measurements with time in `[startMs, endMs)`; empty when the permission is not granted. */
     suspend fun readRespiratoryRate(
         startMs: Long,
         endMs: Long,
         packages: Set<String>?,
     ): List<RespiratoryRateSample>
 
+    /** HRV (RMSSD) measurements with time in `[startMs, endMs)`; empty when the permission is not granted. */
     suspend fun readHrv(
         startMs: Long,
         endMs: Long,

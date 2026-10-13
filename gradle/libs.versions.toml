@@ -39,6 +39,12 @@ kotlinxSerialization = "1.11.0"
 
 # Testing (JUnit 5 line, latest 5.x)
 junit5 = "5.14.4"
+# JUnit 4 + Robolectric run Room/Android-framework unit tests through the JUnit Vintage engine (version from junit-bom).
+junit4 = "4.13.2"
+robolectric = "4.17"
+# android-all jar that Robolectric 4.17 maps to SDK 35 (DefaultSdkProvider); resolved by Gradle, Robolectric runs
+# offline. SDK 35 is the newest Robolectric SDK that runs on JDK 17 (SDK 36/37 require Java 21).
+robolectricAndroidAll = "15-robolectric-13954326-i7"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -59,6 +65,7 @@ androidx-compose-material3-adaptive = { module = "androidx.compose.material3.ada
 
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+hilt-android-testing = { module = "com.google.dagger:hilt-android-testing", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "androidxHilt" }
 androidx-hilt-lifecycle-viewmodel-compose = { module = "androidx.hilt:hilt-lifecycle-viewmodel-compose", version.ref = "androidxHilt" }
 androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "androidxHilt" }
@@ -79,6 +86,10 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit5" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+junit-vintage-engine = { module = "org.junit.vintage:junit-vintage-engine" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+robolectric-android-all-instrumented = { module = "org.robolectric:android-all-instrumented", version.ref = "robolectricAndroidAll" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

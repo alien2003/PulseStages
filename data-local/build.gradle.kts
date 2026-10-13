@@ -23,6 +23,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            // Robolectric reads the merged test manifest and resources produced by AGP.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 kotlin {
@@ -33,15 +39,39 @@ room {
     schemaDirectory("$projectDir/schemas")
 }
 
-dependencies {
-    implementation(project(":core-algo"))
+// Robolectric downloads its android-all jar from Maven Central at test time unless it runs offline. Resolve the jar
+// through Gradle instead (cached, reproducible, no network access from tests) and point Robolectric at it.
+val robolectricAndroidAll = configurations.dependencyScope("robolectricAndroidAll")
+val robolectricAndroidAllClasspath =
+    configurations.resolvable("robolectricAndroidAllClasspath") {
+        extendsFrom(robolectricAndroidAll.get())
+        isTransitive = false
+    }
+val robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
+val prepareRobolectricDependencies =
+    tasks.register<Sync>("prepareRobolectricDependencies") {
+        description = "Copies the android-all jar resolved by Gradle into the directory used by offline Robolectric."
+        from(robolectricAndroidAllClasspath)
+        into(robolectricDependencyDir)
+    }
 
-    implementation(libs.androidx.room.runtime)
+tasks.withType<Test>().configureEach {
+    dependsOn(prepareRobolectricDependencies)
+    inputs.files(prepareRobolectricDependencies).withPropertyName("robolectricDependencies").withNormalizer(ClasspathNormalizer::class.java)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
+}
+
+dependencies {
+    // Types of these libraries appear in this module's public API (AppSettings -> AlgoParams, the RoomDatabase
+    // subclass and DAOs, DataStore instances, Flow / CoroutineScope), and Hilt in :app must see them.
+    api(project(":core-algo"))
+    api(libs.androidx.room.runtime)
+    api(libs.androidx.datastore)
+    api(libs.androidx.datastore.preferences)
+    api(libs.kotlinx.coroutines.android)
     ksp(libs.androidx.room.compiler)
-    implementation(libs.androidx.datastore)
-    implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -50,4 +80,13 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    // Room DAO and logger tests need the Android framework (SQLite): Robolectric (JUnit 4) via the Vintage engine.
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    robolectricAndroidAll(libs.robolectric.android.all.instrumented)
+    // Builds the real Hilt graph of this module in a Robolectric test (nothing in :app consumes it yet).
+    testImplementation(libs.hilt.android.testing)
+    kspTest(libs.hilt.compiler)
 }
