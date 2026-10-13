@@ -357,6 +357,33 @@ class EvaluateCommandTest {
         assertEquals(setOf("0", "1", "2", "3"), lines.drop(1).map { it.substringBefore(',') }.toSet())
     }
 
+    private fun lightPredicted(metrics: JsonObject): Double {
+        val perStage = metrics.obj("pooled").obj("perStage")
+        return perStage.obj("LIGHT").num("predicted")
+    }
+
+    @Test
+    fun `the prior exponent is a grid parameter and the bundle's stage log-bias is applied`() {
+        val model = writeModel(dir.resolve("model.json"))
+        val grid = dir.resolve("beta-grid.json")
+        Files.writeString(grid, """[{}, {"hybrid": {"priorExponent": 1.0}}, {"hybrid": {"priorExponent": 0.0}}]""")
+        val nights = nightsDir().toString()
+        val params = pinnedFile().toString()
+        val out = dir.resolve("beta-grid-out.json")
+        val gridArgs = arrayOf("--param-grid", grid.toString(), "--out", out.toString())
+        ok("evaluate", "--nights", nights, "--model", model.toString(), "--params", params, *gridArgs)
+        val blocks = checkNotNull(readJson(out)["grid"]).jsonArray.map { it.jsonObject }
+        assertEquals(1.0, blocks[0].obj("params").obj("hybrid").num("priorExponent"), "the default is 1")
+        assertEquals(blocks[0].obj("pooled"), blocks[1].obj("pooled"), "priorExponent 1 is today's decoder")
+        assertTrue(blocks[2].obj("pooled") != blocks[0].obj("pooled"), "priorExponent 0 changes the decode")
+
+        val biased = dir.resolve("biased.json")
+        Files.writeString(biased, SyntheticHybridModels.default.copy(stageLogBias = listOf(0.0, 3.0, 0.0, 0.0)).toJson())
+        val biasedOut = dir.resolve("biased-out.json")
+        ok("evaluate", "--nights", nights, "--model", biased.toString(), "--params", params, "--out", biasedOut.toString())
+        assertTrue(lightPredicted(readJson(biasedOut)) > lightPredicted(blocks[0]), "a LIGHT log-bias of +3 predicts more LIGHT")
+    }
+
     @Test
     fun `bad inputs give the documented exit codes`() {
         val nights = nightsDir().toString()

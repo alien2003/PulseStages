@@ -1,0 +1,127 @@
+2026-10-13T09:01:31+02:00 NOTE commands.log of worktree .worktrees/train2 (branch wip/train2); earlier history: /home/user/PulseStages/tools/train/out/commands.log (read-only)
+2026-10-13T09:01:31+02:00 PRE-REGISTRATION bias (written before any candidate result; full text also in tools/train/out/prereg-bias.md):
+  # Pre-registration: stage-proportion bias of the HYBRID decoder (worktree train2, branch wip/train2)
+  
+  Written 2026-10-13T09:01:30+02:00, BEFORE any candidate result exists (no candidate code has been written or run;
+  the only numbers known are the published `loso-v2` baseline numbers of ALGORITHM.md section 13). Also appended
+  verbatim to `tools/train/out/commands.log`.
+  
+  ## Problem
+  
+  Shipped default (HYBRID-MLP [walch+bid-zero], EXPLICIT HSMM, emissionWeight 0.5, timePriorWeight 0; run `loso-v2`):
+  Walch LOSO kappa 0.334 (worse variant, instantaneous), but pooled predicted shares DEEP 25 % / REM 34 % / LIGHT 34 %
+  vs PSG 14 % / 23 % / 57 %; per-night minute errors DEEP 52 / REM 54 min; 12 of 31 Walch nights get the sanity
+  low-confidence flag. Goal: the fix with the smallest per-night minute error that does not lose kappa.
+  
+  ## Decoder change (Kotlin core-algo; defaults = current behaviour)
+  
+  Emission score of epoch k with heart-rate data, stage s (everything else unchanged):
+  
+      e_k(s) = w_e * ( ln p(s | x_k) - beta * ln pi_s ) + b_s        (+ time prior + log factors as before)
+  
+  - `beta` = new AlgoParams field `hybrid.priorExponent` (default 1.0 = today's p / pi), validated finite and >= 0.
+  - `b` = new OPTIONAL bundle field `stageLogBias` = [b_AWAKE, b_LIGHT, b_DEEP, b_REM] (absent = all 0), validated
+    (exactly 4 finite numbers), documented in docs/INTERCHANGE.md, part of the bundle fingerprint when present (a
+    bundle without it keeps its current fingerprint, so personal models keyed to the shipped bundle stay valid).
+    Choice of the bundle over AlgoParams: b is a statistic FITTED to one classifier's outputs (like classPriors,
+    durations, timePrior, which all live in the bundle), not a hyper-parameter chosen from a grid; the app persists
+    the full AlgoParams JSON (encodeDefaults = true), so an AlgoParams vector fitted for one bundle would silently
+    survive into a future bundle; in the bundle it ships with, and is hashed with, the classifier it corrects.
+  - Note (stated before any result): on epochs with HR data, -w_e * beta * ln pi_s and b_s are both per-stage
+    constants, so changing beta by d is exactly the same as adding -w_e * d * ln pi_s to b. With b fitted to the
+    stage shares, the decoded result is therefore (up to the fixed point's tolerance) independent of beta: candidate
+    (c) is expected to coincide with (b). It is run as specified anyway.
+  
+  ## Protocol (identical to loso-v2 otherwise)
+  
+  Baseline reproduction run (new algo-cli build, defaults = current behaviour):
+  
+      JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run bias-base --configs walch+bid-zero \
+          --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group \
+          --keep-inner --jobs 24
+  
+  (MLP alpha 1e-4, seed 0, MLP grid `small`, per-group nested selection by inner mean per-subject kappa, all 78 pool
+  subjects held out so that BIDSleep secondary numbers exist.) Check: the HYBRID-MLP [walch+bid-zero] per-subject
+  kappas of Walch and BIDSleep, both variants, equal those of loso-v2 (0.334 / 0.336 Walch, 0.331 / 0.357 BIDSleep);
+  if not, the difference is documented and bias-base is the reference.
+  
+  Candidates are evaluated post hoc on bias-base (`train.py bias --run bias-base`): the classifier, the outer fold
+  bundles and the decoder choice theta_g = (durationModel, emissionWeight, timePriorWeight) of every (variant, outer
+  group g) are those of the baseline; candidates change only beta and b. Inner-CV data per (variant, g): the kept inner
+  fold models and the inner held-out Walch subjects of the selection set of g (exactly the nights on which theta_g was
+  chosen; out-of-fold decodes, never the outer group's subjects).
+  
+  - BASE: beta = 1, b = 0.
+  - (a) prior exponent: inner grid beta in {1, 0.75, 0.5, 0.25, 0} at theta_g. Inner rule (the adoption rule's
+    objective inside the inner CV, per variant and group): qualifying = beta with inner mean per-subject kappa >=
+    inner kappa of BASE (beta = 1) - 0.01; choose the lowest inner mean per-night E (below); ties (|dE| < 0.05 min) ->
+    higher inner kappa, then larger beta.
+  - (b) proportion matching: beta = 1, b_g = FP(theta_g, beta = 1) on the inner out-of-fold decodes of g (fit set =
+    the Walch PSG nights of the training fold: the selection-scoring dataset of the protocol and the PSG reference;
+    BIDSleep labels are headband-scored with a different N3 share, 19.5 % vs 14.2 %). No selection step.
+  - (c) combination: for every beta of the (a) grid, b_g(beta) = FP(theta_g, beta) (each started at b = 0); the inner
+    kappa / E of (beta, b_g(beta)) are computed on the same inner decodes (b in-sample); beta_g by the (a) inner rule
+    with the BASE inner kappa as reference; if no beta qualifies the group keeps BASE.
+  - Outer evaluation: every held-out subject (Walch and BIDSleep) with its LOSO fold bundle (+ b_g of its group for
+    (b), (c)) and theta_g + beta_g of its group.
+  
+  FP (deterministic fixed point) on a fit set: T_s = true share, P_s(b) = predicted share of stage s over the scored
+  30-s chunks of the fit nights pooled (confusion row / column sums), decoded by algo-cli with bundles carrying
+  stageLogBias = b. Start b = 0, eta = 1. Proposal b' = b + eta * ln(T_s / max(P_s(b), 1e-4)), then centred (mean
+  subtracted). D(b) = sum_s |T_s - P_s(b)|. If D(b') < D(b) accept b <- b', else reject and halve eta. At most 8
+  decodes per fit (b = 0 included); stop early when D(b) <= 0.005. Result = the accepted b (smallest D decoded).
+  
+  Final model, only if (b) or (c) is adopted: b_final = FP at the final decoder params on the LOSO out-of-fold decodes
+  of all 31 Walch subjects, both headline variants pooled (each night decoded by its own outer fold bundle); final
+  decoder params = the most frequent inner choice over the outer folds of the two headline variants, as in loso-v2
+  (beta likewise; ties -> higher mean inner kappa, then larger beta); final bundle = loso-v2-style final fit on all 78
+  subjects + stageLogBias. If (a) is adopted: beta* likewise, no b. TrainedDefaults gains HYBRID_PRIOR_EXPONENT.
+  
+  ## Metrics (Walch held-out subjects = headline; BIDSleep = secondary)
+  
+  - kappa = mean per-subject Cohen's kappa per variant; worse = min over instantaneous / mean2min.
+  - E = mean over nights of sum over {DEEP, REM, AWAKE, LIGHT} of |predicted - true| minutes of the night (scored
+    30-s chunks, from the per-night confusion matrix); worse = MAX over the two variants (each criterion on its own
+    worse variant).
+  - Reported for every candidate either way: kappa per variant and worse, E and per-stage minute errors, accuracy,
+    macro-F1, pooled predicted vs true stage shares, number of nights with a sanity flag (SANITY_DEEP_HIGH /
+    SANITY_REM_HIGH / SANITY_DEEP_LOW), paired per-subject bootstrap 95 % CIs vs BASE for kappa and E (10 000
+    resamples, seed 0, per variant), inner choices of beta and the fitted b per group, BIDSleep secondary numbers.
+  
+  ## Adoption rule (verbatim)
+  
+  On Walch held-out subjects, worse sampling variant: adopt the candidate with the lowest mean absolute per-night
+  minutes error summed over DEEP+REM+AWAKE+LIGHT among those whose mean per-subject kappa >= (baseline kappa - 0.01);
+  ties -> higher kappa; if none qualifies, keep the baseline.
+  
+  (Baseline kappa = BASE worse-variant mean per-subject kappa of bias-base; the baseline itself qualifies trivially and
+  competes; ties = |dE| < 0.05 min. If adopted: retrain / export the final model as above, install it, regenerate
+  TrainedDefaults.kt, update ALGORITHM.md / PLAN.md. If not: document the experiment in ALGORITHM.md anyway.)
+2026-10-13T09:01:36+02:00 NOTE prereg-bias.md sha256 75499301990a0bbea9f0403ee694d6e2487da7258ac043ba120da053cd85c288 (only change vs the logged text: its 'Written' timestamp set to the log time 09:01:31)
+2026-10-13T09:02:52+02:00 START mise exec -- python -I tools/train/train.py defaults --run loso-v2 --out-root /home/user/PulseStages/tools/train/out --output core-algo/.../params/TrainedDefaults.kt (generator now also renders HYBRID_PRIOR_EXPONENT = 1.0; values otherwise unchanged)
+2026-10-13T09:05:21+02:00 START mise exec -- ./gradlew :core-algo:test :algo-cli:test :core-algo:ktlintCheck :algo-cli:ktlintCheck :core-algo:detekt :algo-cli:detekt
+2026-10-13T09:06:29+02:00 START mise exec -- ./gradlew :data-local:testDebugUnitTest :app:testDebugUnitTest ktlintCheck detekt
+2026-10-13T09:07:17+02:00 START mise exec -- ./gradlew :algo-cli:installDist
+2026-10-13T09:07:50+02:00 BUILD algo-cli installDist at 09:07:19 (core-algo: hybrid.priorExponent, bundle stageLogBias; TrainedDefaults.HYBRID_PRIOR_EXPONENT = 1.0); fingerprint sha256 0fe61172cc4a55d50dc4300a37e759d7dffc646d6879bbecdecfc89a5fe8883e. No rebuild until the bias runs are finished.
+2026-10-13T09:07:50+02:00 CHECK mise exec -- python -I <scratchpad>/repro_v2.py: the new build re-evaluates the loso-v2 HYBRID-MLP [walch+bid-zero] fold models (read-only) with identical per-night confusion matrices and warnings for all 568 nights (31 Walch + 253 BIDSleep, instantaneous + mean2min): the new defaults keep the decoder exactly (outputs in tools/train/out/repro-v2)
+2026-10-13T09:07:50+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run bias-base --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --keep-inner --jobs 24
+2026-10-13T09:14:56+02:00 RESULT bias-base (09:07-09:14, 6.5 min, all algo-cli calls rc=0) reproduces loso-v2 exactly: HYBRID-MLP [walch+bid-zero] per-night confusion matrices, warnings and folds identical for all 568 nights (Walch kappa 0.334 / 0.336, BIDSleep 0.331 / 0.357), the 156 outer-fold decoder selections identical, final bundle identical to the shipped asset except modelId / training provenance. bias-base is the BASE reference of the experiment.
+2026-10-13T09:16:55+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py bias --run bias-base --jobs 24 (pre-registered candidates BASE / A / B / C; same algo-cli build 0fe61172)
+2026-10-13T09:19:20+02:00 RESULT bias experiment (bias-base/bias/report.md, 433 algo-cli calls rc=0, BASE reproduced the run night by night): Walch worse-variant kappa / E (min): BASE 0.334 / 219.2, A 0.350 / 156.6, B 0.339 / 146.8, C 0.347 / 166.7; all qualify (threshold 0.324) -> B (proportion matching) adopted by the pre-registered rule. B: Walch DEEP/REM/AWAKE/LIGHT errors 33/41/19/54 min (worse-E variant mean2min), shares inst 5.8/59.1/14.8/20.3 % vs PSG 6.3/57.0/14.1/22.6 %, sanity flags 2/7 of 31 (BASE 12/11). Secondary BIDSleep: B kappa -0.030 [-0.043, -0.016] vs BASE (A: +0.000), E -3.8 [-21.3, 12.3] (A: -23.7 [-37.8, -10.4]). (c) did not coincide with (b): the fixed point is not fully converged after 8 decodes (D 0.002-0.12) and C picks beta by in-sample E.
+2026-10-13T09:19:20+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py bias-final --run bias-base --out-run bias-final --selection-from /home/user/PulseStages/tools/train/out/loso-v2/summary.json --install-model --jobs 8
+2026-10-13T09:20:05+02:00 RESULT bias-final: b_final = [+0.0901, +0.2160, -0.3182, +0.0121] (AWAKE, LIGHT, DEEP, REM) by the pre-registered fixed point on the LOSO out-of-fold decodes of the 31 Walch subjects, both headline variants pooled, decoder EXPLICIT / 0.5 / 0, beta 1 (8 decodes, D 0.0058; pooled shares 6.2/56.7/14.4/22.7 % vs PSG 6.3/56.9/14.2/22.6 %, in-sample for b); final bundle = bias-base final (identical classifier/statistics to the shipped loso-v2 bundle) + stageLogBias, modelId pulsestages-walch+bidsleep-mlp-bias-final, installed to app/src/main/assets/models/hybrid_model.json (resubstitution: 283 nights HYBRID + 1 RULES fallback)
+2026-10-13T09:20:05+02:00 START mise exec -- python -I tools/train/train.py defaults --run bias-final --write
+2026-10-13T09:21:18+02:00 START mise exec -- ./gradlew :core-algo:test :algo-cli:test :data-local:testDebugUnitTest :data-hc:testDebugUnitTest :work:testDebugUnitTest :app:testDebugUnitTest ktlintCheck detekt :algo-cli:installDist (new bundle bias-final + TrainedDefaults from bias-final)
+2026-10-13T09:22:16+02:00 BUILD algo-cli installDist at 09:21:21 after the bias-final bundle / TrainedDefaults (Gradle START above; all JVM tests green: core-algo 229, algo-cli 13, data-local 106, data-hc 209, work 71, app 154; ktlint + detekt clean); fingerprint sha256 033541ae3c1133848708cfd177b1d2fcd233e7d0a9a5e5e1ac0ed500ba3bcdb5
+2026-10-13T09:22:16+02:00 CHECK mise exec -- python -I <scratchpad>/check_final_build.py: the 09:21 build re-decodes the BASE and B outer evaluations of bias-base/bias (1136 nights, Walch + BIDSleep, both variants, B with its per-group stageLogBias bundles) with identical confusion matrices and warnings (outputs in tools/train/out/check-final-build)
+2026-10-13T09:23:47+02:00 NOTE reporting only (not part of the rule): paired B - A, Walch: dkappa -0.013 [-0.036, 0.010] / -0.011 [-0.046, 0.022], dE -13.2 [-33.3, 6.1] / -9.8 [-34.8, 16.9] (inst / mean2min: indistinguishable); BIDSleep: dkappa -0.030 [-0.039, -0.021] / -0.032 [-0.044, -0.020], dE +20.0 [12.6, 27.7] / +12.8 [3.1, 22.2] (A better on the headband-scored secondary set). Final b on the LOSO OOF decodes (b in-sample, reporting only): Walch kappa 0.355 / 0.347, E 124.0 / 143.9 min, shares inst 6.6/56.7/13.3/23.4 %.
+2026-10-13T09:30:49+02:00 FINAL CHECKS: mise exec -- ./gradlew :core-algo:test :algo-cli:test :data-local:testDebugUnitTest :data-hc:testDebugUnitTest :work:testDebugUnitTest :app:testDebugUnitTest ktlintCheck detekt :algo-cli:installDist (09:21; 782 JVM tests, 0 failures; BundledModelAssetTest on the bias-final bundle); mise exec -- python -I -m pytest tools/train/tests -q (207 passed). Shipped: model bias-final (pulsestages-walch+bidsleep-mlp-bias-final, loso-v2 classifier + stageLogBias), TrainedDefaults.kt from bias-final (HYBRID_PRIOR_EXPONENT = 1.0).
+2026-10-13T09:31:22+02:00 COMMIT 94696e0 on wip/train2: feat(train): pre-registered stage-proportion fix — proportion matching adopted
+2026-10-13T09:54:59+02:00 NOTE post-result code change (disclosed by the audit): at 09:19:19, after reading bias-base/bias/report.md (09:18:33), pulsetrain/bias.py final_model() was edited so that the --selection-from check compares only selection.classifier.chosen / .config (and the decoder params) instead of the whole selection.classifier dict (loso-v2's dict also holds the scores of configurations bias-base did not train, so bias-final would not run with loso-v2's summary otherwise). No effect on the candidates, the beta / b fits or the decision; no other bias.py edit between the bias run and commit 94696e0.
+2026-10-13T09:54:59+02:00 NOTE timing correction: bias-base took 385.3 s = 6.4 min (bias-base/run.log 'total wall time'), not 6.5 min as logged at 09:14:56; bias-final ran 09:19:20-09:19:45 (START above, final/result.json written 09:19:45), about 0.4 min; its RESULT line at 09:20:05 was written after inspecting the output.
+2026-10-13T09:54:59+02:00 START mise exec -- python -I tools/train/train.py bias-report --run bias-base (audit fixes: re-render bias/summary.json + report.md from bias/results.jsonl + decisions.json with the pairwise B - A / C - A / C - B comparisons, per-code sanity flags, the C fallback split and the inner-CV kappa losses; originals kept in bias/orig-0918/)
+2026-10-13T09:55:16+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py bias --run bias-base --out-name bias-033541ae --allow-other-build --jobs 24 (audit fix: re-run the whole pre-registered experiment with the current build 033541ae instead of the run's 0fe61172, into bias-base/bias-033541ae, to check that it reproduces bias-base/bias)
+2026-10-13T09:57:05+02:00 RESULT bias-base/bias-033541ae (09:55:17-09:56:48, 433 algo-cli calls rc=0, build 033541ae with --allow-other-build): results.jsonl byte-identical to bias-base/bias/results.jsonl (all four candidates, Walch + BIDSleep, both variants), decisions.json identical (every inner grid point and fixed-point trace), summary.json identical except meta.algoCli / runAlgoCliSha256: the current build reproduces the whole experiment, and the adoption (B) is unchanged.
+2026-10-13T09:57:05+02:00 RESULT bias-report bias-base: summary.json identical to the original (bias/orig-0918) in every key except meta.prereg (now docs/prereg/prereg-bias.md, the committed verbatim copy) and the new meta.preregSha256; new keys pairwise (B - A Walch dkappa -0.013 [-0.036, 0.010] / -0.011 [-0.046, 0.022], dE -13.2 [-33.3, 6.1] / -9.8 [-34.8, 16.9]; BIDSleep dkappa -0.030 [-0.039, -0.021] / -0.032 [-0.044, -0.020], dE +20.0 [12.6, 27.7] / +12.8 [3.1, 22.2] = the 09:23:47 NOTE), choiceCounts (C: beta 1 + b x16, beta 1 BASE fallback x47, 0.75 + b x31, 0.5 + b x47, 0 + b x15), fallbacks (C fell back in 3 of 10 groups / 47 folds; Walch E on those nights C = BASE 207.6 / 213.9, on the others C 130.3 / 136.8 vs B 132.1 / 131.4, inst / mean2min), innerKappaBelowBase (B in 4 of 10 groups, A and C none).
+2026-10-13T10:02:29+02:00 START mise exec -- ./gradlew :core-algo:test :algo-cli:test :data-local:testDebugUnitTest :data-hc:testDebugUnitTest :work:testDebugUnitTest :app:testDebugUnitTest ktlintCheck detekt (audit fixes: no Kotlin change; .editorconfig gained a docs/prereg section)
+2026-10-13T10:03:14+02:00 FINAL CHECKS (audit fixes): mise exec -- python -I -m pytest tools/train/tests -q (213 passed: + rerender, --allow-other-build, fallback / inner-loss / pairwise helpers, --selection-from check, committed pre-registration); Gradle :core-algo:test :algo-cli:test :data-local/:data-hc/:work/:app unit tests + ktlintCheck + detekt BUILD SUCCESSFUL (782 JVM tests, 0 failures; no Kotlin, model or TrainedDefaults change). Adopted configuration unchanged: model bias-final (loso-v2 classifier + stageLogBias (+0.0901, +0.2160, -0.3182, +0.0121)), beta 1, EXPLICIT / 0.5 / 0. This log is copied to docs/prereg/commands-train2.log up to this line.

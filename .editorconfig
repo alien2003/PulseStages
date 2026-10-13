@@ -29,3 +29,9 @@ trim_trailing_whitespace = false
 # The WTFPL text is kept byte-for-byte as served by http://www.wtfpl.net/txt/copying/ (CRLF line endings).
 [LICENSE]
 end_of_line = crlf
+
+# Verbatim evidence (pre-registration and its timestamped command log): never reformat; long lines, indented blank
+# lines.
+[docs/prereg/**]
+trim_trailing_whitespace = false
+max_line_length = off

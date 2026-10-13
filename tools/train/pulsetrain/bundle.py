@@ -1,7 +1,8 @@
 """Hybrid model bundle (docs/INTERCHANGE.md section 3): build, validate, read, write.
 
 The ``hmm`` block holds the supervised HMM estimates in the AlgoParams JSON shape (EmissionTable / MeanBouts /
-TransitionWeights field names of core-algo/.../params/AlgoParams.kt).
+TransitionWeights field names of core-algo/.../params/AlgoParams.kt). ``stageLogBias`` (optional) is the per-stage
+log-bias of the scaled likelihoods fitted by the proportion matching of :mod:`pulsetrain.bias`.
 """
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ SCHEMA_VERSION = 1
 CLASS_ORDER = list(STAGES)
 TOP_LEVEL_KEYS = ("schemaVersion", "modelId", "featureSetVersion", "featureNames", "standardization", "classOrder",
                   "classifier", "classPriors", "durations", "boutTransitions", "initialStage", "timePrior", "hmm",
-                  "training")
-REQUIRED_KEYS = tuple(k for k in TOP_LEVEL_KEYS if k != "hmm")
+                  "training", "stageLogBias")
+OPTIONAL_KEYS = ("hmm", "stageLogBias")
+REQUIRED_KEYS = tuple(k for k in TOP_LEVEL_KEYS if k not in OPTIONAL_KEYS)
 TRAINING_KEYS = ("dataset", "license", "subjects", "nights", "variants", "createdAt", "notes")
 MEAN_BOUT_KEYS = tuple(mean_bout_key(s) for s in range(N_STAGES))
 
@@ -183,6 +185,10 @@ def validate_bundle(b: Mapping, expected_feature_names: Sequence[str] | None = N
                 _prob_vector(row, N_STAGES, f"timePrior.table[{i}]", errs)
     if "hmm" in b:
         _validate_hmm(b["hmm"], errs)
+    if "stageLogBias" in b:
+        v = b["stageLogBias"]
+        if not isinstance(v, list) or len(v) != N_STAGES or not all(_is_num(x) for x in v):
+            errs.append(f"stageLogBias must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
     tr = b["training"]
     if not isinstance(tr, Mapping) or set(tr) != set(TRAINING_KEYS):
         errs.append(f"training must have exactly {list(TRAINING_KEYS)}")
@@ -223,6 +229,18 @@ def _validate_hmm(h: Any, errs: list[str]) -> None:
     if not isinstance(tw, Mapping) or set(tw) != set(TRANSITION_KEYS) or not all(_is_num(v) and v >= 0
                                                                                    for v in tw.values()):
         errs.append(f"hmm.transitions must have non-negative {list(TRANSITION_KEYS)}")
+
+
+def with_stage_log_bias(bundle: Mapping, bias: Sequence[float] | None) -> dict:
+    """A copy of ``bundle`` with ``stageLogBias`` set to ``bias`` (AWAKE, LIGHT, DEEP, REM), or removed for None.
+
+    core-algo adds ``stageLogBias[s]`` to the emission score of every epoch with heart-rate data (docs/INTERCHANGE.md
+    section 3); the key goes last, after ``training``, like the Kotlin field."""
+    out = {k: v for k, v in bundle.items() if k != "stageLogBias"}
+    if bias is not None:
+        out["stageLogBias"] = [float(x) for x in bias]
+    validate_bundle(out)
+    return out
 
 
 def write_bundle(path: Path, bundle: Mapping) -> Path:

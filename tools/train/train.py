@@ -7,6 +7,9 @@
     mise exec -- python -I tools/train/train.py defaults --run <name> --write  # core-algo TrainedDefaults.kt
     mise exec -- python -I tools/train/train.py compare --runs <ref>,<other>,...  # paired CIs between runs
     mise exec -- python -I tools/train/train.py sensitivity --run <name>      # session-boundary sensitivity
+    mise exec -- python -I tools/train/train.py bias --run <name>             # stage-proportion experiment
+    mise exec -- python -I tools/train/train.py bias-report --run <name>      # re-render its summary / report
+    mise exec -- python -I tools/train/train.py bias-final --run <name> [--install-model]   # its final model
 
 Features and decoding are computed by the Kotlin ``algo-cli`` (``mise exec -- ./gradlew :algo-cli:installDist``;
 override the launcher with ``--algo-cli`` or $ALGO_CLI). Reads untrusted data: run with ``python -I``.
@@ -24,7 +27,7 @@ from pathlib import Path
 TRAIN_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TRAIN_DIR))  # our own package only; `python -I` does not add the script directory
 
-from pulsetrain import kotlin_defaults, loso, pipeline, robustness  # noqa: E402
+from pulsetrain import bias, kotlin_defaults, loso, pipeline, robustness  # noqa: E402
 from pulsetrain.algocli import AlgoCliError  # noqa: E402
 from pulsetrain.bundle import BundleError  # noqa: E402
 from pulsetrain.features import FeatureFileError  # noqa: E402
@@ -35,7 +38,7 @@ from pulsetrain.util import read_json  # noqa: E402
 
 OUT_ROOT = TRAIN_DIR / "out"
 EXPECTED_ERRORS = (AlgoCliError, BundleError, FeatureFileError, MetricsFormatError, FileNotFoundError,
-                   kotlin_defaults.DefaultsError, robustness.RobustnessError)
+                   kotlin_defaults.DefaultsError, robustness.RobustnessError, bias.BiasError)
 NIGHTS_ROOT = TRAIN_DIR / "data" / "nights"
 
 
@@ -128,7 +131,36 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out-root", type=Path, default=OUT_ROOT)
     s.add_argument("--algo-cli", default=None)
     s.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    e = sub.add_parser("bias", help="pre-registered stage-proportion experiment on a run made with --keep-inner "
+                                     "(docs/prereg/prereg-bias.md): beta, proportion matching, both")
+    e.add_argument("--run", required=True)
+    e.add_argument("--out-root", type=Path, default=OUT_ROOT)
+    e.add_argument("--algo-cli", default=None)
+    e.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    _bias_common(e)
+    er = sub.add_parser("bias-report", help="re-render <run>/<out-name>/{summary.json,report.md} of a finished `bias` "
+                                            "from its results.jsonl / decisions.json (no algo-cli)")
+    er.add_argument("--run", required=True)
+    er.add_argument("--out-root", type=Path, default=OUT_ROOT)
+    er.add_argument("--out-name", default=bias.DEFAULT_OUT, help="experiment directory inside the run (default bias)")
+    f = sub.add_parser("bias-final", help="final bundle + trained defaults of the candidate adopted by `bias`")
+    f.add_argument("--run", required=True, help="the run the experiment was made on")
+    f.add_argument("--out-root", type=Path, default=OUT_ROOT)
+    f.add_argument("--out-run", default="bias-final", help="output run directory (final/, trained_defaults.json)")
+    f.add_argument("--selection-from", type=Path, default=None,
+                   help="summary.json of the complete-protocol run documented in TrainedDefaults (e.g. loso-v2)")
+    f.add_argument("--install-model", action="store_true")
+    f.add_argument("--algo-cli", default=None)
+    f.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    _bias_common(f)
     return p
+
+
+def _bias_common(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--out-name", default=bias.DEFAULT_OUT, help="experiment directory inside the run (default bias)")
+    p.add_argument("--allow-other-build", action="store_true",
+                   help="decode with an algo-cli build other than the run's (logged and recorded; BASE must still "
+                        "reproduce the run night by night)")
 
 
 def config_from_args(a: argparse.Namespace) -> loso.PipelineConfig:
@@ -189,6 +221,29 @@ def _dispatch(a: argparse.Namespace) -> int:
             cli = AlgoCli.locate(a.algo_cli, commands_log=run_dir / "sensitivity" / "commands.log")
         res = robustness.boundary_sensitivity(run_dir, cli=cli, jobs=a.jobs)
         print(robustness.render_sensitivity(res), end="")
+    elif a.cmd == "bias-report":
+        res = bias.rerender(a.out_root / a.run, out_name=a.out_name)
+        print(json.dumps(res["decision"], indent=2))
+        print(a.out_root / a.run / a.out_name / "report.md")
+    elif a.cmd in ("bias", "bias-final"):
+        run_dir = a.out_root / a.run
+        log_dir = run_dir / a.out_name if a.cmd == "bias" else a.out_root / a.out_run
+        pipeline.setup_logging(log_dir)
+        cli = None
+        if a.algo_cli:
+            from pulsetrain.algocli import AlgoCli
+            cli = AlgoCli.locate(a.algo_cli, commands_log=log_dir / "commands.log")
+        if a.cmd == "bias":
+            res = bias.run_experiment(run_dir, cli=cli, jobs=a.jobs, out_name=a.out_name,
+                                      allow_other_build=a.allow_other_build)
+            print(json.dumps(res["decision"], indent=2))
+            print(run_dir / a.out_name / "report.md")
+        else:
+            res = bias.final_model(run_dir, a.out_root / a.out_run, cli=cli, jobs=a.jobs,
+                                   install=APP_MODEL_PATH if a.install_model else None,
+                                   selection_from=a.selection_from, out_name=a.out_name,
+                                   allow_other_build=a.allow_other_build)
+            print(json.dumps({k: v for k, v in res.items() if k != "fit"}, indent=2))
     elif a.cmd == "defaults":
         text = kotlin_defaults.render_run(a.out_root / a.run)
         target = a.output or (kotlin_defaults.KOTLIN_PATH if a.write else None)

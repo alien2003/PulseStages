@@ -141,19 +141,30 @@ row per session epoch, evaluated night and grid entry (label as in `features`).
     "transitions": { /* TransitionWeights JSON */ }
   },
   "training": { "dataset": "...", "license": "...", "subjects": 31, "nights": 31, "variants": ["..."],
-                "createdAt": "ISO-8601", "notes": "..." }
+                "createdAt": "ISO-8601", "notes": "..." },
+  "stageLogBias": [bA, bL, bD, bR]                        // optional per-stage log-bias of the scaled likelihoods
 }
 ```
 
 `HybridModel.fingerprint()` = SHA-256 of the canonical bundle bytes (the parsed bundle re-encoded as JSON with every
 field, object keys sorted, no whitespace — so formatting and key order do not matter); it is part of the params hash.
+Optional fields added after the first shipped bundles (`stageLogBias`) are left out of the canonical JSON when they
+are absent, so a bundle without them keeps its fingerprint (and the personal models keyed to it stay valid).
+
+`stageLogBias` (optional; absent = all 0): per-stage additive log-bias b_s, AWAKE / LIGHT / DEEP / REM, added to the
+emission score of every epoch with heart-rate data, `e_k(s) = w_e · (ln p(s | x_k) − β · ln classPriors_s) + b_s`
+(w_e = `hybrid.emissionWeight`, β = `hybrid.priorExponent`, ALGORITHM.md section 7). The training scripts fit it
+(`tools/train/pulsetrain/bias.py`) so that the decoded stage shares of out-of-fold decodes of the training nights
+match the true shares (proportion matching); it belongs to the classifier it corrects, which is why it lives in the
+bundle and enters its fingerprint rather than being an AlgoParams value.
 
 Validation (`HybridModel.parse`, HybridModelException on failure): `schemaVersion` 1; `classOrder` exactly
 `["AWAKE","LIGHT","DEEP","REM"]` (every probability vector is in this order); distinct `featureNames`;
 `standardization` with one finite mean and one positive std per feature; layers chaining from `featureNames.size`
 inputs to 4 outputs, `relu` on hidden layers and `softmax` on the last, `logreg` = exactly one layer; finite weights;
 `classPriors` positive, `initialStage`, every `boutTransitions` row and every `timePrior.table` row non-negative,
-each summing to 1 (±1e-3); gamma `shape`/`scale` positive; `timePrior.binMinutes` positive. Unknown keys are ignored.
+each summing to 1 (±1e-3); gamma `shape`/`scale` positive; `timePrior.binMinutes` positive; `stageLogBias`, when
+present, exactly 4 finite numbers. Unknown keys are ignored.
 A bundle whose `featureSetVersion` or `featureNames` differ from this build's `HybridFeatureExtractor` is valid but
 unusable: the estimator falls back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. The `hmm` section is informational
 (the HMM always uses `AlgoParams.hmm`; the training pipeline may turn those estimates into the defaults).

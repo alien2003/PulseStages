@@ -6,6 +6,9 @@
 
 - ``ESTIMATOR``, ``HYBRID_DURATION_MODEL``, ``HYBRID_EMISSION_WEIGHT``, ``HYBRID_TIME_PRIOR_WEIGHT``: the values
   chosen by the LOSO selection rule (``report.select_defaults``);
+- ``HYBRID_PRIOR_EXPONENT``: ``hybrid.priorExponent`` of the patch when a run chose it (the pre-registered
+  stage-proportion experiment, :mod:`pulsetrain.bias`; ``selection.priorExponent.note`` explains the choice),
+  else 1.0;
 - ``HMM_EMISSIONS``, ``HMM_MEAN_BOUTS``, ``HMM_TRANSITIONS``, ``HMM_TIME_PRIOR``: the supervised MLE estimates when
   the trained HMM scored higher than the physiology table and passed the validity gate (``report.hmm_validity``),
   otherwise references to the specification's defaults (``EmissionTable.PHYSIOLOGY``, ``MeanBouts()``,
@@ -133,6 +136,17 @@ def render(defaults: Mapping, selection: Mapping, run: str, created_at: str, dat
     L.append("")
     L += _kdoc("Hybrid decoder: weight of the time-of-night prior log P(stage | 30-min bin) / P(stage).", "    ")
     L.append(f"    const val HYBRID_TIME_PRIOR_WEIGHT: Double = {_num(hyb['timePriorWeight'], 'timePriorWeight')}")
+    L.append("")
+    if "priorExponent" in hyb:
+        beta = _num(hyb["priorExponent"], "priorExponent")
+        if not float(hyb["priorExponent"]) >= 0:
+            raise DefaultsError("hybrid.priorExponent must be >= 0")
+        why = str((sel.get("priorExponent") or {}).get("note") or f"chosen in run {run}")
+    else:
+        beta, why = "1.0", "not part of this run's selection: 1 = divide by the class priors, the pre-training value"
+    L += _kdoc(f"Hybrid decoder: exponent beta of the class priors in the scaled likelihood p(s | x) / prior_s^beta "
+               f"({why}).", "    ")
+    L.append(f"    const val HYBRID_PRIOR_EXPONENT: Double = {beta}")
     L.append("")
     if trained_hmm:
         h = defaults["hmm"]

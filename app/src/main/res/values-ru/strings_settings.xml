@@ -158,6 +158,8 @@
     <string name="set_hyb_max_bout_hint">Самый длинный эпизод, который учитывает модель длительностей.</string>
     <string name="set_hyb_emission_weight_title">Вес эмиссий</string>
     <string name="set_hyb_emission_weight_hint">Показатель степени масштабированных правдоподобий классификатора (1 = как обучено).</string>
+    <string name="set_hyb_prior_exponent_title">Степень априорных частот</string>
+    <string name="set_hyb_prior_exponent_hint">Показатель β априорных частот классов в масштабированных правдоподобиях p(стадия | x) / prior^β (1 = делить на частоты, 0 = апостериорные как есть, это смещает к лёгкому сну).</string>
     <string name="set_hyb_elevated_awake_title">Множитель бодрствования</string>
     <string name="set_hyb_elevated_awake_hint">Множитель правдоподобия бодрствования в ночи с повышенным пульсом.</string>
     <string name="set_post_min_deep_title">Минимальный эпизод глубокого</string>

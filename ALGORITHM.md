@@ -9,12 +9,18 @@ synthetic regression results in [core-algo/SYNTHETIC_RESULTS.md](core-algo/SYNTH
 **Summary.** Default estimator **HYBRID** — a 32 × 32 MLP on 40 multi-scale heart-rate / step / time features, trained
 on Walch (PSG) + BIDSleep, whose posteriors are decoded by an explicit-duration HSMM with gamma bout lengths
 (`durationModel` EXPLICIT; the plain-HMM GEOMETRIC decoder is a setting, and the nested CV could not separate the
-two). Leave-one-subject-out on the 31 Walch PSG nights with OHealth-like 2-minute heart rate (worse of the
-instantaneous / 2-min-mean emulations, here instantaneous): **Cohen's κ = 0.334 ± 0.133** (mean ± sample sd over
-subjects; pooled 0.333, accuracy 0.540, macro-F1 0.498; mean absolute error per night DEEP 52 min, REM 54 min, AWAKE
-18 min), versus 0.070 for the HMM (the specification's physiology table, which stays the HMM default) and 0.076 for
-the rules. Over four training seeds the same setting averages κ 0.317 ± 0.019, the conservative figure. The default
-over-calls DEEP and REM at the expense of LIGHT (section 13.3). The output is an estimate, not a measurement.
+two), plus a per-stage log-bias stored in the model bundle (**proportion matching**, section 7) that brings the
+decoded stage shares to the PSG shares. Leave-one-subject-out on the 31 Walch PSG nights with OHealth-like 2-minute
+heart rate (worse of the instantaneous / 2-min-mean emulations, here mean2min): **Cohen's κ = 0.339 ± 0.169** (mean ±
+sample sd over subjects; instantaneous 0.348; pooled 0.350, accuracy 0.612, macro-F1 0.522; mean absolute error per
+night DEEP 33 min, REM 41 min, AWAKE 19 min, LIGHT 53 min; predicted shares DEEP 13–15 % / REM 20–24 % / LIGHT 57–59 %
+vs PSG 14 / 23 / 57 %), versus 0.070 for the HMM (the specification's physiology table, which stays the HMM default)
+and 0.076 for the rules. Without proportion matching (`loso-v2`) the same classifier scored κ 0.334 but predicted
+25 % DEEP / 34 % REM / 34 % LIGHT with per-night errors of 52 / 54 / 18 / 95 min (DEEP / REM / AWAKE / LIGHT); the
+pre-registered experiment of section 13.10 adopted the correction (summed per-night error 147 instead of 219 min;
+κ 0.339 vs 0.334 is within noise, Δκ +0.003 [−0.037, 0.038] on mean2min, and b costs 0.03 κ on the BIDSleep headband
+nights). Over four training seeds the uncorrected setting averages κ 0.317 ± 0.019, the conservative figure. The
+output is an estimate, not a measurement.
 
 Contents: 1 Estimate, not measurement · 2 Pipeline · 3 Preprocessing · 4 Features · 5 RULES · 6 HMM · 7 HYBRID · 8
 Post-processing · 9 Gates and confidence · 10 Personalization · 11 Parameters · 12 Validation protocol · 13 Results ·
@@ -33,9 +39,9 @@ a higher and more variable one, and stages follow a typical ultradian timing. Th
 - every record the app writes is labelled as an estimate (default title "Sleep stages from heart rate (estimate)"), carries
   `algoVersion` and the `paramsHash` of the exact parameters / model / personal model in its `notes`, and uses
   `recordingMethod = UNKNOWN` (no sensor measured the stages);
-- the validation below quantifies how often the estimate agrees with PSG: Cohen's kappa ≈ 0.33 for the default
-  estimator ("fair" agreement, 54 % of 30-s epochs correct), with mean errors of 18–54 minutes per night for the
-  AWAKE, DEEP and REM totals and large differences between people;
+- the validation below quantifies how often the estimate agrees with PSG: Cohen's kappa ≈ 0.34 for the default
+  estimator ("fair" agreement, 61–62 % of 30-s epochs correct), with mean errors of 18–41 minutes per night for the
+  AWAKE, DEEP and REM totals (38–53 for LIGHT) and large differences between people;
 - any night can be recomputed later with a better algorithm, because the source data are never modified and the params
   hash identifies what produced a record.
 
@@ -205,14 +211,31 @@ softmax(W z + b), or an MLP p = softmax(W₃ relu(W₂ relu(W₁ z + b₁) + b�
 **Emission scores** per epoch k and stage s:
 
 ```text
-e_k(s) = w_e · (log p(s | x_k) − log π_s)            (epochs with HR data; 0 otherwise)
+e_k(s) = w_e · (log p(s | x_k) − β · log π_s) + b_s   (epochs with HR data; 0 otherwise)
        + w_t · (log max(P(s | bin_k), ε) − log π_s)   (time-of-night prior)
        + log-factors (1–4 steps: ln 3 for AWAKE; elevated night: ln 0.6 for AWAKE; SpO2: ln 2 for AWAKE and LIGHT)
 ```
 
-with π the training class frequencies (`classPriors`), w_e = `hybrid.emissionWeight`, w_t = `hybrid.timePriorWeight`,
-bin_k = ⌊(k + ½) · E_min / 30⌋ (bins past the end of the table use the last row); forced epochs get −∞ for every state
-but AWAKE. P(s | 30-min bin) is a table estimated on the training nights (not a linear function of t).
+with π the training class frequencies (`classPriors`), w_e = `hybrid.emissionWeight`, β = `hybrid.priorExponent` (the
+scaled likelihood is p(s | x) / π_s^β; β = 1 is the classic hybrid HMM and the default), b = the bundle's optional
+per-stage log-bias `stageLogBias` (absent = 0), w_t = `hybrid.timePriorWeight`, bin_k = ⌊(k + ½) · E_min / 30⌋ (bins
+past the end of the table use the last row); forced epochs get −∞ for every state but AWAKE. P(s | 30-min bin) is a
+table estimated on the training nights (not a linear function of t).
+
+**Proportion matching** (`stageLogBias`). Dividing the posteriors by π favours the rare stages: without b the decoder
+predicts 25 % DEEP and 34 % REM on Walch where PSG has 14 % and 23 % (section 13.10). b is a per-stage constant added
+to the emission score of every epoch with heart-rate data, fitted by the training scripts (`tools/train/pulsetrain/
+bias.py`) so that the decoded stage shares of out-of-fold decodes match the true PSG shares: deterministic fixed point
+b ← b + η · ln(T_s / P_s(b)) (T = true, P = decoded shares over the scored 30-s chunks of the fit nights, b centred, η
+= 1 halved whenever a step does not reduce Σ_s |T_s − P_s|, at most 8 decodes through `algo-cli`). The shipped bundle
+carries **b = (+0.090, +0.216, −0.318, +0.012)** for AWAKE / LIGHT / DEEP / REM (fitted on the LOSO out-of-fold
+decodes of all 31 Walch subjects, both 2-minute variants, at the shipped decoder parameters; their decoded shares 6.2
+/ 56.7 / 14.4 / 22.7 % vs PSG 6.3 / 56.9 / 14.2 / 22.6 %): relative to LIGHT, the per-epoch DEEP likelihood is scaled
+by e^(−0.534) ≈ 0.59 and the REM likelihood by e^(−0.204) ≈ 0.82. b lives in the bundle, not in AlgoParams, because it
+is a statistic of the classifier it corrects (like `classPriors`); the app persists the full AlgoParams, so an
+AlgoParams vector would outlive its bundle. A bundle without `stageLogBias` keeps its earlier fingerprint. On epochs
+with HR data −w_e · β · log π_s is itself a per-stage constant, so changing β by d equals adding −w_e · d · log π_s to
+b (unit-tested, `HybridEmissionsTest`): a fitted b absorbs any β, and β stays 1.
 
 **Explicit-duration decoder** (`durationModel` = EXPLICIT, HSMM). A path is a sequence of bouts; a bout of stage j
 lasting d epochs (1 ≤ d ≤ D, D = ⌊`maxBoutMin` / E_min⌋ = 120) scores log P_j(d) + Σ e_k(j); consecutive bouts i → j
@@ -237,9 +260,9 @@ with the diagonal floored at ε.
 0.9999), off-diagonal shares ∝ the bundle's bout transitions without the diagonal (zeros → ε), the same initial
 distribution and emission scores; Viterbi + forward–backward.
 
-Shipped decoder defaults (chosen by nested cross-validation, section 13.2): EXPLICIT, w_e = 0.5, w_t = 0. An
-incompatible or missing bundle (`featureSetVersion` or `featureNames` differ from this build) is never used: the night
-falls back to the HMM with the warning `HYBRID_MODEL_UNAVAILABLE`.
+Shipped decoder defaults (chosen by nested cross-validation, section 13.2): EXPLICIT, w_e = 0.5, w_t = 0, β = 1
+(section 13.10), with the bundle's b above. An incompatible or missing bundle (`featureSetVersion` or `featureNames`
+differ from this build) is never used: the night falls back to the HMM with the warning `HYBRID_MODEL_UNAVAILABLE`.
 
 **Training statistics stored in the bundle** (`tools/train/pulsetrain/stats.py`, fitted on the training subjects
 only): gamma MLE (location 0) on the *uncensored* bout lengths of each stage (first / last bout of a labelled segment
@@ -247,7 +270,9 @@ are censored; censored bouts are added only if < 5 uncensored ones exist; method
 counts between consecutive bouts inside labelled segments, a bout of L > 120 min counting as ⌈L/120⌉ pieces (⌈L/120⌉ −
 1 self-transitions, the only diagonal mass), + 0.5 pseudo-count off the diagonal; `initialStage` = stage of the first
 labelled epoch of each night + 0.5 pseudo-count; P(stage | 30-min bin) with Laplace α = 1, bins after the last bin
-with ≥ 300 labelled epochs merged into it; `classPriors` = class frequencies of the classifier's training rows.
+with ≥ 300 labelled epochs merged into it; `classPriors` = class frequencies of the classifier's training rows;
+`stageLogBias` = the proportion-matching fixed point above (out-of-fold decodes of the Walch PSG nights only, never of
+the night being evaluated in a validation).
 
 ## 8. Post-processing (`post/`, shared by all estimators)
 
@@ -349,6 +374,7 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | hybrid | `emissionWeight` | **0.5** (trained; pre-training 1.0) | exponent of the scaled likelihoods |
 | hybrid | `maxBoutMin` | 120 | maximum bout length of the HSMM (min) |
 | hybrid | `elevatedAwakeFactor` | 0.6 | AWAKE likelihood multiplier on elevated nights |
+| hybrid | `priorExponent` | **1.0** (pre-registered experiment, section 13.10: the share correction is the bundle's `stageLogBias`, β stays 1) | β of the scaled likelihood p(s \| x) / π_s^β |
 | post | `minDeepMin` / `minRemMin` / `minAwakeMin` | 5 / 5 / 2 | minimum bouts (min) |
 | post | `gapPolicy` | UNKNOWN | UNKNOWN / LIGHT / NEAREST for long gaps |
 | post | `sanityMinCoverage` / `sanityDeepMax` / `sanityRemMax` / `sanityDeepMin` / `sanityConfidenceFactor` | 0.8 / 0.35 / 0.40 / 0.03 / 0.7 | sanity check |
@@ -361,8 +387,8 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | personal | `calibrationRegularization` / `calibrationHoldout` | 10 / 0.3 | calibration strength (hours of evidence) and held-out share |
 
 The model bundle itself (`assets/models/hybrid_model.json`: standardization, classifier weights, class priors, gamma
-durations, bout transitions, initial distribution, time prior) is not part of `AlgoParams`; its SHA-256 fingerprint
-enters the params hash.
+durations, bout transitions, initial distribution, time prior, proportion-matching `stageLogBias`) is not part of
+`AlgoParams`; its SHA-256 fingerprint enters the params hash.
 
 ## 12. Validation protocol
 
@@ -478,6 +504,12 @@ research, Nature Health (2026), https://doi.org/10.1038/s44360-026-00096-z. Deta
 - **Final model**: fitted on all subjects of the chosen configuration, rows of both headline variants, and installed
   as `app/src/main/assets/models/hybrid_model.json`; a resubstitution run through `algo-cli` checks that the app
   accepts it (its numbers are not a validation result).
+- **Proportion matching** (pre-registered v3, adopted, section 13.10): in the validation, the stage log-bias b of
+  section 7 is fitted per outer group (the groups of the nested selection) on the inner out-of-fold decodes of the
+  group's selection subjects (Walch, the selection-scoring PSG dataset) at the group's decoder choice, and the
+  held-out subjects of the group (Walch and BIDSleep) are decoded with their LOSO fold bundle + that b. The final
+  bundle's b is fitted on the LOSO out-of-fold decodes of all Walch subjects (both headline variants pooled) at the
+  final decoder parameters.
 - **Provenance**: each run records the SHA-256 of the `algo-cli` build it used (launcher + `lib/*.jar`) in its
   `config.json` and fails if the build changes during the run; every rebuild is logged in
   `tools/train/out/commands.log`.
@@ -490,22 +522,30 @@ Runs of `tools/train` on 2026-10-13 (Intel Core Ultra 9 275HX, 24 cores; command
 `algo-cli` calls exit code 0); `exp-v2-e1-balanced` / `exp-v2-e2-mlp-alpha` — the two pre-registered experiments on
 its selection (section 13.6); `seed-v2-s1` … `seed-v2-s3` — the adopted setting with three other seeds (section 13.7,
 reporting only); `loso-v2/sensitivity` — moved session windows and nights without steps (section 13.8, reporting
-only). Neither experiment was adopted, so `loso-v2` is also the complete-protocol run of the adopted setting; it
-trained the shipped model. All kappas are Cohen's kappa on the 30-s label epochs over AWAKE / LIGHT / DEEP / REM;
-"κ mean ± sd" is the mean and the **sample sd (n − 1)** over subjects (each subject's nights pooled), "κ pooled" is
-over all chunks; minute errors are mean absolute errors per night.
+only). Neither experiment was adopted, so `loso-v2` is also the complete-protocol run of the adopted classifier
+setting; it trained the shipped classifier. Then, on a later build that adds the decoder options β and b (defaults
+unchanged; it re-decodes all 568 `loso-v2` HYBRID-MLP [walch+bid-zero] nights identically): `bias-base` — the same
+setting re-run with its inner fold models kept (6.4 min; reproduces `loso-v2` night by night, the 156 decoder choices
+and the final bundle exactly), `bias-base/bias` — the pre-registered stage-proportion experiment (section 13.10, 433
+`algo-cli` calls, all exit code 0; re-run on the final build with `--allow-other-build` as `bias-base/bias-033541ae`,
+it reproduced every per-night result and inner fit byte for byte) and `bias-final` — the final bundle with b
+(installed). Rows marked "+ b" below are
+the adopted default with proportion matching; the other HYBRID rows are without it. All kappas are Cohen's kappa on
+the 30-s label epochs over AWAKE / LIGHT / DEEP / REM; "κ mean ± sd" is the mean and the **sample sd (n − 1)** over
+subjects (each subject's nights pooled), "κ pooled" is over all chunks; minute errors are mean absolute errors per
+night.
 
 Sanity checks: for every metrics file the confusion-matrix total plus the chunks predicted UNKNOWN equals the number
-of 30-s label chunks of the evaluated nights (UNKNOWN = label chunks inside heart-rate gaps > 10 min, not scored:
-1.0 % of the Walch chunks for `instantaneous`, 0.1 % for `mean2min`, 2.3 % / 2.2 % of the BIDSleep chunks); no night
-was skipped; no HYBRID night fell back to the HMM (`HYBRID_MODEL_UNAVAILABLE` never occurred); **one BIDSleep night
+of 30-s label chunks of the evaluated nights (UNKNOWN = label chunks inside heart-rate gaps > 10 min, not scored: 1.0
+% of the Walch chunks for `instantaneous`, 0.1 % for `mean2min`, 2.3 % / 2.2 % of the BIDSleep chunks); no night was
+skipped; no HYBRID night fell back to the HMM (`HYBRID_MODEL_UNAVAILABLE` never occurred); **one BIDSleep night
 (`bid-34` night 1, coverage < 0.6) is estimated by RULES (`RULES_FALLBACK_LOW_COVERAGE`) in every HMM and HYBRID
 evaluation and in the resubstitution run, exactly as the app would do** (column "RULES fallback" below; Walch has no
 such night); the Walch rows of the estimators and configurations that did not change since the superseded run
 `loso-v1` (RULES, HMM-table, `walch`, `walch+bid-mask`) are identical to it; re-evaluating the `loso-v2` Walch fold
 models with the final build (the one with the new `TrainedDefaults.kt`) reproduces every per-subject kappa exactly.
-The headline κ ≈ 0.33 is in the expected range for 2-minute heart rate (section 14) and well below the ≈ 0.5 that would
-suggest leakage.
+The headline κ ≈ 0.34 is in the expected range for 2-minute heart rate (section 14) and well below the ≈ 0.5 that
+would suggest leakage.
 
 ### 13.1 Headline: Walch (PSG), OHealth-like session window
 
@@ -524,11 +564,14 @@ the number used by the selection rule; the median, pooled, accuracy, F1 and minu
 | HYBRID-LR [walch+bid-zero] | 0.264 ± 0.092 | 0.286 ± 0.138 | **0.264** (instantaneous) | 0.282 | 0.273 | 0.483 | 0.441 | 0.29 / 0.51 / 0.45 / 0.52 | 68.1 / 55.9 / 22.4 |
 | HYBRID-MLP [walch] | 0.247 ± 0.140 | 0.284 ± 0.161 | **0.247** (instantaneous) | 0.225 | 0.255 | 0.517 | 0.465 | 0.34 / 0.58 / 0.46 / 0.48 | 34.8 / 53.4 / 20.1 |
 | HYBRID-MLP [walch+bid-mask] | 0.309 ± 0.104 | 0.334 ± 0.118 | **0.309** (instantaneous) | 0.315 | 0.307 | 0.514 | 0.471 | 0.30 / 0.53 / 0.50 / 0.56 | 50.6 / 58.7 / 23.0 |
-| **HYBRID-MLP [walch+bid-zero] (default)** | 0.334 ± 0.133 | 0.336 ± 0.156 | **0.334** (instantaneous) | 0.353 | 0.333 | 0.540 | 0.498 | 0.35 / 0.57 / 0.50 / 0.57 | 52.4 / 53.5 / 18.0 |
+| HYBRID-MLP [walch+bid-zero] (`loso-v2` default, no proportion matching) | 0.334 ± 0.133 | 0.336 ± 0.156 | **0.334** (instantaneous) | 0.353 | 0.333 | 0.540 | 0.498 | 0.35 / 0.57 / 0.50 / 0.57 | 52.4 / 53.5 / 18.0 |
+| **HYBRID-MLP [walch+bid-zero] + b (default, proportion matching)** | 0.348 ± 0.141 | 0.339 ± 0.169 | **0.339** (mean2min) | 0.354 | 0.350 | 0.612 | 0.522 | 0.36 / 0.69 / 0.47 / 0.56 | 33.1 / 40.8 / 19.4 |
 
-The shipped default scores **κ = 0.334** on the worse variant (0.336 on `mean2min`). It is the best of the
-candidates on these data with one seed; the mean over four seeds of the same setting is 0.317 (section 13.7), the
-conservative estimate of what this training procedure delivers.
+The shipped default scores **κ = 0.339** on the worse variant (0.348 on `instantaneous`) and its per-night LIGHT
+error is 38 / 53 min (instantaneous / mean2min; 95 / 86 min without b). The classifier and the decoder choice are
+those of `loso-v2`, the best of the candidates on these data with one seed; the mean over four seeds of that setting
+without b is 0.317 (section 13.7), the conservative estimate of what this training procedure delivers. b was
+adopted by the pre-registered rule of section 13.10, which selects on the minute error, not on κ.
 
 ### 13.2 Selected defaults (selection rule of section 12.3)
 
@@ -587,63 +630,77 @@ subjects):
   What the data do support: the time-of-night prior off (9 of 10 selections, 140 of 156 folds — the hybrid features
   already contain the elapsed and remaining time) and flattened emissions, w_e = 0.5 (7 of 10; the classifier's
   posteriors are over-confident for the decoder). EXPLICIT vs GEOMETRIC is not decided (6 vs 4 selections).
-- **Final model** (`app/src/main/assets/models/hybrid_model.json`, `modelId` `pulsestages-walch+bidsleep-mlp-loso-v2`):
-  MLP fitted on all 78 subjects (225 973 epochs of the instantaneous and mean2min variants), gamma durations / bout
-  transitions / initial distribution / time prior from the 284 nights; the exported weights reproduce
-  scikit-learn's probabilities to 3e-16; the resubstitution run through `algo-cli` used the bundle on 283 nights and
-  RULES on the one low-coverage BIDSleep night (no HMM fallback).
+- **Stage proportions: proportion matching b, β = 1** — the pre-registered experiment of section 13.10 (prior exponent
+  β, proportion matching b, both): b has the lowest summed per-night minute error on Walch (147 vs 219 min) with κ
+  inside the rule's margin (0.339 vs 0.334; paired Δκ +0.003 [−0.037, 0.038] on mean2min — within noise, which does
+  not show that no κ is lost; −0.03 on BIDSleep), and was adopted by its rule; β stays 1.
+- **Final model** (`app/src/main/assets/models/hybrid_model.json`, `modelId`
+  `pulsestages-walch+bidsleep-mlp-bias-final`): MLP fitted on all 78 subjects (225 973 epochs of the instantaneous and
+  mean2min variants), gamma durations / bout transitions / initial distribution / time prior from the 284 nights —
+  identical to the `loso-v2` final model, re-fitted by `bias-base` — plus `stageLogBias` = (+0.090, +0.216, −0.318,
+  +0.012) (section 7); the exported weights reproduce scikit-learn's probabilities to 3e-16; the resubstitution run
+  through `algo-cli` used the bundle on 283 nights and RULES on the one low-coverage BIDSleep night (no HMM fallback).
 
-### 13.3 Confusion matrices of the default estimator (HYBRID-MLP [walch+bid-zero], LOSO)
+### 13.3 Confusion matrices of the default estimator (HYBRID-MLP [walch+bid-zero] + b, LOSO)
 
-Rows = reference (PSG / headband), columns = estimate; counts of 30-s epochs (row %).
+Rows = reference (PSG / headband), columns = estimate; counts of 30-s epochs (row %). Each held-out subject is decoded
+with its LOSO fold bundle plus the b of its outer group (section 12.3).
 
-**Walch (PSG), instantaneous — the worse variant, headline** (31 nights):
-
-| truth \ estimate | AWAKE | LIGHT | DEEP | REM | total | recall |
-|---|---:|---:|---:|---:|---:|---:|
-| AWAKE | 611 (37.8 %) | 431 (26.7 %) | 233 (14.4 %) | 340 (21.1 %) | 1615 | 0.378 |
-| LIGHT | 887 (6.0 %) | 6622 (45.1 %) | 3326 (22.7 %) | 3832 (26.1 %) | 14667 | 0.451 |
-| DEEP | 38 (1.0 %) | 698 (19.2 %) | 2540 (70.0 %) | 352 (9.7 %) | 3628 | 0.700 |
-| REM | 332 (5.7 %) | 1019 (17.5 %) | 340 (5.9 %) | 4120 (70.9 %) | 5811 | 0.709 |
-| predicted total | 1868 | 8770 | 6439 | 8644 | 25721 | |
-| precision | 0.327 | 0.755 | 0.394 | 0.477 | | |
-
-**Walch (PSG), mean2min** (31 nights):
+**Walch (PSG), mean2min — the worse variant, headline** (31 nights):
 
 | truth \ estimate | AWAKE | LIGHT | DEEP | REM | total | recall |
 |---|---:|---:|---:|---:|---:|---:|
-| AWAKE | 624 (38.2 %) | 478 (29.2 %) | 192 (11.7 %) | 341 (20.9 %) | 1635 | 0.382 |
-| LIGHT | 795 (5.4 %) | 7223 (49.0 %) | 3242 (22.0 %) | 3491 (23.7 %) | 14751 | 0.490 |
-| DEEP | 18 (0.5 %) | 703 (19.1 %) | 2615 (71.0 %) | 349 (9.5 %) | 3685 | 0.710 |
-| REM | 325 (5.5 %) | 1255 (21.3 %) | 334 (5.7 %) | 3970 (67.5 %) | 5884 | 0.675 |
-| predicted total | 1762 | 9659 | 6383 | 8151 | 25955 | |
-| precision | 0.354 | 0.748 | 0.410 | 0.487 | | |
+| AWAKE | 585 (35.8 %) | 711 (43.5 %) | 84 (5.1 %) | 255 (15.6 %) | 1635 | 0.358 |
+| LIGHT | 675 (4.6 %) | 10269 (69.6 %) | 1531 (10.4 %) | 2276 (15.4 %) | 14751 | 0.696 |
+| DEEP | 65 (1.8 %) | 1728 (46.9 %) | 1649 (44.7 %) | 243 (6.6 %) | 3685 | 0.447 |
+| REM | 250 (4.2 %) | 2200 (37.4 %) | 62 (1.1 %) | 3372 (57.3 %) | 5884 | 0.573 |
+| predicted total | 1575 | 14908 | 3326 | 6146 | 25955 | |
+| precision | 0.371 | 0.689 | 0.496 | 0.549 | | |
+
+**Walch (PSG), instantaneous** (31 nights):
+
+| truth \ estimate | AWAKE | LIGHT | DEEP | REM | total | recall |
+|---|---:|---:|---:|---:|---:|---:|
+| AWAKE | 553 (34.2 %) | 744 (46.1 %) | 107 (6.6 %) | 211 (13.1 %) | 1615 | 0.342 |
+| LIGHT | 599 (4.1 %) | 10554 (72.0 %) | 1715 (11.7 %) | 1799 (12.3 %) | 14667 | 0.720 |
+| DEEP | 73 (2.0 %) | 1578 (43.5 %) | 1823 (50.2 %) | 154 (4.2 %) | 3628 | 0.502 |
+| REM | 268 (4.6 %) | 2327 (40.0 %) | 169 (2.9 %) | 3047 (52.4 %) | 5811 | 0.524 |
+| predicted total | 1493 | 15203 | 3814 | 5211 | 25721 | |
+| precision | 0.370 | 0.694 | 0.478 | 0.585 | | |
 
 **BIDSleep (EEG headband), instantaneous** (253 nights):
 
 | truth \ estimate | AWAKE | LIGHT | DEEP | REM | total | recall |
 |---|---:|---:|---:|---:|---:|---:|
-| AWAKE | 3896 (32.4 %) | 2205 (18.4 %) | 1745 (14.5 %) | 4162 (34.7 %) | 12008 | 0.324 |
-| LIGHT | 5290 (5.7 %) | 42649 (45.9 %) | 16554 (17.8 %) | 28496 (30.6 %) | 92989 | 0.459 |
-| DEEP | 1264 (3.2 %) | 7245 (18.2 %) | 27512 (69.1 %) | 3766 (9.5 %) | 39787 | 0.691 |
-| REM | 2141 (3.9 %) | 13920 (25.3 %) | 5738 (10.4 %) | 33205 (60.4 %) | 55004 | 0.604 |
-| predicted total | 12591 | 66019 | 51549 | 69629 | 199788 | |
-| precision | 0.309 | 0.646 | 0.534 | 0.477 | | |
+| AWAKE | 3786 (31.5 %) | 5039 (42.0 %) | 910 (7.6 %) | 2273 (18.9 %) | 12008 | 0.315 |
+| LIGHT | 4486 (4.8 %) | 68584 (73.8 %) | 6910 (7.4 %) | 13009 (14.0 %) | 92989 | 0.738 |
+| DEEP | 1085 (2.7 %) | 17967 (45.2 %) | 18956 (47.6 %) | 1779 (4.5 %) | 39787 | 0.476 |
+| REM | 1662 (3.0 %) | 30387 (55.2 %) | 2155 (3.9 %) | 20800 (37.8 %) | 55004 | 0.378 |
+| predicted total | 11019 | 121977 | 28931 | 37861 | 199788 | |
+| precision | 0.344 | 0.562 | 0.655 | 0.549 | | |
 
-Most errors are confusions with LIGHT. The default **over-calls DEEP and REM and under-calls LIGHT**: on Walch it
-predicts 25 % DEEP (truth 14 %), 34 % REM (23 %) and 34 % LIGHT (57 %), on BIDSleep 26 / 35 / 33 % (truth 19.9 /
-27.5 / 46.5 %). Kappa rewards recall of the minority stages (DEEP and REM recall 0.68–0.71), and the specification's
-rule selects by kappa; the price is a lower accuracy (0.54) and per-night minute errors of 52 min (DEEP) and 54 min
-(REM). The post-processing sanity check flags 12 of the 31 Walch nights as low-confidence (instantaneous; REM > 40 %
-on 8, DEEP > 35 % on 5). Wake inside the session is the hardest stage (recall 0.32–0.38, precision 0.31–0.35): heart
-rate rises only briefly during short awakenings and in-bed steps are rare.
+Most errors are confusions with LIGHT. With proportion matching the **Walch stage shares match PSG on average**:
+predicted AWAKE / LIGHT / DEEP / REM 6.1 / 57.4 / 12.8 / 23.7 % (mean2min) and 5.8 / 59.1 / 14.8 / 20.3 %
+(instantaneous) vs PSG 6.3 / 56.8 / 14.2 / 22.7 %. Without it (`loso-v2`) the decoder predicted 7 / 34 / 25 / 34 %
+(instantaneous; recall DEEP 0.70, REM 0.71, LIGHT 0.45, precision DEEP 0.39, REM 0.48): it bought minority-stage
+recall with a third of all LIGHT epochs; b trades some of that recall (DEEP 0.45–0.50, REM 0.52–0.57) for LIGHT recall
+(0.70–0.72) and precision of DEEP / REM (0.48–0.59), with Walch κ within noise (CIs include 0) and accuracy 0.540 /
+0.556 → 0.621 / 0.612 (instantaneous / mean2min). Per-night minute errors fall to 33–34 min (DEEP), 38–41 (REM), 18–19
+(AWAKE) and 38–53 (LIGHT), from 47–52, 48–54, 18–21 and 86–95. The sanity check flags 2 / 7 of the 31 Walch nights
+(instantaneous / mean2min; 12 / 11 without b; 3 of the 7 for DEEP < 3 %). b is fitted to the Walch PSG shares;
+BIDSleep's headband labels have more N3 and REM (19.9 / 27.5 %), and there b predicts 14.5 / 19.0 % DEEP / REM
+(instantaneous), lowers κ by 0.03 and flags 12 / 15 of the 253 nights for DEEP < 3 % (`SANITY_DEEP_LOW`; 3 / 0 without
+b), most of its sanity flags there (section 13.10). Wake inside the session is the hardest stage (recall 0.32–0.36,
+precision 0.34–0.37): heart rate rises only briefly during short awakenings and in-bed steps are rare.
 
 ### 13.4 All estimators and variants, Walch (PSG)
 
 `*-psg` = the full scored PSG range as the session (more pre-sleep wake), for completeness; the selection uses only
-the OHealth-like `instantaneous` / `mean2min` windows. Per-subject κ of the shipped default (instantaneous) ranges
-from 0.08 (5383425) and 0.12 (844359) to 0.66 (4018081, one of the five nights cut short by the watch battery); 2 of
-31 subjects exceed 0.5 and 6 are below 0.2.
+the OHealth-like `instantaneous` / `mean2min` windows. Per-subject κ of the shipped default ranges from −0.03
+(5383425, 3509524) to 0.65 (8258170) on mean2min and from 0.05 (1455390) to 0.63 (1449548) on instantaneous; 7 / 4
+of 31 subjects exceed 0.5 and 5 / 4 are below 0.2 (without b, instantaneous: 0.08 (5383425) to 0.66 (4018081, one of
+the five nights cut short by the watch battery), 2 above 0.5, 6 below 0.2). The stage-proportion experiment decoded
+only the two OHealth-like variants, so the `*-psg` tables have no "+ b" row.
 
 #### instantaneous
 
@@ -659,6 +716,7 @@ from 0.08 (5383425) and 0.12 (844359) to 0.66 (4018081, one of the five nights c
 | HYBRID-MLP [walch] | loso | 31 (0) | 0 | 31 | 0.247 ± 0.140 | 0.225 | 0.255 | 0.517 | 0.465 | 0.344 | 0.576 | 0.460 | 0.481 | 34.8 | 53.4 | 20.1 |
 | HYBRID-MLP [walch+bid-mask] | loso | 31 (0) | 0 | 31 | 0.309 ± 0.104 | 0.315 | 0.307 | 0.514 | 0.471 | 0.296 | 0.530 | 0.498 | 0.561 | 50.6 | 58.7 | 23.0 |
 | HYBRID-MLP [walch+bid-zero] | loso | 31 (0) | 0 | 31 | 0.334 ± 0.133 | 0.353 | 0.333 | 0.540 | 0.498 | 0.351 | 0.565 | 0.505 | 0.570 | 52.4 | 53.5 | 18.0 |
+| **HYBRID-MLP [walch+bid-zero] + b (default)** | loso | 31 (0) | 0 | 31 | 0.348 ± 0.141 | 0.347 | 0.361 | 0.621 | 0.526 | 0.356 | 0.707 | 0.490 | 0.553 | 34.3 | 38.2 | 17.6 |
 
 #### mean2min
 
@@ -674,6 +732,7 @@ from 0.08 (5383425) and 0.12 (844359) to 0.66 (4018081, one of the five nights c
 | HYBRID-MLP [walch] | loso | 31 (0) | 0 | 31 | 0.284 ± 0.161 | 0.291 | 0.287 | 0.538 | 0.472 | 0.294 | 0.604 | 0.484 | 0.507 | 37.9 | 41.0 | 22.3 |
 | HYBRID-MLP [walch+bid-mask] | loso | 31 (0) | 0 | 31 | 0.334 ± 0.118 | 0.350 | 0.341 | 0.544 | 0.500 | 0.353 | 0.576 | 0.488 | 0.581 | 58.7 | 54.0 | 18.5 |
 | HYBRID-MLP [walch+bid-zero] | loso | 31 (0) | 0 | 31 | 0.336 ± 0.156 | 0.310 | 0.345 | 0.556 | 0.511 | 0.367 | 0.592 | 0.519 | 0.566 | 46.6 | 47.8 | 21.4 |
+| **HYBRID-MLP [walch+bid-zero] + b (default)** | loso | 31 (0) | 0 | 31 | 0.339 ± 0.169 | 0.354 | 0.350 | 0.612 | 0.522 | 0.364 | 0.692 | 0.470 | 0.561 | 33.1 | 40.8 | 19.4 |
 
 #### instantaneous-psg
 
@@ -726,6 +785,7 @@ nights are scored with exactly the feature coding they were trained with and tha
 | HYBRID-MLP [walch] | external | 253 (0) | 1 | 47 | 0.271 ± 0.094 | 0.280 | 0.273 | 0.511 | 0.460 | 0.284 | 0.559 | 0.519 | 0.477 | 43.4 | 42.9 | 17.0 |
 | HYBRID-MLP [walch+bid-mask] | loso | 253 (0) | 1 | 47 | 0.329 ± 0.099 | 0.337 | 0.332 | 0.532 | 0.491 | 0.303 | 0.524 | 0.601 | 0.537 | 40.5 | 50.2 | 17.5 |
 | HYBRID-MLP [walch+bid-zero] | loso | 253 (0) | 1 | 47 | 0.331 ± 0.100 | 0.320 | 0.334 | 0.537 | 0.497 | 0.317 | 0.536 | 0.602 | 0.533 | 39.4 | 51.7 | 16.6 |
+| **HYBRID-MLP [walch+bid-zero] + b (default)** | loso | 253 (0) | 1 | 47 | 0.302 ± 0.096 | 0.303 | 0.305 | 0.561 | 0.492 | 0.329 | 0.638 | 0.552 | 0.448 | 35.2 | 47.2 | 16.3 |
 
 #### mean2min
 
@@ -741,6 +801,7 @@ nights are scored with exactly the feature coding they were trained with and tha
 | HYBRID-MLP [walch] | external | 253 (0) | 1 | 47 | 0.258 ± 0.094 | 0.256 | 0.259 | 0.516 | 0.450 | 0.277 | 0.586 | 0.486 | 0.453 | 44.9 | 42.3 | 17.0 |
 | HYBRID-MLP [walch+bid-mask] | loso | 253 (0) | 1 | 47 | 0.361 ± 0.100 | 0.376 | 0.362 | 0.557 | 0.516 | 0.341 | 0.563 | 0.609 | 0.550 | 44.6 | 39.4 | 15.0 |
 | HYBRID-MLP [walch+bid-zero] | loso | 253 (0) | 1 | 47 | 0.357 ± 0.105 | 0.363 | 0.359 | 0.556 | 0.518 | 0.359 | 0.560 | 0.609 | 0.546 | 44.6 | 42.6 | 13.4 |
+| **HYBRID-MLP [walch+bid-zero] + b (default)** | loso | 253 (0) | 1 | 47 | 0.325 ± 0.092 | 0.336 | 0.331 | 0.575 | 0.511 | 0.355 | 0.644 | 0.541 | 0.506 | 38.2 | 40.1 | 14.7 |
 
 #### instantaneous-psg
 
@@ -774,7 +835,10 @@ nights are scored with exactly the feature coding they were trained with and tha
 
 The Walch-only models transfer to BIDSleep with κ 0.27–0.28 (HYBRID-LR / MLP, instantaneous) — close to their Walch
 LOSO values (0.29 / 0.25) — and adding BIDSleep to training raises BIDSleep κ to 0.30–0.33 (0.32–0.36 for mean2min);
-`zero` and `mask` are equal there (0.331 / 0.329, 0.357 / 0.361).
+`zero` and `mask` are equal there (0.331 / 0.329, 0.357 / 0.361). Proportion matching to the Walch PSG shares costs
+0.03 κ on BIDSleep (0.302 / 0.325; paired −0.030 [−0.043, −0.016] / −0.032 [−0.045, −0.019]) and leaves its summed
+minute error about unchanged (167 / 149 vs 171 / 157 min), because the headband-scored BIDSleep nights have more N3
+and REM than the PSG-scored Walch nights (section 13.10).
 
 ### 13.6 Improvement experiments (pre-registered)
 
@@ -806,7 +870,8 @@ Neither experiment beats the reference, so the shipped model is the α = 1e-4 ML
 instantaneous variant and raises mean2min — the same L2 change that gained a little in v1 — and single subjects move
 by about ± 0.07–0.09 κ (sd of the paired differences): with one seed per setting, differences of a few hundredths
 between training settings are noise (section 13.7). (`tools/train/out/compare-v2-experiments.json`, `train.py
-compare --runs loso-v2,exp-v2-e1-balanced,exp-v2-e2-mlp-alpha`.)
+compare --runs loso-v2,exp-v2-e1-balanced,exp-v2-e2-mlp-alpha`.) A third pre-registered experiment, on the stage
+proportions of the decoder, was adopted (section 13.10).
 
 ### 13.7 How much of the score is seed and selection luck (reporting only)
 
@@ -827,7 +892,8 @@ addition, the configuration, the classifier and the experiments were chosen by t
 specification's rule requires), and their differences are within noise (sections 13.2, 13.6), which makes the
 winner's score optimistic again. **Conservative estimate for this training procedure: κ ≈ 0.32 on the worse variant
 (≈ 0.34 on mean2min).** Changing only the seed moves single subjects by ± 0.07–0.11 κ (sd of the paired
-differences). The decoder hyper-parameters within a configuration are chosen by nested CV only.
+differences). The decoder hyper-parameters within a configuration are chosen by nested CV only. The seeds were run
+before proportion matching (section 13.10), i.e. without b; they measure the classifier's seed variance.
 
 ### 13.8 Session boundaries and steps (reporting only)
 
@@ -862,6 +928,8 @@ Mean per-subject κ, paired Δ vs `base` with 95 % bootstrap CI:
   This also bounds the effect of the pedometer having been tuned on the Walch PSG labels (section 16).
 - Not done: training with randomly jittered windows (so that the model relies less on exact boundaries and on the
   AWAKE start), which would be the next step if real watch sessions turn out to start late.
+- These scenarios used the fold models without proportion matching (b, section 13.10); b is a per-stage constant and
+  does not change how the features respond to moved boundaries.
 
 ### 13.9 Superseded results (`loso-v1`, retired configuration)
 
@@ -876,6 +944,122 @@ reason for nonstep beating mask (wake information in the Walch step features; on
 supported. The configuration is retired (the pipeline now checks that training uses exactly the inference feature
 values), the trained HMM is gated (section 12.3), the time prior is estimated, and everything above was re-run
 (`loso-v2`). The v1 numbers belong to an invalid configuration and are not used for any default.
+
+### 13.10 Stage proportions: prior exponent and proportion matching (pre-registered v3, adopted)
+
+**Problem.** The `loso-v2` default divides the classifier's posteriors by the class priors (π = 6 / 48 / 19 / 27 %
+AWAKE / LIGHT / DEEP / REM, dominated by the BIDSleep training rows) and decodes with w_e = 0.5. On Walch it predicted
+25 % DEEP / 34 % REM / 34 % LIGHT vs PSG 14 / 23 / 57 %, per-night errors of 52 min (DEEP), 54 (REM) and 95 (LIGHT),
+and 12 of 31 nights tripped the sanity flag: users would see inflated deep sleep (e.g. in Sleep as Android).
+
+**Pre-registration v3** (written to `tools/train/out/prereg-bias.md` and appended to `tools/train/out/commands.log` at
+2026-10-13T09:01:31+02:00, before any candidate code was written or run; the `loso-v2` baseline numbers were known;
+committed verbatim as [docs/prereg/prereg-bias.md](docs/prereg/prereg-bias.md), SHA-256 `75499301…c288`, with the
+worktree's log as `docs/prereg/commands-train2.log`; `tools/train/tests/test_prereg.py` checks that the two
+agree).
+Decoder term of section 7, e = w_e · (ln p − β · ln π) + b; everything else of `loso-v2` unchanged (classifier and
+fold bundles of the reproduction run `bias-base`, per-group nested selection of the decoder grid θ_g); β and b only.
+
+- **(a) prior exponent**: β ∈ {1, 0.75, 0.5, 0.25, 0} chosen per (variant, outer group) in the inner CV at θ_g by the
+  adoption rule's objective (qualify: inner κ ≥ inner κ(β = 1) − 0.01; lowest inner E; ties → higher κ, larger β).
+- **(b) proportion matching**: β = 1, b fitted per (variant, outer group) by the fixed point of section 7 on the inner
+  out-of-fold decodes of the group's Walch selection subjects at θ_g (the training fold only; never the group's own
+  subjects).
+- **(c) both**: b(β) fitted for every β of the grid, β chosen by the (a) rule on (β, b(β)) (b in-sample), BASE if
+  nothing qualifies. Stated beforehand: since −w_e · β · ln π_s is itself a per-stage constant, (c) was expected to
+  coincide with (b).
+- E = mean over nights of Σ over DEEP + REM + AWAKE + LIGHT of |predicted − true| minutes (scored 30-s chunks).
+  **Adoption rule (verbatim):** "On Walch held-out subjects, worse sampling variant: adopt the candidate with the
+  lowest mean absolute per-night minutes error summed over DEEP+REM+AWAKE+LIGHT among those whose mean per-subject
+  kappa ≥ (baseline kappa − 0.01); ties → higher kappa; if none qualifies, keep the baseline." (κ worse = min, E worse
+  = max over instantaneous / mean2min; ties = |ΔE| < 0.05 min.)
+
+**Results, Walch (PSG) held-out subjects** (paired per-subject differences vs BASE with 95 % bootstrap CIs, 10 000
+resamples; minute errors and accuracy of the worse-E variant):
+
+| candidate | κ inst. / mean2min | **κ worse** | E inst. / mean2min (min) | **E worse** | abs. error min D / R / W / L | accuracy | sanity-flagged nights inst. / mean2min (of them DEEP < 3 %) | Δκ vs BASE, inst. / mean2min | ΔE vs BASE, inst. / mean2min | decision |
+|---|---|---|---|---|---|---|---|---|---|---|
+| BASE (`loso-v2`, β = 1, b = 0) | 0.334 / 0.336 | **0.334** | 219.2 / 201.4 | **219.2** | 52.4 / 53.5 / 18.0 / 95.3 | 0.540 | 12 / 11 of 31 (0 / 0) | — | — | baseline |
+| (a) β | 0.360 / 0.350 | **0.350** | 141.5 / 156.6 | **156.6** | 36.3 / 41.7 / 18.7 / 60.0 | 0.600 | 3 / 5 (0 / 0) | +0.027 [−0.017, 0.066] / +0.014 [−0.005, 0.032] | −77.7 [−112.3, −40.6] / −44.8 [−71.1, −19.6] | qualifies |
+| **(b) b** | 0.348 / 0.339 | **0.339** | 128.3 / 146.8 | **146.8** | 33.1 / 40.8 / 19.4 / 53.5 | 0.612 | 2 / 7 (0 / 3) | +0.014 [−0.032, 0.057] / +0.003 [−0.037, 0.038] | −90.8 [−133.1, −47.9] / −54.6 [−89.5, −18.6] | **adopted** |
+| (c) β + b | 0.360 / 0.347 | **0.347** | 147.7 / 166.7 | **166.7** | 36.3 / 44.3 / 20.6 / 65.5 | 0.590 | 5 / 9 (0 / 1) | +0.026 [−0.011, 0.063] / +0.011 [−0.009, 0.032] | −71.4 [−113.0, −30.0] / −34.7 [−62.2, −8.6] | qualifies |
+
+All four qualify (threshold 0.334 − 0.01 = 0.324); (b) has the lowest worse-variant E → **adopted**. Pooled stage
+shares, % AWAKE / LIGHT / DEEP / REM (PSG: 6.3 / 57.0 / 14.1 / 22.6 instantaneous, 6.3 / 56.8 / 14.2 / 22.7 mean2min):
+
+| candidate | instantaneous | mean2min |
+|---|---|---|
+| BASE | 7.3 / 34.1 / 25.0 / 33.6 | 6.8 / 37.2 / 24.6 / 31.4 |
+| (a) β | 2.4 / 53.9 / 18.2 / 25.5 | 2.9 / 51.1 / 20.6 / 25.3 |
+| **(b) b** | 5.8 / 59.1 / 14.8 / 20.3 | 6.1 / 57.4 / 12.8 / 23.7 |
+| (c) β + b | 5.9 / 54.4 / 16.4 / 23.2 | 6.4 / 48.1 / 17.5 / 28.1 |
+
+**BIDSleep (EEG headband, secondary)**, 253 nights / 47 subjects, true shares 6.0 / 46.5 / 19.9 / 27.5 %:
+
+| candidate | κ inst. / mean2min | E inst. / mean2min | predicted shares inst. | sanity-flagged inst. / mean2min | of them DEEP > 35 % / REM > 40 % / DEEP < 3 %, inst.; mean2min | Δκ vs BASE | ΔE vs BASE |
+|---|---|---|---|---|---|---|---|
+| BASE | 0.331 / 0.357 | 171.4 / 157.2 | 6.3 / 33.0 / 25.8 / 34.9 | 103 / 100 | 36 / 76 / 3; 53 / 53 / 0 | — | — |
+| (a) β | 0.331 / 0.358 | 146.7 / 136.5 | 2.1 / 54.7 / 19.2 / 24.0 | 29 / 31 | 6 / 17 / 6; 12 / 18 / 3 | +0.000 [−0.012, 0.013] / +0.001 [−0.012, 0.012] | −23.7 [−37.8, −10.4] / −22.5 [−35.9, −9.3] |
+| **(b) b** | 0.302 / 0.325 | 166.5 / 149.0 | 5.5 / 61.1 / 14.5 / 19.0 | 18 / 28 | 1 / 5 / **12**; 0 / 14 / **15** | −0.030 [−0.043, −0.016] / −0.032 [−0.045, −0.019] | −3.8 [−21.3, 12.3] / −9.7 [−27.1, 7.9] |
+| (c) β + b | 0.315 / 0.340 | 164.0 / 146.8 | 5.7 / 55.5 / 16.7 / 22.1 | 30 / 52 | 5 / 17 / 9; 21 / 26 / 7 | −0.016 [−0.028, −0.005] / −0.017 [−0.027, −0.007] | −7.2 [−22.8, 6.9] / −10.5 [−24.2, 3.2] |
+
+(Sanity codes `SANITY_DEEP_HIGH` / `SANITY_REM_HIGH` / `SANITY_DEEP_LOW`; a night can carry more than one.) On
+BIDSleep b removes most DEEP / REM over-calls but turns the flags into a new failure: 12 / 15 of the 253 nights get
+less than 3 % DEEP (BASE: 3 / 0), the majority of b's flagged nights there; the headband labels have 20 % N3.
+
+- **All three corrections reduce the bias; none was shown to keep κ.** On Walch the summed per-night error falls by
+  35–91 min, the sanity flags from 12 / 11 to 2–9 nights, and accuracy rises from 0.54 to 0.59–0.62, because the
+  epochs moved to LIGHT are mostly LIGHT. κ moves by +0.003 … +0.027, all CIs include 0, and for the adopted (b) the
+  CI on mean2min is wide (+0.003 [−0.037, 0.038]; its lower end is far beyond the rule's −0.01 margin): (b) qualified
+  on the point estimates (0.339 ≥ 0.324), as the rule specifies, which is not evidence that no κ is lost. On BIDSleep
+  (b) costs κ −0.030 [−0.043, −0.016] / −0.032 [−0.045, −0.019]. In the inner CV, (b)'s inner κ is more than 0.01
+  below BASE's in 4 of the 10 selections (instantaneous 0.285 vs 0.312 and 0.332 vs 0.350, mean2min 0.309 vs 0.354
+  and 0.304 vs 0.328); there b is in-sample (flattering (b)) and BASE's inner κ is the winning decoder choice's on the
+  same nights (flattering BASE). (a) and (c) qualify inside the inner CV by construction.
+- **(b) vs (a) is not decided by the data**: paired (b) − (a) on Walch Δκ −0.013 [−0.036, 0.010] / −0.011
+  [−0.046, 0.022], ΔE −13.2 [−33.3, 6.1] / −9.8 [−34.8, 16.9] (reporting only, not part of the rule; section
+  "Paired per-subject differences between the corrections" of `bias-base/bias/report.md`, `pairwise` in its
+  `summary.json`, regenerated by `train.py bias-report`); the rule picks (b). (b) matches each stage separately; (a)
+  can only move along ln π, which penalizes the rarest stage AWAKE most (2–3 % predicted vs 6 %). On the
+  headband-scored BIDSleep nights (a) is better (Δκ (b) − (a) −0.030 [−0.039, −0.021] / −0.032 [−0.044, −0.020], ΔE
+  +20.0 [12.6, 27.7] / +12.8 [3.1, 22.2]): b is fitted to the Walch PSG shares (14 % DEEP), BIDSleep has 20 % N3 and
+  28 % REM, so (b) under-calls DEEP and REM there.
+- **(c) did not coincide with (b)**, contrary to the stated expectation, **mainly because (c) fell back to BASE**: in
+  3 of the 10 inner selections (instantaneous 88ebca350d3d, mean2min 27aa53fb40d2 and 3c9ea7b7f463; 47 of the 156
+  outer folds) no (β, b(β)) reached inner κ ≥ BASE − 0.01, so, as pre-registered, those groups kept BASE without any
+  b — 7 of the 31 Walch nights on instantaneous and 12 on mean2min (the worse-E variant). There (c) has BASE's E
+  (207.6 / 213.9 min vs (b) 115.3 / 171.2); on the other nights (c) and (b) are close (130.3 vs 132.1 instantaneous,
+  136.8 vs 131.4 mean2min), so the fallbacks explain most of the gap in E worse (167 vs 147). The rest comes from
+  the fixed point: the equivalence of β and b is exact only at its end point, the 8-decode budget left the 50 fits at
+  D = Σ|T − P| of 0.001–0.12 depending on β, and (c) chose among those end points by their in-sample E. (c)'s β:
+  1 with b in 16 folds, BASE fallback (β = 1, no b) in 47, 0.75 in 31, 0.5 in 47, 0 in 15 (`choiceCounts` and
+  `fallbacks` in `bias-base/bias/summary.json`).
+- Inner choices of (a): β = 0.75 in 16 of 156 outer folds, 0.5 in 46, 0.25 in 46, 0 in 48 — no stable value. Fitted b
+  per group (b): LIGHT +0.18 … +0.96, DEEP −0.18 … −0.86, AWAKE −0.31 … +0.19, REM −0.06 … +0.16; the fixed point
+  reached D ≤ 0.043 in 9 of the 10 groups (≤ 0.027 in 8; η halved to 0.5 after the first step at w_e = 0.5, where
+  η = 1 over-shoots) and D = 0.123 in one GEOMETRIC group whose decoded LIGHT share oscillated between ≈ 48.5 and
+  62.5 % over its accepted steps 3–6.
+- **Post-result code change** (disclosed in `commands.log` at the audit): at 09:19:19, after the experiment's report
+  had been read, `final_model`'s `--selection-from` check was narrowed from the whole `selection.classifier` of the
+  two summaries to its `chosen` classifier and `config` (with the decoder parameters, as before), because `loso-v2`'s
+  dict also holds the scores of configurations `bias-base` did not train. It has no effect on the candidates, the β /
+  b fits or the decision; no other change to `pulsetrain/bias.py` was made between the experiment and its commit.
+  The later audit fixes only add reporting (pairwise comparisons, per-code sanity flags, the fallback split, the
+  inner-CV κ losses, `bias-report`) and the opt-in `--allow-other-build`; re-rendered from the stored per-night
+  results, every earlier number of `summary.json` is unchanged.
+- **Final model**: b fitted with the same fixed point on the LOSO out-of-fold decodes of all 31 Walch subjects (both
+  variants pooled) at the final decoder (EXPLICIT, 0.5, 0, β = 1): b = (+0.090, +0.216, −0.318, +0.012), D = 0.006
+  after 8 decodes; on those decodes (b in-sample, reporting only) κ 0.355 / 0.347, E 124 / 144 min, shares 6.6 / 56.7
+  / 13.3 / 23.4 % (instantaneous). The validated numbers of the shipped default are the (b) row above (b fitted per
+  outer group, never on the evaluated subject).
+
+Commands: `train.py run --run bias-base --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants
+instantaneous,mean2min --selection per-group --keep-inner`, `train.py bias --run bias-base` (report
+`tools/train/out/bias-base/bias/report.md`, per-group fits `decisions.json`), `train.py bias-final --run bias-base
+--selection-from <loso-v2>/summary.json --install-model`; after the audit `train.py bias-report --run bias-base`
+(re-renders the summary / report from `results.jsonl` and `decisions.json`; originals kept in
+`bias-base/bias/orig-0918/`) and `train.py bias --run bias-base --out-name bias-033541ae --allow-other-build` (the
+whole experiment on the final build: identical `results.jsonl` and `decisions.json`).
 
 ## 14. Published results for context
 
@@ -897,8 +1081,8 @@ cited papers / repositories (`tools/train/DATASETS.md`, research notes); "4-clas
 Trivial baselines on the Walch labels: always LIGHT = 55–57 % accuracy (4-class) with κ = 0. Accuracy is therefore not
 a useful headline; kappa and macro-F1 are. With heart rate **every 2 minutes** (≈ 24 × sparser than the ≈ 5-s Apple
 Watch series in these studies), **no accelerometer** and no clock time, the research notes expected a 4-class κ of ≈
-0.2–0.3; the 0.33 obtained here (section 13; 0.32 averaged over seeds) is at the upper end of that, helped by the
-pooled BIDSleep training data, the HMM / HSMM decoding and the PSG-derived session boundaries of the emulation
+0.2–0.3; the 0.34 obtained here (section 13; 0.32 averaged over seeds without b) is at the upper end of that, helped
+by the pooled BIDSleep training data, the HMM / HSMM decoding and the PSG-derived session boundaries of the emulation
 (sections 13.8, 16), and well below the ≈ 0.5 that would point to leakage.
 
 ## 15. Synthetic validation (regression tests only)
@@ -934,12 +1118,22 @@ real PSG κ in section 13.
 
 - **Two-minute heart rate only.** Stage-specific physiology lives largely at the beat-to-beat level (HRV, respiratory
   sinus arrhythmia) and in EEG; a sample every 2 minutes conveys only slow trends. Agreement with PSG is "fair" (κ ≈
-  0.33, ≈ 0.32 averaged over training seeds) and varies strongly between people (per-subject sample sd ≈ 0.13, range
-  0.08 … 0.66); single nights can be far off.
-- **Stage proportions.** The default, chosen by kappa as the specification requires, over-calls DEEP and REM and
-  under-calls LIGHT (Walch: 25 % / 34 % / 34 % predicted vs 14 % / 23 % / 57 % true), so the written hypnograms show
-  more DEEP and REM than PSG would; per-night minute errors are ≈ 50 min for DEEP and REM, and the sanity check marks
-  about a third of the Walch nights low-confidence.
+  0.34; ≈ 0.32 averaged over training seeds, measured without proportion matching) and varies strongly between people
+  (per-subject sample sd ≈ 0.14–0.17, range −0.03 … 0.65); single nights can be far off.
+- **Stage proportions are matched on average, not per night.** Dividing the posteriors by the class priors (the
+  hybrid-HMM scaled likelihood the kappa-based selection chose) over-called DEEP and REM (Walch 25 % / 34 % predicted
+  vs 14 % / 23 % PSG). The shipped bundle's proportion-matching log-bias b (sections 7, 13.10) brings the pooled Walch
+  shares to the PSG shares (13–15 % DEEP, 20–24 % REM, 57–59 % LIGHT) and the sanity flags from 12 / 11 to 2 / 7 of 31
+  nights, with Walch κ within noise (Δκ +0.003 [−0.037, 0.038] on mean2min, so a loss of up to ≈ 0.04 is not
+  excluded); but it is one population-level constant per stage: per-night minute errors remain ≈ 33 min (DEEP), 41
+  (REM), 19 (AWAKE) and 38–53 (LIGHT), and a person whose true stage mix differs from the Walch cohort's (31 young
+  healthy adults, PSG in the lab) is pulled towards it. On the headband-scored BIDSleep nights (more N3 and REM) b
+  under-calls DEEP and REM and costs 0.03 κ, and **12–15 of the 253 nights come out with less than 3 % DEEP**
+  (`SANITY_DEEP_LOW`; 3 / 0 without b): users with more N3 than the Walch cohort may see almost no deep sleep. The
+  prior-exponent alternative (β) was as good on Walch and better on BIDSleep but lost by the pre-registered rule
+  (section 13.10). b is fitted on out-of-fold decodes of 31 Walch nights only; it should be re-fitted whenever the
+  classifier or the decoder settings change (a user who edits `emissionWeight` or `durationModel` keeps the shipped b,
+  which was fitted for EXPLICIT / 0.5 / 0).
 - **No HRV, no accelerometer.** OHealth writes neither RMSSD nor raw motion to Health Connect; step counts are ~0 in
   bed, so wake detection in bed relies on heart rate alone (AWAKE F1 is the weakest of the four stages). The model is
   trained with accelerometer-derived steps for Walch, which are themselves an emulation of a watch pedometer; removing
@@ -973,9 +1167,11 @@ real PSG κ in section 13.
   the physiology table (0.117 vs 0.070) — fail the validity gate and are not the defaults; the HMM (the app's
   fallback when no usable bundle is present) therefore keeps the specification's table, and its EM adaptation and
   personalization work as specified. The HMM's cycle-phase prior and step factors were not estimated.
-- **Selection and seed optimism.** Configuration, classifier, BIDSleep step handling and the experiments were chosen by
-  the same outer-LOSO score, and their differences are within the paired CIs; the shipped seed scored best of four
-  (0.334 vs a mean of 0.317). Read 0.32 as the expected κ of the procedure.
+- **Selection and seed optimism.** Configuration, classifier, BIDSleep step handling and the experiments were chosen
+  by the same outer-LOSO score, and their differences are within the paired CIs; the shipped seed scored best of four
+  (0.334 vs a mean of 0.317, without b). Read 0.32 as the expected κ of the procedure. The stage-proportion candidate
+  was picked from four by the outer Walch minute error, so its E (147 min) is slightly optimistic as well; its κ was
+  only a constraint.
 - **Nested selection mode.** The decoder hyper-parameters were chosen with the cheaper per-group nested selection
   (section 12.3), which is leak-free but uses ≈ 80 % of the training subjects for the choice and yields only 10
   distinct inner selections; EXPLICIT vs GEOMETRIC is not decided by them.
@@ -1003,7 +1199,7 @@ mise exec -- python -I tools/train/train.py run --run exp-v2-e2-mlp-alpha --conf
     --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch \
     --mlp-alpha 1e-2 --jobs 12
 mise exec -- python -I tools/train/train.py compare --runs loso-v2,exp-v2-e1-balanced,exp-v2-e2-mlp-alpha
-# 3. no experiment won, so loso-v2 is the complete-protocol run of the adopted setting: install its final model
+# 3. no experiment of section 13.6 won, so loso-v2 is the complete-protocol run of the adopted classifier setting
 mise exec -- python -I tools/train/train.py final --run loso-v2 --install-model
 mise exec -- python -I tools/train/train.py defaults --run loso-v2 --write   # core-algo params/TrainedDefaults.kt
 # 4. reporting only: seeds and session-boundary / steps sensitivity (sections 13.7, 13.8)
@@ -1012,17 +1208,36 @@ for n in 1 2 3; do mise exec -- python -I tools/train/train.py run --run seed-v2
     --heldout-datasets walch --seed $n --jobs 12; done
 mise exec -- python -I tools/train/train.py compare --runs loso-v2,seed-v2-s1,seed-v2-s2,seed-v2-s3
 mise exec -- python -I tools/train/train.py sensitivity --run loso-v2
-# 5. rebuild with the new defaults and check
+# 5. stage proportions (pre-registered v3, section 13.10; a build with hybrid.priorExponent / bundle stageLogBias):
+#    the adopted setting again with its inner fold models kept, the experiment, the final bundle with b
+mise exec -- python -I tools/train/train.py run --run bias-base --configs walch+bid-zero --classifiers mlp \
+    --estimators HYBRID --variants instantaneous,mean2min --selection per-group --keep-inner --jobs 24
+mise exec -- python -I tools/train/train.py bias --run bias-base --jobs 24   # other build: --allow-other-build
+mise exec -- python -I tools/train/train.py bias-report --run bias-base     # re-render its report (no algo-cli)
+mise exec -- python -I tools/train/train.py bias-final --run bias-base --out-run bias-final \
+    --selection-from tools/train/out/loso-v2/summary.json --install-model
+mise exec -- python -I tools/train/train.py defaults --run bias-final --write   # TrainedDefaults.kt (beta = 1)
+# 6. rebuild with the new defaults and check
 mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist ktlintCheck detekt
 mise exec -- python -I -m pytest tools/train/tests -q
 ```
 
 `train.py run` writes `tools/train/out/<run>/` (never committed): `config.json` (with the `algo-cli` fingerprint),
 `report.md` and `summary.json` (all numbers of section 13), `results.jsonl` (per night), `fold_selections.jsonl`
-(inner-CV choice, selection key and inner margin per outer fold), `commands.log` (every `algo-cli` call with exit
-code and duration), the fold bundles, `hmm-trained/<pool>/final.hmm-params.json` and the final model;
-`--install-model` copies the final bundle to `app/src/main/assets/models/hybrid_model.json`. `train.py report --run
-<run>` re-renders the report from the stored per-night results. Results do not depend on `--jobs` (fixed seeds,
-single-threaded BLAS). Wall times on a 24-core (8P + 16E) laptop CPU: step 1 32 min, each experiment / seed run 5–6
-min, the sensitivity analysis ≈ 2 min. The full per-subject nested selection (`--selection per-subject`, 1504 inner-CV
-runs) was started once and stopped; the logged projection was more than 2.5 h for the nested selection alone.
+(inner-CV choice, selection key and inner margin per outer fold), `commands.log` (every `algo-cli` call with exit code
+and duration), the fold bundles, `hmm-trained/<pool>/final.hmm-params.json` and the final model; `--install-model`
+copies the final bundle to `app/src/main/assets/models/hybrid_model.json`. `train.py report --run <run>` re-renders
+the report from the stored per-night results. Results do not depend on `--jobs` (fixed seeds, single-threaded BLAS).
+Wall times on a 24-core (8P + 16E) laptop CPU: step 1 32 min, each experiment / seed run 5–6 min, the sensitivity
+analysis ≈ 2 min; step 5 (from `bias-base/run.log`, `bias-base/bias/commands.log` and `tools/train/out/commands.log`):
+`bias-base` 6.4 min (385 s), `bias` 1.6 min (433 `algo-cli` calls, 09:16:57–09:18:30), `bias-final` ≈ 0.4 min
+(09:19:20–09:19:45, 17 `algo-cli` calls). `train.py bias` writes `<run>/bias/` (`summary.json`, `report.md`,
+`decisions.json` with every inner grid point and fixed-point trace, `results.jsonl`, `commands.log`; `--out-name`
+another directory); `train.py bias-report` re-renders its `summary.json` / `report.md` from `results.jsonl` and
+`decisions.json` without `algo-cli`; `bias-final` writes `out/<out-run>/` (`final/hybrid_model.json`,
+`trained_defaults.json`, `summary.json`). Both `bias` and `bias-final` refuse an `algo-cli` build other than the run's
+unless `--allow-other-build` is given (then logged and recorded in `summary.json` as `runAlgoCliSha256`; BASE must
+still reproduce the run night by night). The run directories are not committed: keep `tools/train/out/{bias-base,
+bias-final}` (and the worktree's `commands.log`) with the other runs; the pre-registration and that log are also
+committed under `docs/prereg/`. The full per-subject nested selection (`--selection per-subject`, 1504
+inner-CV runs) was started once and stopped; the logged projection was more than 2.5 h for the nested selection alone.

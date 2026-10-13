@@ -506,6 +506,13 @@ internal val hybridSection =
                     { it.algo.hybrid.elevatedAwakeFactor },
                     { s, v -> s.hybrid { it.copy(elevatedAwakeFactor = v) } },
                 ),
+                numberField(
+                    "$HYB.priorExponent",
+                    R.string.set_hyb_prior_exponent_title,
+                    R.string.set_hyb_prior_exponent_hint,
+                    { it.algo.hybrid.priorExponent },
+                    { s, v -> s.hybrid { it.copy(priorExponent = v) } },
+                ),
             ),
     )
 

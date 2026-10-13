@@ -43,8 +43,10 @@ def _keys(obj, skip=("emissions", "meanBouts", "transitions")):
 
 def test_bundle_keys_match_interchange_doc():
     b = _make("mlp")
-    assert list(b) == list(bundle.TOP_LEVEL_KEYS)
-    assert _keys(b) == bundle_doc_keys()
+    assert list(b) == [k for k in bundle.TOP_LEVEL_KEYS if k != "stageLogBias"]   # optional, absent by default
+    biased = bundle.with_stage_log_bias(b, [0.1, 0.0, -0.2, 0.1])
+    assert list(biased) == list(bundle.TOP_LEVEL_KEYS)
+    assert _keys(biased) == bundle_doc_keys()
     assert b["classOrder"] == ["AWAKE", "LIGHT", "DEEP", "REM"] and b["schemaVersion"] == 1
     assert [layer["activation"] for layer in b["classifier"]["layers"]] == ["relu", "relu", "softmax"]
 
@@ -85,6 +87,8 @@ def test_round_trip(tmp_path):
     (lambda b: b["hmm"]["transitions"].pop("remToDeep"), "hmm.transitions"),
     (lambda b: b["training"].update(subjects="3"), "training.subjects"),
     (lambda b: b.update(featureSetVersion=1.5), "featureSetVersion"),
+    (lambda b: b.update(stageLogBias=[0.0, 0.1, 0.2]), "stageLogBias"),
+    (lambda b: b.update(stageLogBias=[0.0, 0.1, float("inf"), 0.0]), "stageLogBias"),
 ])
 def test_validation_rejects(mutate, msg):
     b = copy.deepcopy(_make())
@@ -106,3 +110,12 @@ def test_nan_is_never_written():
     b["classPriors"][0] = float("nan")
     with pytest.raises(ValueError, match="non-finite"):
         dumps_pretty(b)
+
+
+def test_stage_log_bias_round_trip(tmp_path):
+    b = _make()
+    biased = bundle.with_stage_log_bias(b, [0.25, -0.5, 0.125, 0.0])
+    assert biased["stageLogBias"] == [0.25, -0.5, 0.125, 0.0] and "stageLogBias" not in b
+    p = bundle.write_bundle(tmp_path / "b.json", biased)
+    assert bundle.read_bundle(p) == biased
+    assert bundle.with_stage_log_bias(biased, None) == b

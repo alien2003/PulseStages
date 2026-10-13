@@ -105,3 +105,17 @@ def test_gate_rejection_is_explained():
     assert "failed the validity gate (hrNorm means violate DEEP < LIGHT < REM < AWAKE)" in flat
     assert "5 of 10 distinct inner selections, 78 of 156 outer folds" in flat
     assert "val HMM_EMISSIONS: EmissionTable = EmissionTable.PHYSIOLOGY" in src
+
+
+def test_prior_exponent_is_rendered():
+    def flat(src):
+        return " ".join(line.strip(" */") for line in src.splitlines())
+
+    src = render({"estimator": "HYBRID", "hybrid": HYBRID}, SELECTION, "r", "2026", "x")
+    assert "const val HYBRID_PRIOR_EXPONENT: Double = 1.0" in src and "the pre-training value" in flat(src)
+    sel = dict(SELECTION, priorExponent={"note": "chosen by the test"})
+    src = render({"estimator": "HYBRID", "hybrid": dict(HYBRID, priorExponent=0.25)}, sel, "r", "2026", "x")
+    assert "const val HYBRID_PRIOR_EXPONENT: Double = 0.25" in src and "(chosen by the test)" in flat(src)
+    assert "priorExponent" in data_class_fields("HybridParams")
+    with pytest.raises(DefaultsError, match="priorExponent"):
+        render({"estimator": "HYBRID", "hybrid": dict(HYBRID, priorExponent=-1.0)}, SELECTION, "r", "2026", "x")

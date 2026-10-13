@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.algo.hybrid
 
+import io.github.alien2003.pulsestages.algo.Fingerprints
 import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -88,6 +89,36 @@ class HybridModelTest {
         assertEquals(model.fingerprint(), reordered.fingerprint(), "key order and whitespace must not matter")
         assertNotEquals(model.fingerprint(), model.copy(modelId = "other").fingerprint())
         assertNotEquals(model.fingerprint(), model.copy(classPriors = listOf(0.2, 0.4, 0.2, 0.2)).fingerprint())
+    }
+
+    @Test
+    fun `the optional stage log-bias is validated and fingerprinted only when present`() {
+        assertNull(model.stageLogBias)
+        assertTrue("stageLogBias" !in tree, "absent from the JSON of a bundle without it")
+        // A bundle without the field keeps the fingerprint of the canonical JSON that never had the key (bundles
+        // shipped before the field existed, and the personal models keyed to them, stay valid).
+        val canonical =
+            Json {
+                encodeDefaults = true
+                explicitNulls = true
+            }
+        val full = canonical.encodeToJsonElement(HybridModel.serializer(), model).jsonObject
+        assertTrue("stageLogBias" in full)
+        assertEquals(Fingerprints.of(JsonObject(full - "stageLogBias")), model.fingerprint())
+
+        val biased = model.copy(stageLogBias = listOf(0.3, -0.2, -0.5, 0.4))
+        val parsed = HybridModel.parse(biased.toJson())
+        assertEquals(biased, parsed)
+        assertEquals(listOf(0.3, -0.2, -0.5, 0.4), parsed.stageLogBias)
+        assertEquals(biased.fingerprint(), parsed.fingerprint())
+        assertNotEquals(model.fingerprint(), biased.fingerprint())
+        assertNotEquals(biased.fingerprint(), model.copy(stageLogBias = listOf(0.3, -0.2, -0.5, 0.41)).fingerprint())
+        val zeros = JsonArray(List(4) { JsonPrimitive(0.0) })
+        assertEquals(listOf(0.0, 0.0, 0.0, 0.0), HybridModel.parse(JsonObject(tree + ("stageLogBias" to zeros)).toString()).stageLogBias)
+        val three = JsonArray(List(3) { JsonPrimitive(0.1) })
+        assertInvalid(JsonObject(tree + ("stageLogBias" to three)).toString(), "stageLogBias must have 4")
+        assertThrows(HybridModelException::class.java) { model.copy(stageLogBias = listOf(0.0, Double.NaN, 0.0, 0.0)) }
+        assertInvalid(JsonObject(tree + ("stageLogBias" to JsonPrimitive("high"))).toString(), "malformed")
     }
 
     @Test

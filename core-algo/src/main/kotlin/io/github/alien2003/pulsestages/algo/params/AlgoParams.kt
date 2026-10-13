@@ -287,8 +287,9 @@ enum class DurationModel { EXPLICIT, GEOMETRIC }
 
 /**
  * Hybrid estimator (section 8). Model weights are not parameters; they come from the model bundle. The decoder
- * defaults ([durationModel], [timePriorWeight], [emissionWeight]) are the values chosen by the nested cross-validation
- * of the open-dataset validation ([TrainedDefaults]); the pre-training values were EXPLICIT, 1.0 and 1.0.
+ * defaults ([durationModel], [timePriorWeight], [emissionWeight], [priorExponent]) are the values chosen by the
+ * nested cross-validation of the open-dataset validation ([TrainedDefaults]); the pre-training values were EXPLICIT,
+ * 1.0, 1.0 and 1.0.
  */
 @Serializable
 data class HybridParams(
@@ -301,6 +302,12 @@ data class HybridParams(
     val emissionWeight: Double = TrainedDefaults.HYBRID_EMISSION_WEIGHT,
     /** AWAKE scaled-likelihood multiplier on elevated-HR nights. */
     val elevatedAwakeFactor: Double = 0.6,
+    /**
+     * Exponent β of the class priors in the scaled likelihood `p(s | x) / prior_s^β`: 1 divides the posteriors by the
+     * training class frequencies (the classic hybrid HMM), 0 uses the posteriors as they are (which favours the
+     * frequent stages), values in between interpolate.
+     */
+    val priorExponent: Double = TrainedDefaults.HYBRID_PRIOR_EXPONENT,
 )
 
 /** What to write for epochs inside long data gaps. */

@@ -4,6 +4,7 @@ import io.github.alien2003.pulsestages.algo.SleepStager
 import io.github.alien2003.pulsestages.algo.metrics.IntervalScoring
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
@@ -38,6 +39,11 @@ class BundledModelAssetTest {
         assertTrue(model.modelId.isNotBlank())
         assertTrue(model.classPriors.all { it > 0 } && abs(model.classPriors.sum() - 1) < 1e-6)
         assertTrue(checkNotNull(model.training?.dataset).isNotBlank())
+        // The proportion-matching log-bias (ALGORITHM.md section 7), when the bundle carries one: centred, finite.
+        model.stageLogBias?.let { bias ->
+            assertEquals(SleepStage.COUNT, bias.size)
+            assertTrue(bias.all { it.isFinite() } && abs(bias.sum()) < 1e-6, "$bias")
+        }
     }
 
     @Test

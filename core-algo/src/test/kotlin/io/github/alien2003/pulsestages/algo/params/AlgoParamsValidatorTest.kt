@@ -33,7 +33,7 @@ class AlgoParamsValidatorTest {
                         epsilon = 0.0,
                     ),
                 rules = base.rules.copy(remMinHrNorm = Double.NaN, calibrationThresholdShift = -0.1),
-                hybrid = base.hybrid.copy(maxBoutMin = 0),
+                hybrid = base.hybrid.copy(maxBoutMin = 0, priorExponent = -0.5),
                 post = base.post.copy(minDeepMin = -5.0, targetRemMin = 0.5),
             )
 
@@ -52,6 +52,7 @@ class AlgoParamsValidatorTest {
                 "rules.remMinHrNorm",
                 "rules.calibrationThresholdShift",
                 "hybrid.maxBoutMin",
+                "hybrid.priorExponent",
                 "post.minDeepMin",
                 "post.targetRemMin",
             ),

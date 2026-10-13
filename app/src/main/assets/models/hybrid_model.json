@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "modelId": "pulsestages-walch+bidsleep-mlp-loso-v2",
+  "modelId": "pulsestages-walch+bidsleep-mlp-bias-final",
   "featureSetVersion": 1,
   "featureNames": ["hrNorm", "hrVar", "hrSlope", "t", "cycleSin", "cycleCos", "cycleAvailable", "stepsLog1p", "hrRelSmooth", "hrRelRaw", "relMean5", "relStd5", "relMin5", "relMax5", "slope5", "relMean15", "relStd15", "relMin15", "relMax15", "slope15", "relMean30", "relStd30", "relMin30", "relMax30", "slope30", "relMean60", "relStd60", "relMin60", "relMax60", "slope60", "acfLag1", "acfLag2", "acfLag3", "minToHrMin", "minToHrMax", "stepsWin5Log1p", "noDataFrac15", "hasData", "hoursSinceStart", "hoursToEnd"],
   "standardization": {
@@ -234,7 +234,8 @@
     "subjects": 78,
     "nights": 284,
     "variants": ["instantaneous", "mean2min"],
-    "createdAt": "2026-10-13T05:42:37Z",
-    "notes": "final model, run loso-v2: all 78 subjects of walch+bidsleep; training configuration walch+bid-zero: Walch + BIDSleep; BIDSleep nights have no step channel and keep the step features that algo-cli computes for them (0 steps, as the app does for a night without step records); validated by LOSO (tools/train report); decoder defaults {\"durationModel\":\"EXPLICIT\",\"emissionWeight\":0.5,\"timePriorWeight\":0.0}; MLP 32x32 relu (adam, alpha=0.0001, early stopping, random_state=0, class_weight=none); policy for missing step channels: zero; training variants: instantaneous, mean2min; label statistics from instantaneous; rows: 225973; hrNorm means violate DEEP < LIGHT < REM < AWAKE (per-night EM will roll back)"
-  }
+    "createdAt": "2026-10-13T07:07:57Z",
+    "notes": "final model, run bias-base: all 78 subjects of walch+bidsleep; training configuration walch+bid-zero: Walch + BIDSleep; BIDSleep nights have no step channel and keep the step features that algo-cli computes for them (0 steps, as the app does for a night without step records); validated by LOSO (tools/train report); decoder defaults {\"durationModel\":\"EXPLICIT\",\"emissionWeight\":0.5,\"timePriorWeight\":0.0}; MLP 32x32 relu (adam, alpha=0.0001, early stopping, random_state=0, class_weight=none); policy for missing step channels: zero; training variants: instantaneous, mean2min; label statistics from instantaneous; rows: 225973; hrNorm means violate DEEP < LIGHT < REM < AWAKE (per-night EM will roll back); stage-proportion experiment (tools/train/out/prereg-bias.md) on run bias-base: candidate B (b) proportion matching b adopted; decoder {\"durationModel\":\"EXPLICIT\",\"emissionWeight\":0.5,\"priorExponent\":1.0,\"timePriorWeight\":0.0}; stageLogBias fitted on the LOSO out-of-fold decodes of the walch subjects (both headline variants pooled) so that the decoded stage shares match the PSG shares"
+  },
+  "stageLogBias": [0.09010846562919099, 0.21599243577458574, -0.3182067760520693, 0.012105874648292604]
 }

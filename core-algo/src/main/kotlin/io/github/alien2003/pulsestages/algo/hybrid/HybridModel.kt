@@ -9,6 +9,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlin.math.abs
 
 /** A model bundle that cannot be parsed or is internally inconsistent. */
@@ -161,7 +164,8 @@ data class TrainingInfo(
 
 /**
  * The hybrid model bundle (docs/INTERCHANGE.md §3): standardization and weights of the emission classifier, class
- * priors, gamma bout durations, bout transitions, the initial bout distribution and the time-of-night prior.
+ * priors, gamma bout durations, bout transitions, the initial bout distribution, the time-of-night prior and an
+ * optional per-stage log-bias of the scaled likelihoods.
  *
  * Construction validates the structure (dimensions, probability vectors summing to 1, positive gamma parameters and
  * standard deviations, finite weights) and throws [HybridModelException] otherwise. Whether the bundle fits this
@@ -184,6 +188,10 @@ data class TrainingInfo(
  * @property timePrior `P(stage | time bin since the session start)`.
  * @property hmm optional supervised estimates for the HMM (informational).
  * @property training optional provenance.
+ * @property stageLogBias optional per-stage additive log-bias `[bA, bL, bD, bR]` of the scaled likelihoods (added to
+ *   the emission score of every epoch with heart-rate data; null = no bias). Fitted by the training scripts on
+ *   out-of-fold decodes of the training nights so that the decoded stage shares match the true ones (proportion
+ *   matching); it belongs to the classifier it corrects, hence to the bundle and its fingerprint.
  */
 @Serializable
 data class HybridModel(
@@ -201,16 +209,22 @@ data class HybridModel(
     val timePrior: TimePrior,
     val hmm: HmmEstimates? = null,
     val training: TrainingInfo? = null,
+    val stageLogBias: List<Double>? = null,
 ) {
     init {
         HybridModelValidator.validate(this)
     }
 
-    private val fingerprintValue: String by lazy { Fingerprints.of(JSON.encodeToJsonElement(serializer(), this)) }
+    private val fingerprintValue: String by lazy {
+        val tree = JSON.encodeToJsonElement(serializer(), this).jsonObject
+        Fingerprints.of(JsonObject(tree.filterNot { (key, value) -> key in OMITTED_WHEN_ABSENT && value is JsonNull }))
+    }
 
     /**
      * SHA-256 (lower-case hex) of the canonical JSON of the bundle (every field, object keys sorted, no whitespace).
-     * It identifies the model in the params hash.
+     * It identifies the model in the params hash. Optional fields introduced after the first bundles ([stageLogBias])
+     * are left out when absent, so a bundle without them keeps the fingerprint it always had (and personal models
+     * fitted for it stay valid).
      */
     fun fingerprint(): String = fingerprintValue
 
@@ -243,6 +257,9 @@ data class HybridModel(
     companion object {
         /** The only supported [schemaVersion]. */
         const val SCHEMA_VERSION: Int = 1
+
+        /** Optional keys that do not enter the fingerprint when they are null (added after schema 1 shipped). */
+        private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias")
 
         private val JSON: Json =
             Json {
@@ -298,6 +315,10 @@ internal object HybridModelValidator {
         ensure(model.timePrior.table.isNotEmpty()) { "timePrior.table is empty" }
         model.timePrior.table.forEachIndexed { i, row -> probabilities("timePrior.table[$i]", row) }
         model.hmm?.emissions?.let { validateEmissions(it) }
+        model.stageLogBias?.let { bias ->
+            ensure(bias.size == SleepStage.COUNT) { "stageLogBias must have ${SleepStage.COUNT} entries, has ${bias.size}" }
+            ensure(bias.all { it.isFinite() }) { "stageLogBias entries must be finite: $bias" }
+        }
     }
 
     private fun validateStandardization(

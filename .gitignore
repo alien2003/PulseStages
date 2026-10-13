@@ -24,9 +24,9 @@ output-metadata.json
 keystore.properties
 
 # Python training tooling
-tools/train/.venv/
-tools/train/data/
-tools/train/out/
+tools/train/.venv
+tools/train/data
+tools/train/out
 __pycache__/
 *.pyc
 

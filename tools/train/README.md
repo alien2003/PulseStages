@@ -90,6 +90,47 @@ mise exec -- python -I tools/train/train.py compare --runs loso-v2,exp-v2-e2-mlp
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py sensitivity --run loso-v2   # session boundaries / steps
 ```
 
+Stage-proportion experiment (pre-registered: `docs/prereg/prereg-bias.md`, a verbatim copy of
+`tools/train/out/prereg-bias.md` with SHA-256 in `docs/prereg/prereg-bias.md.sha256` and the worktree's timestamped
+log in `docs/prereg/commands-train2.log`, checked by `tests/test_prereg.py`; ALGORITHM.md section 13.10) and its
+final model, on a run made with `--keep-inner` (the inner-CV fold models are needed):
+
+```sh
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run bias-base --configs walch+bid-zero \
+    --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --keep-inner --jobs 24
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py bias --run bias-base --jobs 24     # bias/report.md
+mise exec -- python -I tools/train/train.py bias-report --run bias-base      # re-render it from results.jsonl
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py bias-final --run bias-base --out-run bias-final \
+    --selection-from tools/train/out/loso-v2/summary.json --install-model
+mise exec -- python -I tools/train/train.py defaults --run bias-final --write
+```
+
+`bias` (`pulsetrain/bias.py`) keeps the run's classifier, fold bundles and per-group decoder choice and changes only
+the decoder's prior exponent β (`hybrid.priorExponent`, inner-CV grid {1, 0.75, 0.5, 0.25, 0}) and the bundle's
+per-stage log-bias b (`stageLogBias`, fitted per outer group by a deterministic fixed point on the inner out-of-fold
+decodes of the Walch selection subjects so that the decoded stage shares match the PSG shares): candidates BASE, (a)
+β, (b) b, (c) both, the pre-registered adoption rule (lowest worse-variant summed per-night minute error among
+candidates with κ ≥ BASE − 0.01), paired CIs, shares, sanity flags and BIDSleep secondary numbers. It fails unless
+BASE reproduces the run night by night and the inner β = 1 kappas equal the run's selection scores. Its
+`summary.json` / `report.md` also carry reporting-only numbers outside the rule: paired differences between the
+corrections (`pairwise`, e.g. B − A), sanity flags per warning code, outer folds per choice with fallbacks told apart
+(`choiceCounts`), the E split of nights whose group fell back to BASE (`fallbacks`) and the inner selections where a
+candidate's inner κ is more than 0.01 below BASE's (`innerKappaBelowBase`); `bias-report` recomputes both files from
+the stored `results.jsonl` / `decisions.json` without algo-cli. `bias-final` fits b for the final bundle on the LOSO
+out-of-fold decodes of all Walch subjects at the final decoder parameters and writes
+`out/<out-run>/{final/hybrid_model.json, trained_defaults.json, summary.json}` for `defaults`; with
+`--selection-from` the other run's decoder parameters and chosen classifier / configuration must equal this run's
+(the rest of its `selection.classifier`, e.g. scores of configurations this run did not train, may differ).
+
+`bias` and `bias-final` decode with the algo-cli build recorded in the run's `config.json` and refuse any other: the
+shipped experiment (`bias-base`) was made with build `0fe61172…`, the tree's later build is `033541ae…`. To re-run on
+a newer build pass `--allow-other-build` (logged, recorded as `runAlgoCliSha256` in `summary.json`; BASE must still
+reproduce the run night by night) and `--out-name` to keep the original results; `bias --run bias-base --out-name
+bias-033541ae --allow-other-build` reproduced `bias/results.jsonl` and `decisions.json` byte for byte. Run outputs
+are never committed: when a worktree is removed, move its `out/bias-base`, `out/bias-final`, `out/prereg-bias.md` and
+`out/commands.log` next to the other runs of the main checkout's `tools/train/out`, since `defaults --run bias-final`
+needs `bias-final`.
+
 `JAVA_OPTS=-Xmx2g` only caps the heap of each algo-cli JVM (24 of them run in parallel); it does not change results.
 The shipped model and defaults come from the steps listed with their exact commands in ALGORITHM.md, section 17
 (run `loso-v2`, the two pre-registered experiments re-applied to its selection, the adopted setting with the
@@ -102,7 +143,8 @@ every phase). Rebuild algo-cli only between runs and log the rebuild in `tools/t
 
 `defaults` renders `out/<run>/trained_defaults.json` into the generated Kotlin object `TrainedDefaults`
 (`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`,
-`emissionWeight`, `timePriorWeight`) and HMM (`emissions`, `meanBouts`, `transitions`) defaults from it. The HMM
+`emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it) and HMM (`emissions`, `meanBouts`,
+`transitions`) defaults from it. The HMM
 fields hold the supervised estimates only when HMM-trained beat the physiology table by the selection rule;
 otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` / `TransitionWeights()`, and `HmmParams.PHYSIOLOGY`
 always gives the specification's table.
@@ -215,6 +257,7 @@ hybrid/<config>/<variant>/<lr|mlp>/metrics/<group>.json      outer evaluation
 results.jsonl fold_selections.jsonl summary.json report.md   per-night results, per-fold choices, aggregates
 final/hybrid_model.json trained_defaults.json
 sensitivity/{summary.json,report.md}         train.py sensitivity
+bias/{summary.json,report.md,decisions.json,results.jsonl}   train.py bias (stage-proportion experiment; bias-report)
 ```
 
 ### algo-cli interface (verified against the real launcher in PART B)
@@ -253,7 +296,8 @@ Checked on real night files with the installDist launcher; `tests/fake_algo_cli.
 
 Raw downloads (`data/raw/`) and everything derived from them (`data/nights/`, `out/`, models in progress) stay local
 and are never committed — only the scripts, `requirements.txt`, the tests and the links / citations in DATASETS.md
-are (the final model is committed as an app asset). Downloaded files are treated as untrusted input: nothing from
+are (the final model is committed as an app asset; the stage-proportion pre-registration and its command log, which
+hold no data but aggregate numbers, are committed under `docs/prereg/`). Downloaded files are treated as untrusted input: nothing from
 them is executed, and every script that reads them is run with `python -I` (isolated mode: no current directory or
 user site-packages on `sys.path`).
 
@@ -262,7 +306,8 @@ user site-packages on `sys.path`).
 ```
 download.py            dataset download + checksum verification
 prepare.py             night-file generation (all variants), summary.csv, manifest.json
-train.py               training / LOSO CLI (run | report | final | defaults | compare | sensitivity)
+train.py               training / LOSO CLI (run | report | final | defaults | compare | sensitivity | bias | bias-report |
+                       bias-final)
 pulsetrain/ohealth.py  2-min HR resampling, session windows, label mapping, coverage proxy
 pulsetrain/pedometer.py  accelerometer step detector
 pulsetrain/walch.py    sleep-accel readers;  pulsetrain/bidsleep.py  BIDSleep readers
@@ -275,5 +320,6 @@ pulsetrain/loso.py     folds, nested selection, LOSO orchestration;  pulsetrain/
 pulsetrain/report.py   metrics, selection rule + HMM validity gate, paired bootstrap, report.md
 pulsetrain/train_final.py  final model + trained_defaults.json;  pulsetrain/kotlin_defaults.py  TrainedDefaults.kt
 pulsetrain/robustness.py   post-hoc: cross-run comparisons, session-boundary sensitivity, no-steps evaluation
+pulsetrain/bias.py     pre-registered stage-proportion experiment (prior exponent, proportion matching) + its final model
 tests/                 pytest (synthetic data only; tests/fake_algo_cli.py stands in for algo-cli)
 ```

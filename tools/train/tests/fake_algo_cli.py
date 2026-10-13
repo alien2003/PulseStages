@@ -209,6 +209,8 @@ def predict(n, rows, estimator, params, bundle):
     else:
         hp = params.get("hybrid", {})
         ew, tw = hp.get("emissionWeight", 1.0), hp.get("timePriorWeight", 1.0)
+        beta = hp.get("priorExponent", 1.0)
+        bias = bundle.get("stageLogBias") or [0.0] * 4
         prior = bundle["classPriors"]
         table, bm = bundle["timePrior"]["table"], bundle["timePrior"]["binMinutes"]
         for r in rows:
@@ -217,7 +219,8 @@ def predict(n, rows, estimator, params, bundle):
                 continue
             p = classify(bundle, r["hybrid"])
             tp = table[min(int(r["epoch"] // bm), len(table) - 1)]
-            sc = [ew * math.log(max(p[i], 1e-300) / prior[i]) + tw * math.log(tp[i] / prior[i]) for i in range(4)]
+            sc = [ew * (math.log(max(p[i], 1e-300)) - beta * math.log(prior[i])) + bias[i]
+                  + tw * math.log(tp[i] / prior[i]) for i in range(4)]
             pred.append(STAGES[max(range(4), key=lambda i: sc[i])])
         if hp.get("durationModel", "EXPLICIT") == "GEOMETRIC":
             sm = list(pred)

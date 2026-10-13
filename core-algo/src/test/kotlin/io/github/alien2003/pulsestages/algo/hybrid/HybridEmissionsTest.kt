@@ -74,12 +74,57 @@ class HybridEmissionsTest {
         delta: DoubleArray?,
         k: Int,
         row: DoubleArray,
+        bundle: HybridModel = model,
     ) {
         val posterior = logPosterior(night.features.heartRate.hrNorm[night.grid.position(k)], delta)
+        val beta = params.hybrid.priorExponent
         for (s in 0 until SleepStage.COUNT) {
-            val scaled = if (night.sessionHasData(k)) params.hybrid.emissionWeight * (posterior[s] - ln(model.classPriors[s])) else 0.0
+            val bias = bundle.stageLogBias?.get(s) ?: 0.0
+            val weight = params.hybrid.emissionWeight
+            val scaled = if (night.sessionHasData(k)) weight * (posterior[s] - beta * ln(bundle.classPriors[s])) + bias else 0.0
             assertEquals(scaled + timeTerm(k, s, params), row[s], 1e-9, "k=$k s=$s delta=${delta?.toList()}")
         }
+    }
+
+    @Test
+    fun `the prior exponent and the bundle's stage log-bias act on the epochs with heart-rate data`() {
+        val start = synthetic.input.sessionStartMs
+        val input =
+            synthetic.input.copy(
+                steps = emptyList(),
+                heartRate = synthetic.input.heartRate.filter { it.timeMs !in start + 100 * minute until start + 140 * minute },
+            )
+        val biased = model.copy(stageLogBias = listOf(0.4, -0.1, -0.7, 0.25))
+        for (beta in listOf(0.0, 0.35, 1.0, 1.6)) {
+            val params =
+                AlgoParams().let { it.copy(hybrid = it.hybrid.copy(emissionWeight = 0.8, timePriorWeight = 0.3, priorExponent = beta)) }
+            val night = NightPreparer.prepare(input, params)
+            for (bundle in listOf(model, biased)) {
+                val rows = HybridEmissions(night, bundle, DenseNetwork(bundle), null).withOffsets(zero)
+                for (k in rows.indices) assertRow(night, params, null, k, rows[k], bundle)
+            }
+        }
+    }
+
+    @Test
+    fun `a change of the prior exponent is a stage log-bias of w_e times the change times ln prior`() {
+        // e(beta) = w (ln p - beta ln pi) = e(1) + w (1 - beta) ln pi: both are per-stage constants on the epochs
+        // with heart-rate data, so a fitted stage log-bias absorbs any beta (ALGORITHM.md section 7).
+        val weight = 0.5
+        val beta = 0.25
+        val withBeta = AlgoParams().let { it.copy(hybrid = it.hybrid.copy(emissionWeight = weight, priorExponent = beta)) }
+        val asBias = withBeta.copy(hybrid = withBeta.hybrid.copy(priorExponent = 1.0))
+        val bias = model.classPriors.map { weight * (1 - beta) * ln(it) }
+        val biased = model.copy(stageLogBias = bias)
+        val nightBeta = NightPreparer.prepare(synthetic.input, withBeta)
+        val nightBias = NightPreparer.prepare(synthetic.input, asBias)
+        val a = HybridEmissions(nightBeta, model, DenseNetwork(model), null).withOffsets(zero)
+        val b = HybridEmissions(nightBias, biased, DenseNetwork(biased), null).withOffsets(zero)
+        for (k in a.indices) for (s in 0 until SleepStage.COUNT) assertEquals(a[k][s], b[k][s], 1e-12, "k=$k s=$s")
+        val stagesBeta = HybridEstimator(model).estimate(synthetic.input, withBeta).stages
+        val stagesBias = HybridEstimator(biased).estimate(synthetic.input, asBias).stages
+        assertTrue(stagesBeta.size > 1)
+        assertEquals(stagesBeta, stagesBias)
     }
 
     @Test

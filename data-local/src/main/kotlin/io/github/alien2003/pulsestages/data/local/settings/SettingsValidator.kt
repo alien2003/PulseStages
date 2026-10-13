@@ -282,6 +282,7 @@ private fun Checker.checkHybrid(
     int("$p.maxBoutMin", v.maxBoutMin, SettingsLimits.maxBoutMin)
     atLeast("$p.emissionWeight", v.emissionWeight, 0.0)
     atLeast("$p.elevatedAwakeFactor", v.elevatedAwakeFactor, 0.0)
+    atLeast("$p.priorExponent", v.priorExponent, 0.0)
 }
 
 private fun Checker.checkPost(
