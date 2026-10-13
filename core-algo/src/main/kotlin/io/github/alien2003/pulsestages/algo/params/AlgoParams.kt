@@ -45,6 +45,18 @@ data class PreprocessParams(
     val minCoverage: Double = 0.6,
     /** Between this and [minCoverage] the rules estimator is used; below it the night is skipped. */
     val rulesMinCoverage: Double = 0.4,
+    /**
+     * Lower bound (bpm) of the Hampel scale 1.4826·MAD. Heart rate is stored in whole bpm, so a window with three
+     * equal readings has MAD = 0; without a floor every 1-bpm deviation would be "replaced" and the variability
+     * features flattened. With the default threshold 3 a deviation must exceed 3 bpm in such windows.
+     */
+    val hampelMinScaleBpm: Double = 1.0,
+    /**
+     * Sessions shorter than this many minutes are not estimated
+     * ([io.github.alien2003.pulsestages.algo.model.NotEstimatedReason.SESSION_TOO_SHORT]); 0 disables the gate. The
+     * app filters naps by its source setting before calling the estimators and leaves this at 0.
+     */
+    val minSessionMin: Double = 0.0,
 )
 
 /** Per-epoch features and night-level context (section 2). */
@@ -82,6 +94,12 @@ data class FeatureParams(
     val useRespiratoryRate: Boolean = true,
     /** Weight of the respiratory-rate variability term. */
     val respiratoryRateWeight: Double = 0.5,
+    /** Length (minutes, centred) of the rolling median that defines the SpO2 baseline for desaturations. */
+    val spo2MedianWindowMin: Double = 60.0,
+    /** An epoch uses the nearest HRV (RMSSD) sample only if it is at most this far from the epoch midpoint. */
+    val hrvMaxDistanceMin: Double = 5.0,
+    /** Respiratory-rate variability: std of the per-epoch rate in ±[respiratoryHalfWindowEpochs]. */
+    val respiratoryHalfWindowEpochs: Int = 5,
 )
 
 /** A univariate Gaussian. */
@@ -189,6 +207,17 @@ data class RulesParams(
     val remMinHrNorm: Double = 1.3,
     val remMinHrVar: Double = 1.1,
     val remMinT: Double = 0.25,
+    /**
+     * Pseudo-posterior of the chosen stage (the other three share the rest equally). The rules estimator has no
+     * probabilistic model; these values only feed post-processing and the confidence.
+     */
+    val pseudoPosterior: Double = 0.85,
+    /**
+     * Proportion calibration for the rules (they have no state priors to shift): a per-stage log-prior offset δ moves
+     * the hrNorm thresholds by this amount per unit of δ in favour of the stage (deepMaxHrNorm + c·δ_DEEP,
+     * remMinHrNorm − c·δ_REM, awakeMinHrNorm − c·δ_AWAKE). 0 disables calibration for the rules.
+     */
+    val calibrationThresholdShift: Double = 0.25,
 )
 
 /** Explicit-duration (HSMM) or geometric (plain HMM) decoding for the hybrid estimator. */

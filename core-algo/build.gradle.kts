@@ -7,6 +7,8 @@ import org.gradle.api.artifacts.result.ResolvedDependencyResult
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
+    // Test-only helpers shared with :algo-cli's tests (bundle training on synthetic nights); never on runtimeClasspath.
+    `java-test-fixtures`
 }
 
 kotlin {
@@ -15,6 +17,8 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+
+    testFixturesImplementation(libs.kotlinx.serialization.json)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

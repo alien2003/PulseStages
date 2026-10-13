@@ -1,0 +1,160 @@
+package io.github.alien2003.pulsestages.algo.hybrid
+
+import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class HybridModelTest {
+    private val model = MinimalBundles.logreg()
+    private val tree: JsonObject = Json.parseToJsonElement(model.toJson()).jsonObject
+
+    /** [element] with the value at [path] (object keys or array indices) replaced by [value]; null removes a key. */
+    private fun replaced(
+        element: JsonElement,
+        path: List<Any>,
+        value: JsonElement?,
+    ): JsonElement {
+        if (path.isEmpty()) return checkNotNull(value)
+        val head = path.first()
+        return when (element) {
+            is JsonObject -> {
+                val map = element.toMutableMap()
+                val key = head as String
+                if (path.size == 1 &&
+                    value == null
+                ) {
+                    map.remove(key)
+                } else {
+                    map[key] = replaced(checkNotNull(element[key]), path.drop(1), value)
+                }
+                JsonObject(map)
+            }
+
+            is JsonArray -> {
+                val list = element.toMutableList()
+                val index = head as Int
+                list[index] = replaced(list[index], path.drop(1), value)
+                JsonArray(list)
+            }
+
+            else -> {
+                error("cannot descend into $element")
+            }
+        }
+    }
+
+    private fun mutated(
+        vararg path: Any,
+        value: JsonElement?,
+    ): String = replaced(tree, path.toList(), value).toString()
+
+    private fun reversedKeys(element: JsonElement): JsonElement =
+        when (element) {
+            is JsonObject -> JsonObject(element.entries.reversed().associate { (k, v) -> k to reversedKeys(v) })
+            is JsonArray -> JsonArray(element.map { reversedKeys(it) })
+            else -> element
+        }
+
+    private fun assertInvalid(
+        json: String,
+        expectedMessagePart: String,
+    ) {
+        val error = assertThrows(HybridModelException::class.java) { HybridModel.parse(json) }
+        assertTrue(
+            error.message.orEmpty().contains(expectedMessagePart),
+            "message '${error.message}' should contain '$expectedMessagePart'",
+        )
+    }
+
+    @Test
+    fun `bundles round-trip through JSON with a stable fingerprint`() {
+        val parsed = HybridModel.parse(model.toJson())
+
+        assertEquals(model, parsed)
+        assertEquals(model.fingerprint(), parsed.fingerprint())
+        assertTrue(Regex("[0-9a-f]{64}").matches(model.fingerprint()))
+        val reordered = HybridModel.parse(reversedKeys(tree).toString())
+        assertEquals(model.fingerprint(), reordered.fingerprint(), "key order and whitespace must not matter")
+        assertNotEquals(model.fingerprint(), model.copy(modelId = "other").fingerprint())
+        assertNotEquals(model.fingerprint(), model.copy(classPriors = listOf(0.2, 0.4, 0.2, 0.2)).fingerprint())
+    }
+
+    @Test
+    fun `unknown keys are ignored and optional sections may be absent`() {
+        val withExtra = JsonObject(tree + ("validationReport" to JsonPrimitive("ignored")))
+        assertEquals(model, HybridModel.parse(withExtra.toString()))
+        assertNull(HybridModel.parse(mutated("hmm", value = null)).hmm)
+    }
+
+    @Test
+    fun `structural problems are rejected with a reason`() {
+        assertInvalid("{", "malformed")
+        assertInvalid(mutated("durations", value = null), "malformed")
+        assertInvalid(mutated("schemaVersion", value = JsonPrimitive(2)), "schemaVersion")
+        assertInvalid(mutated("classOrder", 0, value = JsonPrimitive("LIGHT")), "classOrder")
+        assertInvalid(mutated("featureNames", 1, value = JsonPrimitive("hrNorm")), "duplicates")
+        assertInvalid(mutated("standardization", "std", 3, value = JsonPrimitive(0.0)), "standardization.std")
+        val shortMean = JsonArray(checkNotNull(checkNotNull(tree["standardization"]).jsonObject["mean"]).jsonArray.drop(1))
+        assertInvalid(mutated("standardization", "mean", value = shortMean), "standardization needs")
+        assertInvalid(mutated("classifier", "layers", 0, "weights", 2, value = JsonArray(listOf(JsonPrimitive(1.0)))), "inputs")
+        assertInvalid(mutated("classifier", "layers", 0, "bias", value = JsonArray(List(3) { JsonPrimitive(0.0) })), "weight rows")
+        assertInvalid(mutated("classifier", "layers", 0, "activation", value = JsonPrimitive("relu")), "activation must be SOFTMAX")
+        assertInvalid(mutated("classifier", "layers", 0, "activation", value = JsonPrimitive("tanh")), "malformed")
+        assertInvalid(mutated("classPriors", 0, value = JsonPrimitive(0.0)), "classPriors entries must be positive")
+        assertInvalid(mutated("classPriors", 0, value = JsonPrimitive(0.3)), "classPriors must sum to 1")
+        assertInvalid(mutated("boutTransitions", 1, 0, value = JsonPrimitive(-0.2)), "non-negative")
+        assertInvalid(mutated("boutTransitions", 2, 1, value = JsonPrimitive(0.5)), "boutTransitions[2] must sum to 1")
+        assertInvalid(mutated("initialStage", value = JsonArray(List(3) { JsonPrimitive(1.0 / 3) })), "initialStage must have 4")
+        assertInvalid(mutated("durations", "DEEP", "shape", value = JsonPrimitive(0.0)), "durations.DEEP")
+        assertInvalid(mutated("durations", "AWAKE", "scale", value = JsonPrimitive(-1.0)), "durations.AWAKE")
+        assertInvalid(mutated("timePrior", "binMinutes", value = JsonPrimitive(0.0)), "binMinutes")
+        assertInvalid(mutated("timePrior", "table", 1, 0, value = JsonPrimitive(0.9)), "timePrior.table[1]")
+        assertInvalid(mutated("timePrior", "table", value = JsonArray(emptyList())), "timePrior.table is empty")
+        assertInvalid(model.toJson().replaceFirst("1.5,", "NaN,"), "malformed")
+    }
+
+    @Test
+    fun `logreg must be a single layer and mlp layers must chain`() {
+        val hidden = DenseLayer(List(3) { List(model.featureNames.size) { 0.1 } }, List(3) { 0.0 }, Activation.RELU)
+        val output = DenseLayer(List(4) { List(3) { 0.2 } }, List(4) { 0.0 }, Activation.SOFTMAX)
+        val mlp = model.copy(classifier = ClassifierSpec(ClassifierType.MLP, listOf(hidden, output)))
+        assertEquals(mlp, HybridModel.parse(mlp.toJson()))
+
+        val error =
+            assertThrows(HybridModelException::class.java) {
+                model.copy(classifier = ClassifierSpec(ClassifierType.LOGREG, listOf(hidden, output)))
+            }
+        assertTrue(error.message.orEmpty().contains("logreg"))
+        assertThrows(HybridModelException::class.java) {
+            model.copy(classifier = ClassifierSpec(ClassifierType.MLP, listOf(hidden, output.copy(weights = List(4) { List(2) { 0.2 } }))))
+        }
+    }
+
+    @Test
+    fun `compatibility with this build's features is checked separately`() {
+        assertNull(model.compatibilityProblem())
+        assertTrue(
+            model
+                .copy(featureSetVersion = 2)
+                .compatibilityProblem()
+                .orEmpty()
+                .contains("featureSetVersion 2"),
+        )
+        val renamed = HybridFeatureExtractor.FEATURE_NAMES.toMutableList().also { it[5] = "somethingElse" }
+        val problem = MinimalBundles.logreg(featureNames = renamed).compatibilityProblem().orEmpty()
+        assertTrue(problem.contains("index 5") && problem.contains("somethingElse"), problem)
+        val shorter = MinimalBundles.logreg(featureNames = HybridFeatureExtractor.FEATURE_NAMES.dropLast(1)).compatibilityProblem()
+        assertTrue(shorter.orEmpty().contains("index ${HybridFeatureExtractor.FEATURE_NAMES.size - 1}"), shorter)
+    }
+}
