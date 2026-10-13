@@ -64,13 +64,29 @@ sealed interface UiText {
     }
 }
 
-/** Resolves this text with [resources]. */
+/**
+ * Resolves this text with [resources]. A text without arguments is read as it is: `getString(id, *emptyArray())` would
+ * still run `String.format` and throw on a literal `%` (the unit "%", marked `formatted="false"`). A text with
+ * arguments is formatted, so its resource must write a literal percent sign as `%%`.
+ */
 @Suppress("SpreadOperator") // Resources.getString takes Java varargs; the arrays are a handful of elements.
 fun UiText.resolve(resources: Resources): String =
     when (this) {
-        is UiText.Res -> resources.getString(id, *args.resolveArgs(resources))
-        is UiText.Plural -> resources.getQuantityString(id, count, *args.resolveArgs(resources))
-        is UiText.Verbatim -> value
+        is UiText.Res -> {
+            if (args.isEmpty()) resources.getString(id) else resources.getString(id, *args.resolveArgs(resources))
+        }
+
+        is UiText.Plural -> {
+            if (args.isEmpty()) {
+                resources.getQuantityString(id, count)
+            } else {
+                resources.getQuantityString(id, count, *args.resolveArgs(resources))
+            }
+        }
+
+        is UiText.Verbatim -> {
+            value
+        }
     }
 
 /** Resolves this text with the resources of the current context. */

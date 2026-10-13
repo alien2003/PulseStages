@@ -8,6 +8,19 @@ workflow derives versionName and versionCode from the tag (see README, "GitHub: 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings**: opening the "Features" group crashed the app with `UnknownFormatConversionException`. Its percent
+  fields have the unit "%" (`formatted="false"`), and a text without arguments was still resolved with
+  `Resources.getString(id, *emptyArray())`, which runs `String.format`. Texts without arguments are now read as they
+  are.
+
+### Added
+
+- Render tests of every Settings group (every field, option, the HMM tables and the About card) and of every other
+  screen in its main states, in English and Russian, at font scale 2 and in a wide window; a test that resolves every
+  text of the settings catalog; a scan of every string with `%` for invalid format patterns.
+
 ## [0.1.0] - 2026-10-13
 
 First release.

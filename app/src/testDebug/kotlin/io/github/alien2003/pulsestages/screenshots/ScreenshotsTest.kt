@@ -5,31 +5,12 @@ package io.github.alien2003.pulsestages.screenshots
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.os.Looper
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.hasScrollAction
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.SavedStateHandle
-import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
 import io.github.alien2003.pulsestages.data.hc.HcAvailability
 import io.github.alien2003.pulsestages.data.hc.HealthPermissions
@@ -73,7 +54,6 @@ import io.github.alien2003.pulsestages.ui.settings.SettingsRoute
 import io.github.alien2003.pulsestages.ui.settings.SettingsViewModel
 import io.github.alien2003.pulsestages.ui.sources.SourcesRoute
 import io.github.alien2003.pulsestages.ui.sources.SourcesViewModel
-import io.github.alien2003.pulsestages.ui.theme.PulseStagesTheme
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -81,11 +61,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows.shadowOf
-import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
@@ -116,7 +92,7 @@ class ScreenshotsTest {
     private val model: HybridModel = HybridModel.parse(File(MODEL_FILE).readText())
     private val models = HybridModelProvider { model }
     private val appInfo = FakeAppInfoResolver(LABELS)
-    private var activity: ActivityController<ComponentActivity>? = null
+    private val host = ScreenHost(compose)
     private lateinit var defaultZone: TimeZone
     private lateinit var defaultLocale: Locale
 
@@ -130,7 +106,7 @@ class ScreenshotsTest {
 
     @After
     fun tearDown() {
-        activity?.pause()?.stop()?.destroy()
+        host.close()
         TimeZone.setDefault(defaultZone)
         Locale.setDefault(defaultLocale)
     }
@@ -249,16 +225,8 @@ class ScreenshotsTest {
         prepare: () -> Unit = {},
         content: @Composable () -> Unit,
     ) {
-        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        activity = controller
-        controller.get().setContent {
-            PulseStagesTheme(darkTheme = false, dynamicColor = false) { Shell(tab, content) }
-        }
-        compose.waitUntil(timeoutMillis = TIMEOUT_MS) {
-            shadowOf(Looper.getMainLooper()).idle()
-            ready()
-        }
-        compose.waitForIdle()
+        host.show(tab, content)
+        host.waitUntil(ready)
         prepare()
         compose.waitForIdle()
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
@@ -268,37 +236,9 @@ class ScreenshotsTest {
         assertTrue("$file was not written", file.length() > 0)
     }
 
-    /** The app shell of PulseStagesNavHost: the screen above the four-tab navigation bar. */
-    @Composable
-    private fun Shell(
-        selected: TopLevelDestination,
-        content: @Composable () -> Unit,
-    ) {
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    TopLevelDestination.entries.forEach { tab ->
-                        val label = stringResource(tab.label)
-                        NavigationBarItem(
-                            selected = tab == selected,
-                            onClick = {},
-                            icon = { Icon(painter = painterResource(tab.icon), contentDescription = label) },
-                            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        )
-                    }
-                }
-            },
-        ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding)) {
-                content()
-            }
-        }
-    }
-
     private companion object {
         const val OUTPUT_PROPERTY = "pulsestages.screenshots.dir"
         const val MODEL_FILE = "src/main/assets/models/hybrid_model.json"
-        const val TIMEOUT_MS = 120_000L
         const val PNG_QUALITY = 100
         const val MINUTE_MS = 60_000L
         const val DETAIL_NIGHT = "ps:demo-2"

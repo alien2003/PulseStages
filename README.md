@@ -756,6 +756,16 @@ These checks enforce the rule:
   Health Connect replaced by the in-memory fake.
 - **`ScreenshotsTest`** (`:app`, Robolectric native graphics) renders the six screens of the
   [Screenshots](#screenshots) section on every test run.
+- **Render tests** (`:app`, Robolectric native graphics, `src/testDebug`): `SettingsRenderTest` opens every Settings
+  group, every dropdown and the time picker, and shows a validation problem under every field; `HomeRenderTest`,
+  `NightsRenderTest` and `OtherScreensRenderTest` show every other screen in its main states (every Health Connect
+  and permission state, empty, error, the night detail with the epoch details, the RULES comparison and the warnings,
+  Compare, Sources, Log, the privacy screen). Each runs in English and Russian, at font scale 2 and in a wide window;
+  any exception, and any text that still shows a format placeholder such as `%1$s`, fails it.
+- **`SettingsTextsTest`** (`:app`, Robolectric) resolves every text the settings catalog can produce (titles, hints,
+  units, options, accepted values, every validation message) against the real English and Russian resources.
+- **`ResourceFormatsTest`** (`:app`) requires every string with `%` in every module to be a valid format pattern
+  (a literal percent sign is `%%`), or to be marked `formatted="false"` and never be given format arguments.
 
 ## Known limitations and ideas for the next version
 
