@@ -120,13 +120,18 @@ class PreparedNight internal constructor(
 
 /** Builds [PreparedNight]s. */
 object NightPreparer {
-    /** Preprocesses [input] and computes its statistics and base features with [params]. */
+    /**
+     * Preprocesses [input] and computes its statistics and base features with [params]. The input's baseline nadir is
+     * used only for a session that counts for the baseline
+     * ([io.github.alien2003.pulsestages.algo.params.FeatureParams.countsForBaseline]): a nap is never elevated.
+     */
     fun prepare(
         input: NightInput,
         params: AlgoParams,
     ): PreparedNight {
         val preprocessed = Preprocessor.preprocess(input, params.preprocess)
-        val statistics = NightStatistics.compute(preprocessed, params.features, input.baselineNadirBpm)
+        val baseline = input.baselineNadirBpm.takeIf { params.features.countsForBaseline(input.sessionEndMs - input.sessionStartMs) }
+        val statistics = NightStatistics.compute(preprocessed, params.features, baseline)
         val features = BaseFeatureExtractor.extract(input, preprocessed, statistics, params.features)
         return PreparedNight(input, params, preprocessed, statistics, features)
     }

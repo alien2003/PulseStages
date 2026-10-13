@@ -59,12 +59,13 @@ class RoomLedgerCrossCheckTest {
         val clock = TestClock(NOON)
         val repository = FakeHealthRepository { clock.millis() }
         val settings = FakeSettingsRepository()
+        val estimator = FakeNightEstimator()
         private val builder = NightCandidateBuilder(repository.ownPackage) { 0 }
         val windowReader = NightWindowReader(repository, builder, repository.ownPackage)
         val pipeline =
             NightPipeline(
                 repository,
-                FakeNightEstimator(),
+                estimator,
                 ledger,
                 { PipelineHarness.DEFAULT_TITLE },
                 RecordingLogger(),
@@ -100,6 +101,16 @@ class RoomLedgerCrossCheckTest {
         reports += process(PipelineTrigger.RECOMPUTE)
         settings.set { it.copy(write = it.write.copy(overwritePolicy = OverwritePolicy.RECOMPUTE_ALL)) }
         reports += process()
+        // Naps estimated: their nadir rows exist, and recomputing every night (new params hash) reads the baseline with
+        // them in the table, which the baseline query has to skip on both ledgers.
+        settings.set {
+            it.copy(
+                sources = it.sources.copy(minSessionMin = 30),
+                algo = it.algo.copy(features = it.algo.features.copy(baselineNights = 13)),
+            )
+        }
+        reports += process()
+        reports += process(PipelineTrigger.RECOMPUTE)
 
         val deleted = listOf(fifth, first, single).map { it.uuid }
         deleted.forEach(repository::deleteSleepSession)
@@ -117,6 +128,7 @@ class RoomLedgerCrossCheckTest {
         val sources: List<SourceSessionEntity>,
         val baselines: List<String>,
         val own: List<String>,
+        val inputBaselines: List<String>,
     )
 
     private suspend fun Env.snapshot(
@@ -150,7 +162,8 @@ class RoomLedgerCrossCheckTest {
             repository.ownSessions().map {
                 "${it.clientRecordId}|${it.clientRecordVersion}|${it.stages.size}|${it.startMs}|${it.endMs}"
             }
-        return Snapshot(reports, nights, sources, baselines, own)
+        val inputBaselines = estimator.inputs.map { "${it.sessionStartMs}|${it.sessionEndMs}|${it.baselineNadirBpm}" }
+        return Snapshot(reports, nights, sources, baselines, own, inputBaselines)
     }
 
     @Test
@@ -172,6 +185,11 @@ class RoomLedgerCrossCheckTest {
             assertEquals(onRoom.sources, inMemory.sources)
             assertEquals(onRoom.baselines, inMemory.baselines)
             assertEquals(onRoom.own, inMemory.own)
+            assertEquals(onRoom.inputBaselines, inMemory.inputBaselines)
+            assertTrue("the scenario read baselines", onRoom.inputBaselines.any { !it.endsWith("null") })
+            val napInputs = onRoom.inputBaselines.filter { it.split("|").let { (start, end) -> end.toLong() - start.toLong() < HOUR_MS } }
+            assertTrue("the scenario estimated a nap", napInputs.isNotEmpty())
+            assertTrue("a nap never gets a baseline", napInputs.all { it.endsWith("null") })
         }
 
     private companion object {

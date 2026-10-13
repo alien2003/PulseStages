@@ -118,6 +118,28 @@ class SettingsViewModelTest {
             }
 
         @Test
+        fun `the nap thresholds are minutes from 0 to 720 and make nights stale`() =
+            runTest(main.dispatcher) {
+                val vm = viewModel()
+                vm.onEdit(SettingsEdit.Text("algo.features.baselineMinSessionMin", "30"))
+                vm.onEdit(SettingsEdit.Text("algo.post.proportionsMinSessionMin", "0"))
+                assertEquals(30.0, repository.current.algo.features.baselineMinSessionMin)
+                assertEquals(0.0, repository.current.algo.post.proportionsMinSessionMin)
+                assertTrue(
+                    vm.state.value.messages
+                        .any { it.action != null },
+                    "part of the params hash: recompute offered",
+                )
+
+                vm.onEdit(SettingsEdit.Text("algo.features.baselineMinSessionMin", "721"))
+
+                assertEquals(30.0, repository.current.algo.features.baselineMinSessionMin)
+                val problem = vm.problemsOf("algo.features.baselineMinSessionMin").single() as FieldProblem.Invalid
+                assertEquals(SettingsErrorCode.OUT_OF_RANGE, problem.error.code)
+                assertEquals("0.0..720.0", problem.error.constraint)
+            }
+
+        @Test
         fun `text that is not a number is rejected with the expected kind`() =
             runTest(main.dispatcher) {
                 val vm = viewModel()

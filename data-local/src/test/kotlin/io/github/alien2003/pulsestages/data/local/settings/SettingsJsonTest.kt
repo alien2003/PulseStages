@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.data.local.settings
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
+import io.github.alien2003.pulsestages.algo.params.FeatureParams
 import io.github.alien2003.pulsestages.algo.params.GapPolicy
 import io.github.alien2003.pulsestages.algo.params.HybridParams
 import io.github.alien2003.pulsestages.algo.params.PostprocessParams
@@ -42,10 +43,11 @@ class SettingsJsonTest {
                     estimator = EstimatorType.HMM,
                     preprocess =
                         PreprocessParams(epochSec = 30, smoothWindowEpochs = 7),
+                    features = FeatureParams(baselineMinSessionMin = 240.0),
                     hybrid =
                         HybridParams(durationModel = DurationModel.GEOMETRIC, maxBoutMin = 90),
                     post =
-                        PostprocessParams(gapPolicy = GapPolicy.NEAREST, calibrateProportions = true),
+                        PostprocessParams(gapPolicy = GapPolicy.NEAREST, calibrateProportions = true, proportionsMinSessionMin = 0.0),
                 ),
             debug = DebugSettings(logLevel = LogLevel.DEBUG),
         )
@@ -100,6 +102,43 @@ class SettingsJsonTest {
                     ),
             )
         assertEquals(SettingsImportResult.Success(expected), result)
+    }
+
+    @Test
+    fun `the nap thresholds are exported, imported and default to 180 minutes in older files`() {
+        val algo =
+            Json
+                .parseToJsonElement(SettingsJson.encode(customized))
+                .jsonObject
+                .getValue("algo")
+                .jsonObject
+        assertEquals(
+            "240.0",
+            algo
+                .getValue("features")
+                .jsonObject
+                .getValue("baselineMinSessionMin")
+                .toString(),
+        )
+        assertEquals(
+            "0.0",
+            algo
+                .getValue("post")
+                .jsonObject
+                .getValue("proportionsMinSessionMin")
+                .toString(),
+        )
+
+        val older = SettingsJson.decode("""{"algo": {"features": {"baselineNights": 14}, "post": {"sanityDeepMax": 0.35}}}""")
+
+        val imported = assertInstanceOf(SettingsImportResult.Success::class.java, older).settings.algo
+        assertEquals(180.0, imported.features.baselineMinSessionMin)
+        assertEquals(180.0, imported.post.proportionsMinSessionMin)
+        val invalid = SettingsJson.decode("""{"algo": {"features": {"baselineMinSessionMin": 721}}}""")
+        assertEquals(
+            listOf("algo.features.baselineMinSessionMin"),
+            assertInstanceOf(SettingsImportResult.Invalid::class.java, invalid).errors.map { it.path },
+        )
     }
 
     @Test

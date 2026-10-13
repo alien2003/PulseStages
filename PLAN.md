@@ -83,6 +83,33 @@ from memory.
   backfill or recompute requested before the deletion never re-writes the deleted nights.
 - **Spec vs. "prefer what wins on synthetic tests".** Where a choice can be measured on the open PSG dataset, the
   dataset decides (spec §9 forbids tuning on synthetic data); synthetic tests only guard invariants and regressions.
+- **Naps and the elevated-HR baseline** (`algo.features.baselineMinSessionMin`, default 180 min, 0..720, 0 = the old
+  rule). With `minSessionMin` lowered (the user estimates naps from 30 min) a daytime nap's nadir is higher than a
+  night's: it would inflate the 14-night median (fewer correct "elevated" flags on real nights) and be flagged itself.
+  Sessions shorter than the threshold (end − start of the merged session, as `minSessionMin` measures it) therefore
+  (a) do not contribute: their `night_baselines` row is still written, but `NightBaselineDao.recentNadirs` joins
+  `estimated_nights` and counts only rows whose session is long enough (the limit applies after the filter, so the
+  baseline is the last 14 *nights*; a changed threshold applies to the stored history at once; no Room schema change,
+  so no migration), and (b) get `baselineNadirBpm = null` in `NightInputReader`, the one reader used by the pipeline,
+  the night detail, the reference comparison and personalization; `NightPreparer` in `:core-algo` also ignores a
+  baseline handed in for a nap (algo-cli, tests). Part of the params hash (the user has no estimated nights yet).
+- **Naps and the stage-share checks** (`algo.post.proportionsMinSessionMin`, default 180 min, 0..720, 0 = the old
+  rule). The sanity check (DEEP 3–35 %, REM ≤ 40 %) and the optional proportion calibration describe whole nights; a
+  30–90-min nap often has no DEEP or REM, so every such nap would get `SANITY_DEEP_LOW` and a low-confidence flag.
+  Both run only for sessions at least that long. A separate parameter, not `baselineMinSessionMin`: it belongs to the
+  post-processing and is validated / shown there.
+- **A piece of a night never replaces it** (source priority). Two sessions of different apps overlapping by more than
+  half of the shorter are one sleep, and the priority decides — except when one lies mostly inside the other but covers
+  at most half of it: that session is a piece of the other's sleep and becomes its duplicate whatever the priority (a
+  staged piece blocks nothing). With naps estimated, a 40-min fragment of a higher-priority watch would otherwise
+  replace the whole night of another source (with `minSessionMin` = 90 such fragments used to be dropped as naps).
+  The outcome stays `LOWER_PRIORITY_DUPLICATE` (persisted enum), with its own reason text.
+- **Naps: deliberately unchanged.** Fragments closer than `mergeGapMin` are merged before the nap filter, so a nap
+  ending < 30 min before bedtime becomes the first fragment of the night (it cannot be told from a night split at an
+  awakening; the merged nadir is the night's; `mergeGapMin` = 0 keeps them apart). Coverage gates are shares of the
+  session and work the same on a 30-min nap. `LOW_HR_RANGE` stays (a nap's small P50 − P10 really makes hrNorm
+  unreliable). Population EM (HMM only, not with the default HYBRID bundle) still pools naps. Details: ALGORITHM.md
+  §4, §8, §9.
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 

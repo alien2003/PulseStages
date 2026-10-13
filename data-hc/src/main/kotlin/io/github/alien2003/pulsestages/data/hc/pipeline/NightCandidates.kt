@@ -187,7 +187,9 @@ object NightKeys {
  *    package comes first in `sourcePriority` (unlisted packages last, then by name) is kept, the others are
  *    LOWER_PRIORITY_DUPLICATE. Sessions skipped in step 2 take part as well (merged and nap-filtered per package like
  *    the others): a night that a higher-priority source recorded with its own stages makes the overlapping nights of
- *    lower-priority sources duplicates too, although it is not estimated itself (it stays HAS_STAGES).
+ *    lower-priority sources duplicates too, although it is not estimated itself (it stays HAS_STAGES). Exception: a
+ *    night lying mostly inside a session of another package but covering at most half of it is a piece of that sleep,
+ *    not a second record of it: it is a duplicate of that session whatever the priority, and blocks nothing.
  */
 class NightCandidateBuilder
     @Inject
@@ -254,6 +256,12 @@ class NightCandidateBuilder
          * Keeps, among nights of different packages overlapping by more than half, the one of the higher-priority
          * package. [stagedNights] (sessions with their own stages, not estimated) only block: a [nights] entry they
          * outrank becomes a duplicate, and they are never returned.
+         *
+         * A piece of a longer session never wins over it: a night that lies mostly inside a session of another package
+         * but covers at most half of that session ([isPieceOf], e.g. a 40-min fragment a watch recorded during an 8-h
+         * night another source recorded completely) is a duplicate of that session whatever the priority, and a
+         * staged piece blocks nothing. Without this, a short higher-priority fragment (estimated since
+         * `minSessionMin` may be as low as 10 min) would replace the whole night.
          */
         private fun removeDuplicates(
             nights: List<NightCandidate>,
@@ -261,9 +269,12 @@ class NightCandidateBuilder
             priority: List<String>,
         ): Pair<List<NightCandidate>, List<SkippedNight>> {
             val stagedIds = stagedNights.mapTo(HashSet()) { it.clientRecordId }
+            val ordered = (nights + stagedNights).sortedWith(priorityOrder(priority))
+            val containers = ordered.associate { night -> night.clientRecordId to ordered.filter { isPieceOf(night, it) } }
+            val (pieces, whole) = ordered.partition { containers.getValue(it.clientRecordId).isNotEmpty() }
             val kept = mutableListOf<NightCandidate>()
             val duplicates = mutableListOf<SkippedNight>()
-            (nights + stagedNights).sortedWith(priorityOrder(priority)).forEach { night ->
+            whole.forEach { night ->
                 val winner = kept.firstOrNull { it.packageName != night.packageName && overlapsMostly(it, night) }
                 if (winner == null) {
                     kept += night
@@ -271,6 +282,12 @@ class NightCandidateBuilder
                     duplicates += duplicateOf(night, winner, winnerHasStages = winner.clientRecordId in stagedIds)
                 }
                 // A staged night that a higher-priority night outranks stays HAS_STAGES and blocks nothing.
+            }
+            val keptIds = kept.mapTo(HashSet()) { it.clientRecordId }
+            pieces.filter { it.clientRecordId !in stagedIds }.forEach { piece ->
+                val candidates = containers.getValue(piece.clientRecordId)
+                val container = candidates.firstOrNull { it.clientRecordId in keptIds } ?: candidates.first()
+                duplicates += pieceOf(piece, container, containerHasStages = container.clientRecordId in stagedIds)
             }
             return kept.filter { it.clientRecordId !in stagedIds } to duplicates
         }
@@ -292,6 +309,26 @@ class NightCandidateBuilder
                         "overlaps the night of higher-priority source ${winner.packageName} (${winner.clientRecordId})"
                     },
                 stagedWinnerUuids = if (winnerHasStages) winner.sourceUuids else emptyList(),
+            )
+
+        private fun pieceOf(
+            piece: NightCandidate,
+            container: NightCandidate,
+            containerHasStages: Boolean,
+        ): SkippedNight =
+            SkippedNight(
+                packageName = piece.packageName,
+                sessions = piece.fragments,
+                outcome = SourceOutcome.LOWER_PRIORITY_DUPLICATE,
+                reason =
+                    if (containerHasStages) {
+                        "lies inside a longer session with sleep stages of ${container.packageName} " +
+                            "(${container.sourceUuids.joinToString(",")}) and covers at most half of it"
+                    } else {
+                        "lies inside the longer night of ${container.packageName} (${container.clientRecordId}) " +
+                            "and covers at most half of it"
+                    },
+                stagedWinnerUuids = if (containerHasStages) container.sourceUuids else emptyList(),
             )
 
         private fun merge(
@@ -349,6 +386,19 @@ class NightCandidateBuilder
         ): Boolean {
             val overlap = minOf(a.endMs, b.endMs) - maxOf(a.startMs, b.startMs)
             return overlap > 0 && overlap * 2 > minOf(a.durationMs, b.durationMs)
+        }
+
+        /**
+         * Whether [piece] lies mostly inside [other] of another package but covers at most half of it: more than half of
+         * [piece] overlaps [other], and the overlap is at most half of [other]. Then [piece] is shorter than [other].
+         */
+        private fun isPieceOf(
+            piece: NightCandidate,
+            other: NightCandidate,
+        ): Boolean {
+            if (piece.packageName == other.packageName) return false
+            val overlap = minOf(piece.endMs, other.endMs) - maxOf(piece.startMs, other.startMs)
+            return overlap > 0 && overlap * 2 > piece.durationMs && overlap * 2 <= other.durationMs
         }
 
         private companion object {

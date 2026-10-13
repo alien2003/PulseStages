@@ -141,7 +141,7 @@ class NightBaselineDaoTest : DatabaseTest() {
             nightEndingAt("n1", 10, 50.0)
             nightEndingAt("n2", 20, 52.0)
 
-            assertNull(dao.baselineBefore(nightStartMs = 100, nights = 14))
+            assertNull(dao.baselineBefore(nightStartMs = 100, nights = 14, minDurationMs = 0))
         }
 
     @Test
@@ -150,10 +150,10 @@ class NightBaselineDaoTest : DatabaseTest() {
             nightEndingAt("n1", 10, 50.0)
             nightEndingAt("n2", 20, 60.0)
             nightEndingAt("n3", 30, 52.0)
-            assertEquals(52.0, checkNotNull(dao.baselineBefore(100, 14)), 0.0)
+            assertEquals(52.0, checkNotNull(dao.baselineBefore(100, 14, 0)), 0.0)
 
             nightEndingAt("n4", 40, 54.0)
-            assertEquals(53.0, checkNotNull(dao.baselineBefore(100, 14)), 0.0)
+            assertEquals(53.0, checkNotNull(dao.baselineBefore(100, 14, 0)), 0.0)
         }
 
     @Test
@@ -165,8 +165,8 @@ class NightBaselineDaoTest : DatabaseTest() {
             nightEndingAt("same-end", 100, 90.0)
             nightEndingAt("later", 200, 95.0)
 
-            assertEquals(51.0, checkNotNull(dao.baselineBefore(nightStartMs = 100, nights = 14)), 0.0)
-            assertNull("only two nights end before 25", dao.baselineBefore(nightStartMs = 25, nights = 14))
+            assertEquals(51.0, checkNotNull(dao.baselineBefore(nightStartMs = 100, nights = 14, minDurationMs = 0)), 0.0)
+            assertNull("only two nights end before 25", dao.baselineBefore(nightStartMs = 25, nights = 14, minDurationMs = 0))
         }
 
     @Test
@@ -176,11 +176,11 @@ class NightBaselineDaoTest : DatabaseTest() {
             (1..10).forEach { nightEndingAt("old$it", it.toLong(), 40.0) }
             (11..13).forEach { nightEndingAt("new$it", it.toLong(), 60.0) }
 
-            assertEquals(60.0, checkNotNull(dao.baselineBefore(nightStartMs = 1_000, nights = 3)), 0.0)
-            assertEquals(40.0, checkNotNull(dao.baselineBefore(nightStartMs = 1_000, nights = 13)), 0.0)
-            assertEquals(listOf(60.0, 60.0, 60.0, 40.0), dao.recentNadirs(beforeMs = 1_000, limit = 4))
-            assertNull(dao.baselineBefore(nightStartMs = 1_000, nights = 2))
-            assertNull(dao.baselineBefore(nightStartMs = 1_000, nights = 0))
+            assertEquals(60.0, checkNotNull(dao.baselineBefore(nightStartMs = 1_000, nights = 3, minDurationMs = 0)), 0.0)
+            assertEquals(40.0, checkNotNull(dao.baselineBefore(nightStartMs = 1_000, nights = 13, minDurationMs = 0)), 0.0)
+            assertEquals(listOf(60.0, 60.0, 60.0, 40.0), dao.recentNadirs(beforeMs = 1_000, limit = 4, minDurationMs = 0))
+            assertNull(dao.baselineBefore(nightStartMs = 1_000, nights = 2, minDurationMs = 0))
+            assertNull(dao.baselineBefore(nightStartMs = 1_000, nights = 0, minDurationMs = 0))
         }
 
     @Test
@@ -193,5 +193,61 @@ class NightBaselineDaoTest : DatabaseTest() {
             dao.delete("n1")
 
             assertNull(dao.find("n1"))
+        }
+}
+
+class NapBaselineDaoTest : DatabaseTest() {
+    private val dao get() = db.nightBaselineDao()
+    private val nights get() = db.estimatedNightDao()
+    private val minute = 60_000L
+    private val threeHours = 180 * minute
+
+    /** Records a WRITTEN session of [minutes] starting at [startMs] with [nadir] the way the pipeline does. */
+    private suspend fun written(
+        id: String,
+        startMs: Long,
+        minutes: Long,
+        nadir: Double,
+    ) {
+        val row = night(id, startMs, nadirBpm = nadir).let { it.copy(sessionEndMs = it.sessionStartMs + minutes * minute) }
+        nights.recordNight(row, emptyList())
+    }
+
+    @Test
+    fun napsGetARowButOnlyLongEnoughNightsFormTheBaseline() =
+        runTest {
+            val day = 24 * HOUR_MS
+            (0 until 3).forEach { written("night$it", it * day, minutes = 480, nadir = 50.0 + it) }
+            // Daytime naps after the nights: higher nadirs, later ends (the latest rows).
+            (0 until 3).forEach { written("nap$it", 3 * day + it * 4 * HOUR_MS, minutes = 45, nadir = 70.0) }
+            val nextNight = 5 * day
+
+            assertEquals("naps are stored", NightBaselineEntity("nap0", 3 * day + 45 * minute, 70.0), dao.find("nap0"))
+            assertEquals(listOf(52.0, 51.0, 50.0), dao.recentNadirs(nextNight, 14, threeHours))
+            assertEquals(51.0, checkNotNull(dao.baselineBefore(nextNight, 14, threeHours)), 0.0)
+            // The latest 3 rows would all be naps: the limit applies after the filter.
+            assertEquals(51.0, checkNotNull(dao.baselineBefore(nextNight, 3, threeHours)), 0.0)
+            // 0 restores the old rule: every session counts.
+            assertEquals(70.0, checkNotNull(dao.baselineBefore(nextNight, 3, 0)), 0.0)
+            assertEquals(61.0, checkNotNull(dao.baselineBefore(nextNight, 14, 0)), 0.0)
+        }
+
+    @Test
+    fun theThresholdIsInclusiveAndUsesTheSessionOfTheNightRow() =
+        runTest {
+            written("exact", 0, minutes = 180, nadir = 50.0)
+            written("short", HOUR_MS * 24, minutes = 179, nadir = 60.0)
+
+            assertEquals(listOf(50.0), dao.recentNadirs(10 * 24 * HOUR_MS, 14, threeHours))
+            assertEquals(listOf(60.0, 50.0), dao.recentNadirs(10 * 24 * HOUR_MS, 14, threeHours - minute))
+        }
+
+    @Test
+    fun aRowWithoutANightCountsOnlyWithoutAMinimum() =
+        runTest {
+            dao.upsert(NightBaselineEntity("orphan", 10, 50.0))
+
+            assertEquals(listOf(50.0), dao.recentNadirs(100, 14, 0))
+            assertEquals(emptyList<Double>(), dao.recentNadirs(100, 14, threeHours))
         }
 }

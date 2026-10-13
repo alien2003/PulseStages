@@ -35,7 +35,10 @@ enum class SourceOutcome {
     /** Written by PulseStages itself. */
     OWN,
 
-    /** Overlaps a session of a higher-priority source. */
+    /**
+     * Overlaps a session of a higher-priority source, or lies inside a longer session of another source while covering at
+     * most half of it (a piece of that sleep, whatever the priority).
+     */
     LOWER_PRIORITY_DUPLICATE,
 
     /** Not estimated (no heart rate / low coverage). */
@@ -76,7 +79,9 @@ data class SourceSessionEntity(
 )
 
 /**
- * Heart-rate nadir of an estimated night, used for the rolling baseline (table `night_baselines`).
+ * Heart-rate nadir of an estimated night, used for the rolling baseline (table `night_baselines`). The session length
+ * that decides whether the row counts (naps do not) is read from the night's `estimated_nights` row by
+ * [NightBaselineDao.recentNadirs].
  *
  * @property clientRecordId the night's clientRecordId.
  * @property sessionEndMs end of the night, epoch ms UTC.

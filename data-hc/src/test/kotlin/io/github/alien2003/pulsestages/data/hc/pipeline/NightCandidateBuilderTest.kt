@@ -244,6 +244,67 @@ class NightCandidateBuilderTest {
     }
 
     @Test
+    fun `a nap-length piece of a higher-priority source does not replace the whole night of another source`() {
+        // minSessionMin 30 (naps estimated): the watch recorded only 40 minutes of the night the other app recorded fully.
+        val otherFirst =
+            SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OTHER_APP, OHEALTH), minSessionMin = 30)
+        val oh = session(OHEALTH, startMs = start, endMs = start + 8 * HOUR_MS, uuid = "oh")
+        val piece = session(OTHER_APP, startMs = start + 3 * HOUR_MS, endMs = start + 3 * HOUR_MS + 40 * MINUTE_MS, uuid = "piece")
+
+        val result = build(oh, piece, sources = otherFirst)
+
+        assertEquals(listOf("oh"), result.candidates.flatMap { it.sourceUuids })
+        val duplicate = result.skipped.single()
+        assertEquals(SourceOutcome.LOWER_PRIORITY_DUPLICATE, duplicate.outcome)
+        assertEquals(listOf("piece"), duplicate.sessions.map { it.uuid })
+        assertTrue(duplicate.reason.contains("inside the longer night of $OHEALTH"), duplicate.reason)
+        assertTrue(duplicate.stagedWinnerUuids.isEmpty())
+        // The other order of priority gives the same result.
+        val ohFirst = otherFirst.copy(sourcePriority = listOf(OHEALTH, OTHER_APP))
+        assertEquals(listOf("oh"), build(oh, piece, sources = ohFirst).candidates.flatMap { it.sourceUuids })
+
+        // At exactly half of the longer night it is still a piece; above half the priority decides again.
+        val half = session(OTHER_APP, startMs = start, endMs = start + 4 * HOUR_MS, uuid = "half")
+        assertEquals(listOf("oh"), build(oh, half, sources = otherFirst).candidates.flatMap { it.sourceUuids })
+        val most = session(OTHER_APP, startMs = start, endMs = start + 4 * HOUR_MS + MINUTE_MS, uuid = "most")
+        val byPriority = build(oh, most, sources = otherFirst)
+        assertEquals(listOf("most"), byPriority.candidates.flatMap { it.sourceUuids })
+        assertTrue(
+            byPriority.skipped
+                .single()
+                .reason
+                .contains("higher-priority source $OTHER_APP"),
+        )
+    }
+
+    @Test
+    fun `staged pieces block nothing and a piece inside a staged night needs no estimate`() {
+        val stages = { from: Long, to: Long -> listOf(HcStage(from, to, 5)) }
+        val otherFirst =
+            SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OTHER_APP, OHEALTH), minSessionMin = 30)
+        val oh = session(OHEALTH, startMs = start, endMs = start + 8 * HOUR_MS, uuid = "oh")
+        val stagedPiece =
+            session(OTHER_APP, startMs = start + HOUR_MS, endMs = start + 2 * HOUR_MS, uuid = "staged-piece").let {
+                it.copy(stages = stages(it.startMs, it.endMs))
+            }
+
+        val blocked = build(oh, stagedPiece, sources = otherFirst)
+
+        assertEquals(listOf("oh"), blocked.candidates.flatMap { it.sourceUuids })
+        assertEquals(listOf(SourceOutcome.HAS_STAGES), blocked.skipped.map { it.outcome })
+
+        // A stage-less higher-priority piece inside a lower-priority night with stages: the night has its stages.
+        val stagedNight = oh.copy(uuid = "oh-staged", stages = stages(oh.startMs, oh.endMs))
+        val piece = session(OTHER_APP, startMs = start + HOUR_MS, endMs = start + 2 * HOUR_MS, uuid = "piece")
+        val inside = build(stagedNight, piece, sources = otherFirst)
+        assertTrue(inside.candidates.isEmpty())
+        val duplicate = inside.skipped.single { it.outcome == SourceOutcome.LOWER_PRIORITY_DUPLICATE }
+        assertEquals(listOf("piece"), duplicate.sessions.map { it.uuid })
+        assertEquals(listOf("oh-staged"), duplicate.stagedWinnerUuids)
+        assertTrue(duplicate.reason.contains("sleep stages of $OHEALTH"), duplicate.reason)
+    }
+
+    @Test
     fun `an overlap of at most half of the shorter night is not a duplicate`() {
         val sources = SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OHEALTH, OTHER_APP))
         val oh = session(OHEALTH, startMs = start, endMs = start + 8 * HOUR_MS)

@@ -277,6 +277,15 @@ internal val featuresSection =
                     UNIT_NIGHTS,
                 ),
                 numberField(
+                    "$FEA.baselineMinSessionMin",
+                    R.string.set_fea_baseline_min_session_title,
+                    R.string.set_fea_baseline_min_session_hint,
+                    { it.algo.features.baselineMinSessionMin },
+                    { s, v -> s.features { it.copy(baselineMinSessionMin = v) } },
+                    boundsRange(0, SettingsLimits.sessionThresholdMin.endInclusive.toInt()),
+                    UNIT_MIN,
+                ),
+                numberField(
                     "$FEA.elevatedNightPct",
                     R.string.set_fea_elevated_pct_title,
                     R.string.set_fea_elevated_pct_hint,
@@ -598,6 +607,15 @@ internal val postSection =
                     R.string.set_post_sanity_coverage_hint,
                     { it.algo.post.sanityMinCoverage },
                     { s, v -> s.post { it.copy(sanityMinCoverage = v) } },
+                ),
+                numberField(
+                    "$POST.proportionsMinSessionMin",
+                    R.string.set_post_proportions_min_session_title,
+                    R.string.set_post_proportions_min_session_hint,
+                    { it.algo.post.proportionsMinSessionMin },
+                    { s, v -> s.post { it.copy(proportionsMinSessionMin = v) } },
+                    boundsRange(0, SettingsLimits.sessionThresholdMin.endInclusive.toInt()),
+                    UNIT_MIN,
                 ),
                 shareSlider(
                     "$POST.sanityDeepMax",

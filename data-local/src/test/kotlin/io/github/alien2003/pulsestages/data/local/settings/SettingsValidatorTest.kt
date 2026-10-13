@@ -213,6 +213,29 @@ class SettingsValidatorTest {
     }
 
     @Test
+    fun `the nap thresholds accept 0 to 720 minutes`() {
+        fun thresholds(
+            baseline: Double,
+            proportions: Double,
+        ) = algo {
+            copy(
+                features = features.copy(baselineMinSessionMin = baseline),
+                post = post.copy(proportionsMinSessionMin = proportions),
+            )
+        }
+        assertAll(
+            { assertValid(thresholds(0.0, 0.0)) },
+            { assertValid(thresholds(720.0, 720.0)) },
+            { assertValid(thresholds(30.0, 90.5)) },
+            { assertRejected(thresholds(-1.0, 180.0), "algo.features.baselineMinSessionMin") },
+            { assertRejected(thresholds(720.5, 180.0), "algo.features.baselineMinSessionMin") },
+            { assertRejected(thresholds(Double.NaN, 180.0), "algo.features.baselineMinSessionMin", SettingsErrorCode.NOT_FINITE) },
+            { assertRejected(thresholds(180.0, -0.5), "algo.post.proportionsMinSessionMin") },
+            { assertRejected(thresholds(180.0, 721.0), "algo.post.proportionsMinSessionMin") },
+        )
+    }
+
+    @Test
     fun `every Gaussian sd must be positive and every mean finite`() {
         val physiology = EmissionTable.PHYSIOLOGY
         val p = "algo.hmm.emissions"

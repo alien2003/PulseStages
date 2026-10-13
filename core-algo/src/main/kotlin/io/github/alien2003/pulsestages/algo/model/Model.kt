@@ -132,7 +132,8 @@ data class TimeSpan(
  * @property respiratoryRate optional respiratory-rate measurements; empty when not available or not granted.
  * @property hrv optional HRV (RMSSD) measurements; empty when not available or not granted.
  * @property forcedAwake intervals inside the session that must be AWAKE (e.g. gaps between merged fragments).
- * @property baselineNadirBpm rolling median of the nadirs of the previous nights, or null if unknown.
+ * @property baselineNadirBpm rolling median of the nadirs of the previous nights, or null if unknown. Ignored for a
+ *   session shorter than `features.baselineMinSessionMin` (a nap is never compared with the baseline).
  */
 data class NightInput(
     val sessionStartMs: Long,

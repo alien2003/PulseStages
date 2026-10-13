@@ -122,6 +122,18 @@ likelihood is multiplied by `elevatedAwakeFactor` = 0.6 (note: < 1 *lowers* AWAK
 higher heart rate) and the night confidence by `elevatedConfidenceFactor` = 0.8. The open datasets have one night per
 subject (Walch) or no long-term context, so this rule is not exercised by the validation.
 
+**Naps and the baseline** (`baselineMinSessionMin` = 180 min, session length = end − start of the merged session,
+gaps included). A session shorter than that is a nap for the long-term context: its nadir does not enter the baseline
+(the app still stores it, and the baseline query of `NightBaselineDao` counts only rows whose `estimated_nights`
+session is long enough, so a changed threshold applies to the stored history without a recompute), and it gets no
+baseline itself, so it is never `ELEVATED_HR`: the app passes `baselineNadirBpm = null` for it (`NightInputReader`,
+used by the pipeline, the night detail, the reference comparison and personalization), and `NightPreparer` ignores a
+baseline given for a nap anyway. Reason: when naps are estimated (source setting `minSessionMin` lowered, e.g. to 30)
+a daytime nap's nadir is several bpm above a night's; counting it would raise the median (fewer correct flags on
+real nights), and comparing the nap with a nights' baseline would flag almost every nap. `baselineMinSessionMin` = 0
+restores the rule without naps (every session counts and is compared). A short real night (e.g. 2.5 h after a night
+shift) is treated as a nap too; lower the threshold if such nights matter more than daytime naps.
+
 **Steps.** An epoch with ≥ `awakeStepThreshold` = 5 steps is forced to AWAKE for every estimator (all other states get
 probability 0); 1 … 4 whole steps multiply the AWAKE likelihood by `fewStepsAwakeFactor` = 3 (fractions of a step left
 by spreading a long record do not count).
@@ -284,25 +296,57 @@ repeatedly the shortest bout below its minimum — DEEP `minDeepMin` = 5, REM `m
 min (AWAKE only inside sleep, i.e. with sleep epochs before and after it; LIGHT and UNKNOWN have no minimum) — is
 relabelled to the neighbouring bout whose stage has the larger mean posterior over the short bout (the only scored
 neighbour at an edge; UNKNOWN gaps never absorb; bouts with forced epochs are never absorbed). A final partial epoch
-takes the label of the epoch before it. (4) **Sanity check** (coverage > `sanityMinCoverage` = 0.8): DEEP >
-`sanityDeepMax` = 35 % (`SANITY_DEEP_HIGH`), REM > `sanityRemMax` = 40 % (`SANITY_REM_HIGH`) or DEEP < `sanityDeepMin`
-= 3 % (`SANITY_DEEP_LOW`) of scored time → low-confidence, confidence × `sanityConfidenceFactor` = 0.7. (5)
-**Proportion calibration** (`calibrateProportions` = false by default): per-stage log-prior offsets start at 0; up to
+takes the label of the epoch before it. (4) **Sanity check** (coverage > `sanityMinCoverage` = 0.8 and a session of at
+least `proportionsMinSessionMin` = 180 min): DEEP > `sanityDeepMax` = 35 % (`SANITY_DEEP_HIGH`), REM > `sanityRemMax` =
+40 % (`SANITY_REM_HIGH`) or DEEP < `sanityDeepMin` = 3 % (`SANITY_DEEP_LOW`) of scored time → low-confidence,
+confidence × `sanityConfidenceFactor` = 0.7. (5) **Proportion calibration** (`calibrateProportions` = false by default;
+sessions of at least `proportionsMinSessionMin` only): per-stage log-prior offsets start at 0; up to
 `calibrationMaxIterations` = 5 times, DEEP is raised / lowered by `calibrationStep` = 0.2 while outside [10 %, 25 %],
 REM likewise for [15 %, 30 %], AWAKE lowered while > 15 %; the night is re-decoded with the offsets and steps 1–4
 re-run (`PROPORTIONS_CALIBRATED`, `flags.calibrated`; RULES shifts its thresholds by 0.25 per unit offset instead).
 (6) **Merging** into intervals on the epoch grid; the last interval ends exactly at the session end, so the stages
 cover the session without gaps or overlaps and each is at least one epoch long.
 
+**Naps skip steps 4 and 5.** Both compare the stage shares with whole-night ranges. A 30–90-min nap often has no
+DEEP or no REM at all (or mostly DEEP after sleep loss), so on sessions shorter than `proportionsMinSessionMin` = 180
+min the sanity check would only add misleading `SANITY_*` low-confidence flags, and the calibration would push the nap
+towards a night's 10–25 % DEEP / 15–30 % REM. Shorter sessions are therefore neither checked nor calibrated (0 = every
+session, as before); the other steps are unchanged.
+
 ## 9. Coverage gates, fallbacks and confidence (`SleepStager`)
 
-Session shorter than `minSessionMin` (default 0 = off; the app drops naps by its own 90-minute source setting) → not
-estimated (`SESSION_TOO_SHORT`); no heart-rate sample in range in the session ± 30 min → `NO_HR_DATA`; coverage ≥
+Session shorter than `minSessionMin` (default 0 = off; the app drops naps by its own source setting, 90 min by
+default and as low as 10 min when naps are wanted) → not estimated (`SESSION_TOO_SHORT`); no heart-rate sample in range in the session ± 30 min → `NO_HR_DATA`; coverage ≥
 `minCoverage` = 0.6 → the configured estimator; `rulesMinCoverage` = 0.4 ≤ coverage < 0.6 → RULES with
 `RULES_FALLBACK_LOW_COVERAGE`; coverage < 0.4 → not estimated (`LOW_COVERAGE`), reason logged.
 
 **Confidence**: epochConfidence = max_s γ_k(s); nightConfidence = mean epochConfidence over the session epochs with
 data × coverage × 0.8 (elevated night) × 0.7 (sanity check failed), clipped to [0, 1].
+
+**Naps** (the app's source setting `minSessionMin` lowered below 180 min, e.g. 30). What changes for a session shorter
+than 180 min, and what deliberately does not:
+
+- no elevated-HR comparison and no contribution to the nadir baseline (`baselineMinSessionMin`, section 4), no sanity
+  check or proportion calibration (`proportionsMinSessionMin`, section 8); so a nap's confidence is the mean posterior
+  × coverage only;
+- the coverage gates are unchanged: coverage is a share of the session epochs, so a 30-min nap with heart rate every 2
+  min has the same coverage as a night, and a nap with sparse heart rate falls back to RULES or is not estimated like a
+  night would be;
+- `LOW_HR_RANGE` stays: a short session often has P50 − P10 < 2 bpm, and its hrNorm is then genuinely unreliable;
+  `CYCLE_PRIOR_DISABLED` (HMM only) is expected on sessions shorter than about two cycles and has no effect on the
+  confidence;
+- the estimators run unchanged: the HYBRID classifier's elapsed / remaining-time features and the HSMM durations were
+  learned on whole nights, so a nap looks like the beginning and the end of a night at once; no nap was in the
+  validation data, so nap hypnograms are unvalidated;
+- population EM (section 10; only when the HMM emissions are used, not with the default HYBRID bundle) pools the
+  latest written sessions, naps included, and counts them towards `emEveryNights`: a nap is on its own hrNorm scale
+  and weighs by its epoch count (a 45-min nap ≈ a tenth of a night); not changed;
+- source selection (app, before the estimator; README "Which source sessions become nights"): fragments closer than
+  `mergeGapMin` = 30 min are merged before the nap filter, so a nap ending less than 30 min before bedtime becomes the
+  first fragment of the night (the gap is AWAKE) — unchanged, because it cannot be told apart from a night that the
+  watch split at an awakening, and the merged session's nadir is the night's; for two sources, a session lying mostly
+  inside a session of another source but covering at most half of it is a piece of that sleep and never replaces it,
+  whatever the priority (otherwise a 40-min fragment of a higher-priority watch would replace a whole night).
 
 ## 10. Personalization (`personal/`)
 
@@ -351,6 +395,7 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | features | `varHalfWindowEpochs` / `slopeHalfWindowEpochs` | 3 / 2 | hrVar and hrSlope windows (± epochs) |
 | features | `cycleMinDistanceMin` / `cycleMinProminenceBpm` | 60 / 2.0 | ultradian minima search |
 | features | `baselineNights` / `elevatedNightPct` / `elevatedAwakeShift` / `elevatedConfidenceFactor` | 14 / 12 / 0.3 / 0.8 | elevated-HR night |
+| features | `baselineMinSessionMin` | 180 | shorter sessions (naps) neither enter the nadir baseline nor are compared with it (0 = every session) |
 | features | `useSpo2` / `spo2DropPct` / `spo2AwakeLightFactor` / `spo2MedianWindowMin` | true / 3.0 / 2.0 / 60 | SpO2 desaturations |
 | features | `useHrv` / `hrvWeight` / `hrvMaxDistanceMin` | true / 1.5 / 5 | RMSSD replaces hrVar |
 | features | `useRespiratoryRate` / `respiratoryRateWeight` / `respiratoryHalfWindowEpochs` | true / 0.5 / 5 | respiratory-rate variability |
@@ -378,6 +423,7 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | post | `minDeepMin` / `minRemMin` / `minAwakeMin` | 5 / 5 / 2 | minimum bouts (min) |
 | post | `gapPolicy` | UNKNOWN | UNKNOWN / LIGHT / NEAREST for long gaps |
 | post | `sanityMinCoverage` / `sanityDeepMax` / `sanityRemMax` / `sanityDeepMin` / `sanityConfidenceFactor` | 0.8 / 0.35 / 0.40 / 0.03 / 0.7 | sanity check |
+| post | `proportionsMinSessionMin` | 180 | sanity check and proportion calibration only for sessions at least this long (0 = every session) |
 | post | `calibrateProportions` | false | soft proportion calibration |
 | post | `targetDeepMin` / `targetDeepMax` / `targetRemMin` / `targetRemMax` / `targetAwakeMax` | 0.10 / 0.25 / 0.15 / 0.30 / 0.15 | calibration corridors |
 | post | `calibrationStep` / `calibrationMaxIterations` | 0.2 / 5 | calibration step and iterations |
@@ -1162,6 +1208,11 @@ real PSG κ in section 13.
 - **Long-term context untested.** The elevated-HR rule and the personalization (calibration, population EM) cannot be
   validated on these datasets (one night per Walch subject); they are implemented as specified and unit-tested on
   synthetic data only.
+- **Naps unvalidated.** Both datasets contain whole nights only. Naps (the source setting `minSessionMin` lowered, e.g.
+  to 30) are estimated by models trained on nights (elapsed / remaining-time features, HSMM durations), so their
+  hypnograms carry no validated accuracy; the nap thresholds of 180 min (`baselineMinSessionMin`,
+  `proportionsMinSessionMin`, section 9) are a physiological choice (shorter than any regular night, longer than
+  typical naps), not fitted.
 - **Supervised HMM not usable as is.** On these 2-minute data the per-stage hrNorm means are not ordered as the
   specification's HMM assumes (DEEP 1.28 > LIGHT 0.90), so the supervised estimates — although they score higher than
   the physiology table (0.117 vs 0.070) — fail the validity gate and are not the defaults; the HMM (the app's

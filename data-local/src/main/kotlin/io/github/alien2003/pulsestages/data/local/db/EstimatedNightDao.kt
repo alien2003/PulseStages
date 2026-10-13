@@ -120,7 +120,9 @@ abstract class EstimatedNightDao {
 
     /**
      * Stores one pipeline result atomically: [upsert]s [night], upserts [sourceSessions] and, for a
-     * [NightStatus.WRITTEN] night with a nadir, its baseline row (other results leave baselines untouched).
+     * [NightStatus.WRITTEN] night with a nadir, its baseline row (other results leave baselines untouched). Naps get a
+     * row too: [NightBaselineDao] counts only nights long enough for the baseline, so the stored history follows a
+     * changed `features.baselineMinSessionMin`.
      * Returns the night's row id.
      */
     @Transaction

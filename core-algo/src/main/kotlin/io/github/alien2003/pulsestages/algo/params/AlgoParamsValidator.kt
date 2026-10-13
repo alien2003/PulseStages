@@ -60,6 +60,7 @@ private const val MAX_INTERP_GAP_MIN = 60.0
 private const val MAX_CONTEXT_MARGIN_MIN = 240
 private const val MIN_BASELINE_NIGHTS = 3
 private const val MAX_BASELINE_NIGHTS = 365
+private const val MAX_SESSION_THRESHOLD_MIN = 720.0
 private const val MAX_AWAKE_STEP_THRESHOLD = 10_000
 private const val MIN_MAX_BOUT_MIN = 10
 private const val MAX_MAX_BOUT_MIN = 600
@@ -97,6 +98,7 @@ private fun Checker.features(v: FeatureParams) {
     greaterThan("$p.cycleMinDistanceMin", v.cycleMinDistanceMin, 0.0)
     atLeast("$p.cycleMinProminenceBpm", v.cycleMinProminenceBpm, 0.0)
     int("$p.baselineNights", v.baselineNights, MIN_BASELINE_NIGHTS..MAX_BASELINE_NIGHTS)
+    inRange("$p.baselineMinSessionMin", v.baselineMinSessionMin, 0.0..MAX_SESSION_THRESHOLD_MIN)
     atLeast("$p.elevatedNightPct", v.elevatedNightPct, 0.0)
     atLeast("$p.elevatedAwakeShift", v.elevatedAwakeShift, 0.0)
     inRange("$p.elevatedConfidenceFactor", v.elevatedConfidenceFactor, UNIT)
@@ -197,6 +199,7 @@ private fun Checker.post(v: PostprocessParams) {
     inRange("$p.sanityDeepMin", v.sanityDeepMin, UNIT)
     notAbove("$p.sanityDeepMin", v.sanityDeepMin, "$p.sanityDeepMax", v.sanityDeepMax)
     inRange("$p.sanityConfidenceFactor", v.sanityConfidenceFactor, UNIT)
+    inRange("$p.proportionsMinSessionMin", v.proportionsMinSessionMin, 0.0..MAX_SESSION_THRESHOLD_MIN)
     inRange("$p.targetDeepMin", v.targetDeepMin, UNIT)
     inRange("$p.targetDeepMax", v.targetDeepMax, UNIT)
     notAbove("$p.targetDeepMin", v.targetDeepMin, "$p.targetDeepMax", v.targetDeepMax)

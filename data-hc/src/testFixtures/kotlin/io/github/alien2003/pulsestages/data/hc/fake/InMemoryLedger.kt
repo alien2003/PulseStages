@@ -316,10 +316,14 @@ class InMemoryLedger {
         override suspend fun recentNadirs(
             beforeMs: Long,
             limit: Int,
+            minDurationMs: Long,
         ): List<Double> =
             read {
+                // LEFT JOIN estimated_nights: the session length comes from the night row (none: unknown length).
+                val durations = nights.values.associate { it.clientRecordId to it.sessionEndMs - it.sessionStartMs }
                 baselines.values
                     .filter { it.sessionEndMs < beforeMs }
+                    .filter { row -> minDurationMs <= 0 || (durations[row.clientRecordId] ?: Long.MIN_VALUE) >= minDurationMs }
                     .sortedWith(compareByDescending<NightBaselineEntity> { it.sessionEndMs }.thenBy { it.clientRecordId })
                     .take(limit)
                     .map { it.nadirBpm }

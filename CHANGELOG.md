@@ -23,6 +23,20 @@ workflow derives versionName and versionCode from the tag (see README, "GitHub: 
   `Resources.getString(id, *emptyArray())`, which runs `String.format`. Texts without arguments are now read as they
   are.
 
+### Changed
+
+- **Naps and the elevated-heart-rate baseline**: sessions shorter than `baselineMinSessionMin` (new, Settings →
+  Features, 180 min; 0 = as before) no longer enter the rolling nadir baseline and are never compared with it, so
+  estimated daytime naps neither inflate the baseline of the nights nor get flagged "elevated heart rate" themselves.
+  Their nadir is still stored; the baseline query counts only long enough sessions, so a changed threshold applies to
+  the whole history.
+- **Naps and the stage-share checks**: the sanity check and the proportion calibration run only for sessions of at
+  least `proportionsMinSessionMin` (new, Settings → Post-processing, 180 min; 0 = as before); naps no longer get
+  `SANITY_DEEP_LOW` and a low-confidence flag for having no deep sleep.
+- **Source priority**: a session lying mostly inside a longer session of another app while covering at most half of
+  it (e.g. a 40-min fragment) is a piece of that night and no longer replaces it, whatever the priority.
+- Both new parameters are part of the params hash: nights estimated before are offered for recomputation.
+
 ### Added
 
 - Render tests of every Settings group (every field, option, the HMM tables and the About card) and of every other

@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.algo.params
 
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import kotlinx.serialization.Serializable
+import kotlin.math.ceil
 
 /**
  * All tunable parameters of the stage estimators. Every number used by the algorithms lives here so that it can
@@ -90,6 +91,14 @@ data class FeatureParams(
     val cycleMinProminenceBpm: Double = 2.0,
     /** Number of previous nights used for the baseline nadir (used by the caller that computes the baseline). */
     val baselineNights: Int = 14,
+    /**
+     * Sessions shorter than this many minutes are naps for the long-term heart-rate context: their nadir does not
+     * contribute to the rolling baseline (the caller that computes the baseline filters them, [countsForBaseline]),
+     * and they are never compared with it (no elevated-HR check: the estimators ignore a baseline given for such a
+     * session). A daytime nap's nadir is higher than a night's, so it would inflate the baseline and be flagged
+     * itself. 0 restores the behaviour without this rule (every session counts).
+     */
+    val baselineMinSessionMin: Double = 180.0,
     /** Nadir above baseline by more than this percentage marks the night as "elevated HR". */
     val elevatedNightPct: Double = 12.0,
     /** On elevated nights the AWAKE threshold is raised by this amount of hrNorm. */
@@ -116,7 +125,25 @@ data class FeatureParams(
     val hrvMaxDistanceMin: Double = 5.0,
     /** Respiratory-rate variability: std of the per-epoch rate in ±[respiratoryHalfWindowEpochs]. */
     val respiratoryHalfWindowEpochs: Int = 5,
-)
+) {
+    /** [baselineMinSessionMin] in whole milliseconds, rounded up (0 for a non-positive or undefined value). */
+    val baselineMinSessionMs: Long get() = minutesToWholeMs(baselineMinSessionMin)
+
+    /**
+     * Whether a session lasting [durationMs] (end − start, merged fragments and their gaps included) is a night for
+     * the rolling nadir baseline: at least [baselineMinSessionMin] long. Only such sessions contribute to the
+     * baseline and are compared with it.
+     */
+    fun countsForBaseline(durationMs: Long): Boolean = durationMs >= baselineMinSessionMs
+}
+
+/**
+ * [minutes] as whole milliseconds, rounded up, so that `durationMs >= minutesToWholeMs(minutes)` holds exactly when
+ * the duration is at least [minutes] minutes; 0 for a non-positive or undefined value.
+ */
+internal fun minutesToWholeMs(minutes: Double): Long = if (minutes.isNaN() || minutes <= 0.0) 0L else ceil(minutes * MS_PER_MINUTE).toLong()
+
+private const val MS_PER_MINUTE = 60_000.0
 
 /**
  * A univariate Gaussian.
@@ -429,6 +456,10 @@ enum class LowConfidencePolicy {
  * @property sanityRemMax a night with more REM than this share is low-confidence.
  * @property sanityDeepMin a night with less DEEP than this share is low-confidence.
  * @property sanityConfidenceFactor night confidence multiplier when a sanity check fails.
+ * @property proportionsMinSessionMin the sanity check and the proportion calibration run only for sessions at least
+ *   this many minutes long (0 = always). Both compare the stage shares with whole-night ranges, which do not describe a
+ *   nap (a 30–90 min nap often has no DEEP or no REM at all), so on naps they would only add misleading
+ *   low-confidence flags or push the shares towards a night's.
  * @property targetDeepMin lower end of the DEEP share corridor of the calibration.
  * @property targetDeepMax upper end of the DEEP share corridor.
  * @property targetRemMin lower end of the REM share corridor.
@@ -451,6 +482,7 @@ data class PostprocessParams(
     val sanityRemMax: Double = 0.40,
     val sanityDeepMin: Double = 0.03,
     val sanityConfidenceFactor: Double = 0.7,
+    val proportionsMinSessionMin: Double = 180.0,
     /** Soft calibration of stage proportions towards the target ranges. */
     val calibrateProportions: Boolean = false,
     val targetDeepMin: Double = 0.10,
@@ -462,7 +494,13 @@ data class PostprocessParams(
     val calibrationMaxIterations: Int = 5,
     val lowConfidenceThreshold: Double = 0.45,
     val lowConfidencePolicy: LowConfidencePolicy = LowConfidencePolicy.KEEP,
-)
+) {
+    /**
+     * Whether the sanity check and the proportion calibration apply to a session lasting [durationMs]: at least
+     * [proportionsMinSessionMin] long.
+     */
+    fun checksProportions(durationMs: Long): Boolean = durationMs >= minutesToWholeMs(proportionsMinSessionMin)
+}
 
 /** Personalization (section 10). */
 @Serializable

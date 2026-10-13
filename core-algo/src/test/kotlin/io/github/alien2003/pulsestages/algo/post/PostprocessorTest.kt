@@ -24,7 +24,8 @@ class PostprocessorTest {
     private fun context(
         grid: EpochGrid,
         coverage: Double = 1.0,
-    ) = PostprocessContext(grid, BooleanArray(grid.sessionEpochs) { true }, BooleanArray(grid.sessionEpochs), coverage)
+        checkProportions: Boolean = true,
+    ) = PostprocessContext(grid, BooleanArray(grid.sessionEpochs) { true }, BooleanArray(grid.sessionEpochs), coverage, checkProportions)
 
     /** A decoder that labels by argmax(score + offsets) with softmax posteriors. */
     private fun scoreDecoder(scores: Array<DoubleArray>) =
@@ -133,6 +134,23 @@ class PostprocessorTest {
         assertTrue(on.calibrated)
         assertTrue(on.warnings.any { it.code == WarningCode.PROPORTIONS_CALIBRATED })
         assertFalse(off.calibrated)
+    }
+
+    @Test
+    fun `without proportion checks there is neither a sanity flag nor a calibration`() {
+        val g = grid(100)
+        val deepHigh = fixedDecoder(SleepStage.DEEP to 40, SleepStage.LIGHT to 40, SleepStage.REM to 20)
+        val params = PostprocessParams(calibrateProportions = true)
+
+        val checked = Postprocessor.run(deepHigh, context(g), params)
+        val nap = Postprocessor.run(deepHigh, context(g, checkProportions = false), params)
+
+        assertTrue(checked.sanityFailed)
+        assertTrue(checked.warnings.any { it.code == WarningCode.SANITY_DEEP_HIGH })
+        assertFalse(nap.sanityFailed)
+        assertFalse(nap.calibrated)
+        assertTrue(nap.warnings.isEmpty(), "${nap.warnings}")
+        assertEquals(40, nap.stages.count { it == SleepStage.DEEP }, "labels of the plain decode")
     }
 
     @Test

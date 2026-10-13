@@ -73,7 +73,12 @@ abstract class SourceSessionDao {
     ): Int
 }
 
-/** Nadirs of estimated nights (`night_baselines`) and the rolling baseline derived from them. */
+/**
+ * Nadirs of estimated nights (`night_baselines`) and the rolling baseline derived from them. Every WRITTEN night with a
+ * nadir has a row, naps included; the baseline counts only the rows whose night lasted at least the minimum session
+ * length (`features.baselineMinSessionMin`, compared with the session of the night's `estimated_nights` row), so a
+ * changed threshold applies to the stored history without a recompute.
+ */
 @Dao
 abstract class NightBaselineDao {
     /** Inserts or replaces the baseline row of a night. */
@@ -88,21 +93,32 @@ abstract class NightBaselineDao {
     @Query("SELECT * FROM night_baselines WHERE clientRecordId = :clientRecordId")
     abstract suspend fun find(clientRecordId: String): NightBaselineEntity?
 
-    /** Nadirs of the [limit] latest nights that ended strictly before [beforeMs], latest first. */
-    @Query("SELECT nadirBpm FROM night_baselines WHERE sessionEndMs < :beforeMs ORDER BY sessionEndMs DESC, clientRecordId LIMIT :limit")
+    /**
+     * Nadirs of the [limit] latest nights that ended strictly before [beforeMs] and whose session (end − start of
+     * their `estimated_nights` row) lasted at least [minDurationMs], latest first. With [minDurationMs] ≤ 0 every row
+     * counts, also one without a night row; with a positive minimum such a row (no known length) does not.
+     */
+    @Query(
+        "SELECT b.nadirBpm FROM night_baselines b LEFT JOIN estimated_nights n ON n.clientRecordId = b.clientRecordId " +
+            "WHERE b.sessionEndMs < :beforeMs AND (:minDurationMs <= 0 OR n.sessionEndMs - n.sessionStartMs >= :minDurationMs) " +
+            "ORDER BY b.sessionEndMs DESC, b.clientRecordId LIMIT :limit",
+    )
     abstract suspend fun recentNadirs(
         beforeMs: Long,
         limit: Int,
+        minDurationMs: Long,
     ): List<Double>
 
     /**
      * Baseline nadir for a night starting at [nightStartMs]: the median of the nadirs of the last [nights] nights
-     * that ended before it, or null when fewer than [NightBaseline.MIN_NIGHTS] such nights exist.
+     * that ended before it and lasted at least [minDurationMs] (shorter sessions are naps and never count), or null
+     * when fewer than [NightBaseline.MIN_NIGHTS] such nights exist.
      */
     open suspend fun baselineBefore(
         nightStartMs: Long,
         nights: Int,
-    ): Double? = if (nights <= 0) null else NightBaseline.median(recentNadirs(nightStartMs, nights))
+        minDurationMs: Long,
+    ): Double? = if (nights <= 0) null else NightBaseline.median(recentNadirs(nightStartMs, nights, minDurationMs))
 }
 
 /** Stays well below SQLite's 999 bound-parameter limit of older Android versions. */

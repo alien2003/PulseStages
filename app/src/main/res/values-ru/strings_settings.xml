@@ -65,6 +65,8 @@
     <string name="set_fea_cycle_prominence_hint">Минимальная глубина ультрадианного минимума пульса.</string>
     <string name="set_fea_baseline_nights_title">Ночей для базовой линии</string>
     <string name="set_fea_baseline_nights_hint">Число предыдущих ночей, минимумы которых образуют базовую линию пульса.</string>
+    <string name="set_fea_baseline_min_session_title">Базовая линия: минимальная длина сессии</string>
+    <string name="set_fea_baseline_min_session_hint">Более короткие сессии (дрёма) не входят в базовую линию пульса и не сравниваются с ней, поэтому никогда не помечаются как «повышенный пульс». 0 — учитываются все сессии.</string>
     <string name="set_fea_elevated_pct_title">Порог повышенного пульса</string>
     <string name="set_fea_elevated_pct_hint">Минимум ночи выше базовой линии больше чем на столько помечает ночь как «повышенный пульс».</string>
     <string name="set_fea_elevated_awake_shift_title">Сдвиг порога бодрствования</string>
@@ -176,6 +178,8 @@
     <string name="set_post_low_conf_policy_hint">Оставить декодированную стадию или писать лёгкий сон.</string>
     <string name="set_post_sanity_coverage_title">Проверять при покрытии выше</string>
     <string name="set_post_sanity_coverage_hint">Проверка правдоподобия выполняется только для ночей с покрытием выше этого.</string>
+    <string name="set_post_proportions_min_session_title">Проверять с длины сессии</string>
+    <string name="set_post_proportions_min_session_hint">Проверка правдоподобия и калибровка долей выполняются только для сессий не короче этой: доли стадий ночи не подходят для дрёмы. 0 — для всех сессий.</string>
     <string name="set_post_sanity_deep_max_title">Неправдоподобно много глубокого</string>
     <string name="set_post_sanity_deep_max_hint">Доля глубокого сна выше этой неправдоподобна.</string>
     <string name="set_post_sanity_deep_min_title">Неправдоподобно мало глубокого</string>

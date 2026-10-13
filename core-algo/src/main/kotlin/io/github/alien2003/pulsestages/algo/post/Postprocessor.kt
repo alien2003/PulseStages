@@ -27,12 +27,15 @@ internal fun interface EpochDecoder {
  *
  * @property hasData session epochs with heart-rate data.
  * @property forced session epochs forced to AWAKE (never relabelled).
+ * @property checkProportions run the sanity check and the proportion calibration (false for sessions shorter than
+ *   `post.proportionsMinSessionMin`: whole-night stage shares do not describe a nap).
  */
 internal class PostprocessContext(
     val grid: EpochGrid,
     val hasData: BooleanArray,
     val forced: BooleanArray,
     val coverage: Double,
+    val checkProportions: Boolean = true,
 )
 
 /**
@@ -56,7 +59,8 @@ internal class PostprocessResult(
 /**
  * Post-processing shared by all estimators (section 4 of the specification), in this order: (1) low-confidence
  * policy, (2) gap policy, (3) minimum bouts, (4) sanity check, (5) optional proportion calibration with re-decoding
- * (re-running 1–4), (6) merging into intervals. Proportions are shares of scored (non-UNKNOWN) time.
+ * (re-running 1–4), (6) merging into intervals. Proportions are shares of scored (non-UNKNOWN) time; (4) and (5) run
+ * only when [PostprocessContext.checkProportions] (not for naps).
  *
  * The minimum bouts run after the gap policy (the design notes listed them before it) so that the minimum lengths of
  * the specification hold in the output: the gap policy relabels the no-data part of a decoded bout, and the remaining
@@ -80,7 +84,7 @@ internal object Postprocessor {
         val initial = label(decoder.decode(offsets), context, params)
         var current = initial
         var iterations = 0
-        if (params.calibrateProportions) {
+        if (params.calibrateProportions && context.checkProportions) {
             while (iterations < params.calibrationMaxIterations && current.shares.hasScoredTime) {
                 val next = calibrationStep(offsets, current.shares, params) ?: break
                 offsets = next
@@ -123,7 +127,8 @@ internal object Postprocessor {
         val lastIsPartial = grid.clippedDurationMs(grid.sessionEpochs - 1) < grid.epochMs
         stages = LabelRules.mergePartialLastEpoch(stages, lastIsPartial)
         val shares = StageShares.of(stages, grid)
-        return Labelled(decoding, stages, shares, SanityCheck.check(shares, context.coverage, params))
+        val sanity = if (context.checkProportions) SanityCheck.check(shares, context.coverage, params) else emptyList()
+        return Labelled(decoding, stages, shares, sanity)
     }
 
     /**

@@ -65,6 +65,8 @@
     <string name="set_fea_cycle_prominence_hint">Minimum depth of an ultradian heart-rate minimum.</string>
     <string name="set_fea_baseline_nights_title">Baseline nights</string>
     <string name="set_fea_baseline_nights_hint">Number of previous nights whose minima form the heart-rate baseline.</string>
+    <string name="set_fea_baseline_min_session_title">Baseline: minimum session length</string>
+    <string name="set_fea_baseline_min_session_hint">Shorter sessions (naps) do not count for the heart-rate baseline and are not compared with it, so they are never marked elevated. 0 = every session counts.</string>
     <string name="set_fea_elevated_pct_title">Elevated heart-rate threshold</string>
     <string name="set_fea_elevated_pct_hint">A night minimum above the baseline by more than this marks the night as elevated.</string>
     <string name="set_fea_elevated_awake_shift_title">Awake threshold shift (elevated)</string>
@@ -176,6 +178,8 @@
     <string name="set_post_low_conf_policy_hint">Keep the decoded stage or write light sleep.</string>
     <string name="set_post_sanity_coverage_title">Check above coverage</string>
     <string name="set_post_sanity_coverage_hint">The sanity check runs only on nights with more coverage than this.</string>
+    <string name="set_post_proportions_min_session_title">Check from session length</string>
+    <string name="set_post_proportions_min_session_hint">The sanity check and the proportion calibration run only on sessions at least this long: night stage shares do not fit naps. 0 = every session.</string>
     <string name="set_post_sanity_deep_max_title">Implausible deep share above</string>
     <string name="set_post_sanity_deep_max_hint">More deep sleep than this share is implausible.</string>
     <string name="set_post_sanity_deep_min_title">Implausible deep share below</string>

@@ -25,9 +25,18 @@ internal class ExtraFeatures(
 
 /** Builds the [NightEstimate] from a prepared night and its post-processed labels. */
 internal object EstimateAssembler {
-    /** The post-processing context of [night]. */
+    /**
+     * The post-processing context of [night]; the stage-share checks run only for a session of at least
+     * `post.proportionsMinSessionMin` ([io.github.alien2003.pulsestages.algo.params.PostprocessParams.checksProportions]).
+     */
     fun context(night: PreparedNight): PostprocessContext =
-        PostprocessContext(night.grid, night.sessionDataMask, night.forcedAwakeMask, night.coverage)
+        PostprocessContext(
+            night.grid,
+            night.sessionDataMask,
+            night.forcedAwakeMask,
+            night.coverage,
+            checkProportions = night.params.post.checksProportions(night.input.sessionEndMs - night.input.sessionStartMs),
+        )
 
     /**
      * Night confidence: mean max posterior over session epochs with data × coverage × elevatedConfidenceFactor (if

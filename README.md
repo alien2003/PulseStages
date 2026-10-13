@@ -265,6 +265,9 @@ Android 14+ it uses an `activity-alias` with `android.intent.action.VIEW_PERMISS
   app's session is removed (unless "Existing sessions" is "Never overwrite"). If that staged session is deleted later,
   the next run estimates the lower-priority session again. Under "Recompute everything" sessions with stages are
   estimated too, so the priority decides between the two like for any other night.
+- **A piece of a night is not the night.** A session that lies mostly inside a longer session of another app but covers
+  at most half of it (say 40 minutes one watch recorded of a night another app recorded completely) never replaces
+  that night, whatever the priority. It is skipped as a duplicate of it.
 - **Manual package.** "Add an app by package name" adds a watch app that has not written sleep yet.
 - **Heart rate and steps.** "Heart rate and steps from any app" is the setting `hrSources`. The default `SAME_AS_SLEEP`
   reads heart rate and steps only from the app that wrote the sleep session. `ANY` reads them from every app.
@@ -277,6 +280,12 @@ Android 14+ it uses an `activity-alias` with `android.intent.action.VIEW_PERMISS
 - Fragments of one night from one app with a gap shorter than `mergeGapMin` (30 min) are merged into one night. The
   gap is written as AWAKE.
 - A merged night shorter than `minSessionMin` (90 min) is treated as a nap and skipped.
+- Naps can be estimated too: lower `minSessionMin` (Settings → Sources), for example to 30 min. Then:
+  - sessions shorter than `baselineMinSessionMin` (180 min, Settings → Features) do not count for the heart-rate
+    baseline and are never marked "elevated heart rate";
+  - sessions shorter than `proportionsMinSessionMin` (180 min, Settings → Post-processing) get no sanity check of the
+    stage shares, so a nap without deep sleep is not flagged as implausible;
+  - a nap that ends less than `mergeGapMin` before the night is merged into the night (the gap is AWAKE).
 
 ### Health Connect's own "Data sources and priority"
 
