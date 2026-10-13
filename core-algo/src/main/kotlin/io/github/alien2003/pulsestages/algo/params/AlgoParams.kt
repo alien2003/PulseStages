@@ -401,7 +401,8 @@ enum class DurationModel {
  * Hybrid estimator (section 8). Model weights are not parameters; they come from the model bundle. The decoder
  * defaults ([durationModel], [timePriorWeight], [emissionWeight], [priorExponent]) are the values chosen by the
  * nested cross-validation of the open-dataset validation ([TrainedDefaults]); the pre-training values were EXPLICIT,
- * 1.0, 1.0 and 1.0.
+ * 1.0, 1.0 and 1.0. [shortSessionMaxMin] comes from the pre-registered nap experiment (ALGORITHM.md section 13.11;
+ * 0 before it).
  */
 @Serializable
 data class HybridParams(
@@ -420,6 +421,12 @@ data class HybridParams(
      * frequent stages), values in between interpolate.
      */
     val priorExponent: Double = TrainedDefaults.HYBRID_PRIOR_EXPONENT,
+    /**
+     * Sessions shorter than this many minutes (naps, and short nights) are decoded with the bundle's short-session
+     * log-bias `stageLogBiasShort` instead of its `stageLogBias` (a bundle without `stageLogBiasShort` keeps
+     * `stageLogBias` for them); 0 disables the rule, every session then uses `stageLogBias`.
+     */
+    val shortSessionMaxMin: Double = TrainedDefaults.HYBRID_SHORT_SESSION_MAX_MIN,
 )
 
 /** What to write for epochs inside long data gaps. */

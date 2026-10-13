@@ -293,6 +293,7 @@ class SettingsValidatorTest {
             { assertRejected(algo { copy(hybrid = hybrid.copy(timePriorWeight = -1.0)) }, "algo.hybrid.timePriorWeight") },
             { assertRejected(algo { copy(hybrid = hybrid.copy(emissionWeight = -1.0)) }, "algo.hybrid.emissionWeight") },
             { assertRejected(algo { copy(hybrid = hybrid.copy(priorExponent = -0.25)) }, "algo.hybrid.priorExponent") },
+            { assertRejected(algo { copy(hybrid = hybrid.copy(shortSessionMaxMin = -1.0)) }, "algo.hybrid.shortSessionMaxMin") },
             { assertRejected(algo { copy(rules = rules.copy(remMinT = 1.5)) }, "algo.rules.remMinT") },
             {
                 assertRejected(

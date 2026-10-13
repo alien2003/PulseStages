@@ -19,8 +19,16 @@ and 0.076 for the rules. Without proportion matching (`loso-v2`) the same classi
 25 % DEEP / 34 % REM / 34 % LIGHT with per-night errors of 52 / 54 / 18 / 95 min (DEEP / REM / AWAKE / LIGHT); the
 pre-registered experiment of section 13.10 adopted the correction (summed per-night error 147 instead of 219 min;
 κ 0.339 vs 0.334 is within noise, Δκ +0.003 [−0.037, 0.038] on mean2min, and b costs 0.03 κ on the BIDSleep headband
-nights). Over four training seeds the uncorrected setting averages κ 0.317 ± 0.019, the conservative figure. The
-output is an estimate, not a measurement.
+nights). Over four training seeds the uncorrected setting averages κ 0.317 ± 0.019, the conservative figure.
+Sessions shorter than 180 min use a separate short-session bias (pre-registered nap experiment, section 13.11): daytime
+naps, and with the app's default source filter (90 min) also short nights of 90–180 min. On nap proxies of 30–120 min
+cut from the PSG nights it raises accuracy from 0.41 to 0.49 and lowers the summed stage-share error from 93 to 72
+percentage points (worse variant); no length between 120 and 180 min was in the pre-registered evaluation. Nap
+estimates stay rough (κ ≈ 0.1–0.3; for a 30-min nap no better than calling everything light sleep). In the experiment
+about 4 in 5 nap proxies were flagged low-confidence, mostly by the stage-share sanity check; that check now skips
+sessions shorter than 180 min (`proportionsMinSessionMin`, section 8), so only a too-small heart-rate range flags a nap
+(33–41 % of the 30–120-min proxies, same stages); a nap without the flag is still a rough estimate. The output is an
+estimate, not a measurement.
 
 Contents: 1 Estimate, not measurement · 2 Pipeline · 3 Preprocessing · 4 Features · 5 RULES · 6 HMM · 7 HYBRID · 8
 Post-processing · 9 Gates and confidence · 10 Personalization · 11 Parameters · 12 Validation protocol · 13 Results ·
@@ -41,7 +49,8 @@ a higher and more variable one, and stages follow a typical ultradian timing. Th
   `recordingMethod = UNKNOWN` (no sensor measured the stages);
 - the validation below quantifies how often the estimate agrees with PSG: Cohen's kappa ≈ 0.34 for the default
   estimator ("fair" agreement, 61–62 % of 30-s epochs correct), with mean errors of 18–41 minutes per night for the
-  AWAKE, DEEP and REM totals (38–53 for LIGHT) and large differences between people;
+  AWAKE, DEEP and REM totals (38–53 for LIGHT) and large differences between people; daytime naps are estimated
+  much more roughly (section 13.11);
 - any night can be recomputed later with a better algorithm, because the source data are never modified and the params
   hash identifies what produced a record.
 
@@ -245,7 +254,12 @@ decodes of all 31 Walch subjects, both 2-minute variants, at the shipped decoder
 / 56.7 / 14.4 / 22.7 % vs PSG 6.3 / 56.9 / 14.2 / 22.6 %): relative to LIGHT, the per-epoch DEEP likelihood is scaled
 by e^(−0.534) ≈ 0.59 and the REM likelihood by e^(−0.204) ≈ 0.82. b lives in the bundle, not in AlgoParams, because it
 is a statistic of the classifier it corrects (like `classPriors`); the app persists the full AlgoParams, so an
-AlgoParams vector would outlive its bundle. A bundle without `stageLogBias` keeps its earlier fingerprint. On epochs
+AlgoParams vector would outlive its bundle. A bundle without `stageLogBias` keeps its earlier fingerprint. **Short
+sessions (naps)**: on sessions shorter than `hybrid.shortSessionMaxMin` = 180 min the bundle's `stageLogBiasShort` =
+(−0.094, +0.417, +0.270, −0.593) replaces b (relative to LIGHT: DEEP × 0.86, REM × 0.36), fitted by the same fixed
+point on the out-of-fold decodes of nap-length sessions cut from the Walch nights (section 13.11); a bundle without it
+keeps b on short sessions; `shortSessionMaxMin` = 0 turns the rule off. The rule is by length only, so short nights
+(90–180 min, estimated under the app's default source filter) get it as well. On epochs
 with HR data −w_e · β · log π_s is itself a per-stage constant, so changing β by d equals adding −w_e · d · log π_s to
 b (unit-tested, `HybridEmissionsTest`): a fitted b absorbs any β, and β stays 1.
 
@@ -273,8 +287,9 @@ with the diagonal floored at ε.
 distribution and emission scores; Viterbi + forward–backward.
 
 Shipped decoder defaults (chosen by nested cross-validation, section 13.2): EXPLICIT, w_e = 0.5, w_t = 0, β = 1
-(section 13.10), with the bundle's b above. An incompatible or missing bundle (`featureSetVersion` or `featureNames`
-differ from this build) is never used: the night falls back to the HMM with the warning `HYBRID_MODEL_UNAVAILABLE`.
+(section 13.10), with the bundle's b above, and its b_short on sessions shorter than 180 min (section 13.11). An
+incompatible or missing bundle (`featureSetVersion` or `featureNames` differ from this build) is never used: the night
+falls back to the HMM with the warning `HYBRID_MODEL_UNAVAILABLE`.
 
 **Training statistics stored in the bundle** (`tools/train/pulsetrain/stats.py`, fitted on the training subjects
 only): gamma MLE (location 0) on the *uncensored* bout lengths of each stage (first / last bout of a labelled segment
@@ -316,8 +331,10 @@ session, as before); the other steps are unchanged.
 ## 9. Coverage gates, fallbacks and confidence (`SleepStager`)
 
 Session shorter than `minSessionMin` (default 0 = off; the app drops naps by its own source setting, 90 min by
-default and as low as 10 min when naps are wanted) → not estimated (`SESSION_TOO_SHORT`); no heart-rate sample in range in the session ± 30 min → `NO_HR_DATA`; coverage ≥
-`minCoverage` = 0.6 → the configured estimator; `rulesMinCoverage` = 0.4 ≤ coverage < 0.6 → RULES with
+default and as low as 10 min when naps are wanted; a user who lowers that setting gets naps estimated, with the
+short-session bias of section 7 below 180 min, validated on nap proxies in section 13.11) → not estimated
+(`SESSION_TOO_SHORT`); no heart-rate sample in range in the session ± 30 min → `NO_HR_DATA`; coverage ≥ `minCoverage`
+= 0.6 → the configured estimator; `rulesMinCoverage` = 0.4 ≤ coverage < 0.6 → RULES with
 `RULES_FALLBACK_LOW_COVERAGE`; coverage < 0.4 → not estimated (`LOW_COVERAGE`), reason logged.
 
 **Confidence**: epochConfidence = max_s γ_k(s); nightConfidence = mean epochConfidence over the session epochs with
@@ -335,9 +352,11 @@ than 180 min, and what deliberately does not:
 - `LOW_HR_RANGE` stays: a short session often has P50 − P10 < 2 bpm, and its hrNorm is then genuinely unreliable;
   `CYCLE_PRIOR_DISABLED` (HMM only) is expected on sessions shorter than about two cycles and has no effect on the
   confidence;
-- the estimators run unchanged: the HYBRID classifier's elapsed / remaining-time features and the HSMM durations were
-  learned on whole nights, so a nap looks like the beginning and the end of a night at once; no nap was in the
-  validation data, so nap hypnograms are unvalidated;
+- the estimators run unchanged except for one HYBRID constant: on sessions shorter than `hybrid.shortSessionMaxMin` =
+  180 min the bundle's short-session bias `stageLogBiasShort` replaces b (section 7; pre-registered nap experiment,
+  section 13.11). The HYBRID classifier's elapsed / remaining-time features and the HSMM durations were learned on
+  whole nights, so a nap looks like the beginning and the end of a night at once; no real nap was in the validation
+  data, only nap proxies cut from the PSG nights (section 13.11), on which nap hypnograms are rough;
 - population EM (section 10; only when the HMM emissions are used, not with the default HYBRID bundle) pools the
   latest written sessions, naps included, and counts them towards `emEveryNights`: a nap is on its own hrNorm scale
   and weighs by its epoch count (a 45-min nap ≈ a tenth of a night); not changed;
@@ -422,6 +441,7 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | hybrid | `maxBoutMin` | 120 | maximum bout length of the HSMM (min) |
 | hybrid | `elevatedAwakeFactor` | 0.6 | AWAKE likelihood multiplier on elevated nights |
 | hybrid | `priorExponent` | **1.0** (pre-registered experiment, section 13.10: the share correction is the bundle's `stageLogBias`, β stays 1) | β of the scaled likelihood p(s \| x) / π_s^β |
+| hybrid | `shortSessionMaxMin` | **180** (pre-registered nap experiment, section 13.11; 0 = off, the value before it) | sessions shorter than this (min) use the bundle's `stageLogBiasShort` instead of `stageLogBias` |
 | post | `minDeepMin` / `minRemMin` / `minAwakeMin` | 5 / 5 / 2 | minimum bouts (min) |
 | post | `gapPolicy` | UNKNOWN | UNKNOWN / LIGHT / NEAREST for long gaps |
 | post | `sanityMinCoverage` / `sanityDeepMax` / `sanityRemMax` / `sanityDeepMin` / `sanityConfidenceFactor` | 0.8 / 0.35 / 0.40 / 0.03 / 0.7 | sanity check |
@@ -435,8 +455,8 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | personal | `calibrationRegularization` / `calibrationHoldout` | 10 / 0.3 | calibration strength (hours of evidence) and held-out share |
 
 The model bundle itself (`assets/models/hybrid_model.json`: standardization, classifier weights, class priors, gamma
-durations, bout transitions, initial distribution, time prior, proportion-matching `stageLogBias`) is not part of
-`AlgoParams`; its SHA-256 fingerprint enters the params hash.
+durations, bout transitions, initial distribution, time prior, proportion-matching `stageLogBias`, short-session
+`stageLogBiasShort`) is not part of `AlgoParams`; its SHA-256 fingerprint enters the params hash.
 
 ## 12. Validation protocol
 
@@ -558,6 +578,10 @@ research, Nature Health (2026), https://doi.org/10.1038/s44360-026-00096-z. Deta
   held-out subjects of the group (Walch and BIDSleep) are decoded with their LOSO fold bundle + that b. The final
   bundle's b is fitted on the LOSO out-of-fold decodes of all Walch subjects (both headline variants pooled) at the
   final decoder parameters.
+- **Naps** (pre-registered, adopted, section 13.11): nap proxies (the first 30–180 min of every night, no data after
+  the end) decoded with the same fold bundles; the short-session bias b_short is fitted per outer group on the inner
+  out-of-fold proxies of the group's Walch selection subjects, the final one on the LOSO out-of-fold proxies of all
+  Walch subjects.
 - **Provenance**: each run records the SHA-256 of the `algo-cli` build it used (launcher + `lib/*.jar`) in its
   `config.json` and fails if the build changes during the run; every rebuild is logged in
   `tools/train/out/commands.log`.
@@ -577,7 +601,14 @@ setting re-run with its inner fold models kept (6.4 min; reproduces `loso-v2` ni
 and the final bundle exactly), `bias-base/bias` — the pre-registered stage-proportion experiment (section 13.10, 433
 `algo-cli` calls, all exit code 0; re-run on the final build with `--allow-other-build` as `bias-base/bias-033541ae`,
 it reproduced every per-night result and inner fit byte for byte) and `bias-final` — the final bundle with b
-(installed). Rows marked "+ b" below are
+(installed). Finally, on the release build of the tree before the nap experiment (`bb321bcb…`; it reproduces
+`bias-base/bias` night by night): `naps` — the pre-registered nap-proxy evaluation on the `bias-base` fold artefacts
+(section 13.11, 223 `algo-cli` calls, all exit code 0, 22:29:29–22:30:22) and `naps-final` — the final bundle with
+b_short (installed); on the build that implements it (`f0ae1c7b…`) `naps-verify` checked the implementation, and
+for the audit `naps-rerun` (the experiment again with the committed code: every stored file identical, 223 calls) and
+`naps-posthoc` (post-hoc analyses, reporting only, 20 calls); on the build that merged it with the nap rules of the
+long-term context and the stage-share checks (`713a0663…`) `naps-verify-merge` repeated the implementation check
+(section 13.11, "Flags in the current build"). Rows marked "+ b" below are
 the adopted default with proportion matching; the other HYBRID rows are without it. All kappas are Cohen's kappa on
 the 30-s label epochs over AWAKE / LIGHT / DEEP / REM; "κ mean ± sd" is the mean and the **sample sd (n − 1)** over
 subjects (each subject's nights pooled), "κ pooled" is over all chunks; minute errors are mean absolute errors per
@@ -1109,6 +1140,197 @@ instantaneous,mean2min --selection per-group --keep-inner`, `train.py bias --run
 `bias-base/bias/orig-0918/`) and `train.py bias --run bias-base --out-name bias-033541ae --allow-other-build` (the
 whole experiment on the final build: identical `results.jsonl` and `decisions.json`).
 
+### 13.11 Daytime naps: nap proxies and a short-session bias (pre-registered, adopted)
+
+**Question.** A user who takes daytime naps lowers the app's source filter `minSessionMin` (90 min by default) to 30
+min, so every session of 30 min or more is estimated by the default of section 13.10. Is that good enough for naps,
+and does b — fitted to whole-night stage shares — suit them? No open dataset has labelled daytime naps, so the
+evaluation uses **nap proxies** cut from the labelled nights. (With the default filter, sessions of 90–180 min —
+short nights — are estimated as well, so the threshold T chosen here also decides how they are decoded; see "Sessions
+between 120 and 180 min" below.)
+
+**Pre-registration** (written to `tools/train/out/prereg-naps.md` and appended verbatim to
+`tools/train/out/naps/commands.log` at 2026-10-13T22:24:35+02:00, before any proxy was built or decoded; the night-level
+numbers of sections 13.1–13.10 were known; committed as [docs/prereg/prereg-naps.md](docs/prereg/prereg-naps.md),
+SHA-256 `10ebc9f4…3815`, with the log as `docs/prereg/commands-naps.log`; `tools/train/tests/test_prereg.py` checks that
+the two agree). Code: `tools/train/pulsetrain/naps.py`, `train.py naps | naps-report | naps-final | naps-verify`; post
+hoc (audit, reporting only): `pulsetrain/naps_posthoc.py`, `train.py naps-posthoc`.
+**Provenance, stated plainly:** the pre-registration was first committed together with the results (commit
+`2bd5eee`), so "written before any result" rests on file times (`out/prereg-naps.md` created 22:24:22 and last
+modified 22:24:35; first algo-cli call 22:29:29) and on the run's own log, not on an independent record.
+`pulsetrain/naps.py` was rewritten at 22:33:15, after the run (22:29–22:30), so the exact file behind `out/naps` is not
+kept. A re-run of the whole experiment with the committed code (`out/naps-rerun`, build `f0ae1c7b`) reproduces its
+`results.jsonl`, `fits.json`, `repro/summary.json` and `report.md` byte for byte (decision unchanged). The nap
+runs now record the SHA-256 of `train.py` and every `pulsetrain/*.py` next to the build and pre-registration digests
+(`meta.code`); a future pre-registration should be committed, with its analysis code, before the first run.
+
+- **Proxies.** For every OHealth-like night (both headline variants; Walch PSG headline, BIDSleep secondary) and every
+  L ∈ {30, 60, 90, 120, 180} min: start = the night's session start (first non-wake epoch − 5 min, as in
+  `prepare.py`), end = start + L; heart rate and steps of the 30 min before the start as the night file has them,
+  **nothing after the end** (a real nap is followed by wakefulness, which the nights cannot supply; dropping the
+  post-session context is the conservative choice); the label epochs inside. Every prepared session is ≥ 199 min
+  long, so all 31 × 5 Walch and 253 × 5 BIDSleep proxies exist per variant.
+- **Fold artefacts, no retraining.** Each held-out subject is decoded with its LOSO outer fold bundle of `bias-base`,
+  its group's decoder choice θ_g and β = 1. Reproduction gate (before any proxy): with this worktree's algo-cli build
+  the night-level evaluation of A (fold bundle + the fold-level b_g of candidate (b), section 13.10) and of BASE (no
+  b) reproduced `bias-base/bias/results.jsonl` night by night — **1136 of 1136 decodes identical** (284 nights × 2
+  variants × 2), Walch κ 0.348 / 0.339 (A) and 0.334 / 0.336 (BASE) — and RULES / HMM-table reproduced `loso-v2` on
+  4 × 284 of 284 nights.
+- **Candidates** for sessions shorter than T ∈ {120, 180} min (strictly shorter; sessions ≥ T are decoded as A in
+  every candidate, so the validation nights, all ≥ 199 min, are unaffected by construction; a real night shorter
+  than T is not): **(A)** shipped default, b on; **(B-T)** b off
+  for short sessions; **(C-T)** a separate short-session bias b_short_g(T), fitted by the fixed point of section 7
+  (unchanged: start 0, η halving, ≤ 8 decodes) per (variant, outer group, T) on the TRAINING folds' proxies only —
+  the proxies with L < T of the group's inner held-out Walch selection subjects, each decoded by its inner fold model
+  at θ_g (the fit set of b_g, cut into naps; never a subject of the group). RULES and HMM-table for context.
+- **Metrics** per session: accuracy over its scored 30-s chunks; **E = 100 · Σ_s |P_s − T_s|**, the summed absolute
+  stage-share error in percentage points (AWAKE + LIGHT + DEEP + REM, 0–200); Cohen's κ (mean per subject where
+  defined, reported, **not** used: it is unstable on 30-min segments with one or two stages); NOT_ESTIMATED rate and
+  reasons; low-confidence / sanity flags. Per L, accuracy is pooled over the chunks of the L; "pooled over L" is the
+  mean over L ∈ {30, 60, 90, 120} of the per-L values. Paired per-subject bootstrap CIs vs A (10 000 resamples).
+- **Adoption rule (verbatim):** "On Walch, worse sampling variant, pooled over L in {30, 60, 90, 120} (and reported per
+  L): adopt the candidate with the lowest mean summed share error among those whose accuracy >= (accuracy of A -
+  0.01); ties -> higher accuracy; else keep A." (accuracy worse = min, E worse = max over the two variants; ties =
+  |ΔE| < 0.05 pp; then the order A, B-120, B-180, C-120, C-180.)
+
+**Results, Walch (PSG) held-out subjects**, worse variant per cell (accuracy / E in pp; `out/naps/report.md` has both
+variants, κ, shares and flags per L). "Always LIGHT" is a trivial reference computed from the labels (κ = 0), not a
+candidate:
+
+| candidate | L = 30 | L = 60 | L = 90 | L = 120 | **pooled 30–120: accuracy / E** (inst. / mean2min) | L = 180 | decision |
+|---|---|---|---|---|---|---|---|
+| A shipped default (b on) | 0.470 / 94.5 | 0.339 / 111.2 | 0.390 / 90.8 | 0.433 / 76.0 | **0.413 / 93.1** (0.421 / 84.5; 0.413 / 93.1) | 0.478 / 65.5 | reference |
+| B-120 b off < 120 min | 0.344 / 115.4 | 0.292 / 111.0 | 0.323 / 102.6 | = A | **0.353 / 99.9** | = A | accuracy too low |
+| B-180 b off < 180 min | 0.344 / 115.4 | 0.292 / 111.0 | 0.323 / 102.6 | 0.314 / 104.8 | **0.323 / 106.8** | = A | accuracy too low |
+| C-120 b_short < 120 min | 0.558 / 75.9 | 0.428 / 84.5 | 0.474 / 71.2 | = A | **0.473 / 75.5** (0.473 / 75.5; 0.494 / 72.9) | = A | qualifies |
+| **C-180 b_short < 180 min** | 0.574 / 71.8 | 0.388 / 89.5 | 0.474 / 70.8 | 0.510 / 65.2 | **0.488 / 72.3** (0.488 / 72.3; 0.510 / 72.3) | = A | **adopted** |
+| *RULES (context)* | 0.574 / 61.3 | 0.438 / 76.4 | 0.434 / 74.0 | 0.442 / 71.3 | 0.472 / 70.8 | 0.469 / 70.3 | — |
+| *HMM-table (context)* | 0.379 / 76.3 | 0.339 / 67.7 | 0.318 / 65.0 | 0.325 / 62.2 | 0.345 / 65.2 | 0.338 / 58.7 | — |
+| *always LIGHT (reference)* | 0.639 / 72.1 | 0.498 / 100.4 | 0.506 / 98.8 | 0.528 / 94.5 | 0.543 / 91.3 | 0.534 / 93.2 | — |
+
+Threshold 0.413 − 0.01 = 0.403; qualifying A, C-120, C-180; **C-180 has the lowest E → adopted**. T was selected by
+the pre-registered rule on these held-out results, the same data the table reports, so the C-180 row is the selected
+candidate's own estimate and carries a small selection optimism; C-180 and C-120 are not distinguishable (paired
+C-180 − C-120, Walch, pooled: ΔE −3.1 [−7.3, 0.9] / −0.6 [−5.6, 4.2] pp, Δaccuracy +0.015 [0.001, 0.030] / +0.017
+[−0.003, 0.037], instantaneous / mean2min; `out/naps-posthoc`, post hoc). Future experiments should select T in the
+inner folds. The C-versus-A decision does not depend on that choice. Paired C-180 − A
+(Walch, pooled over L): ΔE −12.1 [−18.9, −5.4] / −20.8 [−31.5, −11.1] pp, Δaccuracy +0.068 [0.040, 0.096] / +0.097
+[0.050, 0.148] (instantaneous / mean2min); per L the CIs of ΔE exclude 0 except at 60 and 120 min on instantaneous
+and 120 min on mean2min; Δκ per L between −0.035 and +0.072, every CI includes 0. B-120 / B-180 − A: ΔE +13.7 / +22.3
+pp and Δaccuracy −0.068 / −0.098 on instantaneous (CIs exclude 0): turning b off makes naps worse. Mean per-subject
+κ on the proxies (worse variant): A 0.22 / 0.11 / 0.13 / 0.18 (L = 30 / 60 / 90 / 120), C-180 0.28 / 0.10 / 0.16 /
+0.19, at 180 min 0.22 (A = C); whole nights 0.34. (This is the mean of per-subject κ, the "κ" of `out/naps/report.md`.
+The κ of the chunk-pooled confusion matrix, its "κ pooled", is lower: averaged over L = 30–120, A 0.140 / 0.149 and
+C-180 0.159 / 0.156 against 0.164 / 0.177 and 0.188 / 0.186 per subject, instantaneous / mean2min.)
+
+**RULES, context only by pre-registration, comes close to C-180 on the rule's two metrics:** accuracy 0.472 vs 0.488
+(above the threshold) and E 70.8 vs 72.3 pp (lower). Scored as if it had been a candidate (post hoc), the rule would
+have picked it. Only κ separates the two (RULES 0.015 / 0.029, C-180 0.188 / 0.186): RULES discriminates stages
+hardly better than base rates, and its low E comes from a stage mix close to PSG, not from finding the stages. The
+rule's metrics do not penalize that (κ was left out because it is unstable on short segments); "always LIGHT" also
+qualifies on accuracy (0.543) but has E 91.3.
+
+Pooled stage shares on Walch, % AWAKE / LIGHT / DEEP / REM (PSG of the instantaneous chunks; the mean2min chunks
+differ by ≤ 0.4 pp):
+
+| L | PSG | A inst. | A mean2min | C-180 inst. | C-180 mean2min |
+|---|---|---|---|---|---|
+| 30 | 19.8 / 63.9 / 15.2 / 1.1 | 28.3 / 53.1 / 0.0 / 18.6 | 22.7 / 45.7 / 1.3 / 30.3 | 19.0 / 65.9 / 5.0 / 10.1 | 17.3 / 72.1 / 4.8 / 5.7 |
+| 60 | 13.0 / 49.9 / 36.1 / 1.0 | 18.8 / 41.3 / 15.3 / 24.7 | 17.7 / 47.9 / 7.6 / 26.8 | 13.1 / 46.6 / 24.7 / 15.5 | 12.7 / 61.5 / 18.7 / 7.1 |
+| 90 | 9.9 / 50.7 / 33.4 / 6.0 | 14.9 / 40.5 / 23.0 / 21.5 | 18.6 / 39.6 / 18.1 / 23.7 | 11.0 / 48.8 / 32.8 / 7.4 | 12.3 / 56.9 / 29.4 / 1.4 |
+| 120 | 8.4 / 52.8 / 29.6 / 9.2 | 15.1 / 38.9 / 25.3 / 20.7 | 15.0 / 41.4 / 22.1 / 21.5 | 9.0 / 54.5 / 32.9 / 3.5 | 8.2 / 53.4 / 34.7 / 3.6 |
+| 180 | 7.2 / 53.5 / 26.6 / 12.7 | 10.5 / 43.9 / 25.6 / 20.0 | 11.1 / 42.3 / 22.4 / 24.2 | = A | = A |
+
+The shipped default **over-calls REM in short sessions** (19–30 % REM in the first 30–120 min of sleep, where PSG has
+1–9 %) and under-calls DEEP in the first hour. A plausible explanation (not tested here): the classifier's time
+features (hours to the session end) were trained on sessions that end at the final morning awakening, where REM and
+wake are frequent, so the end of a short session looks like the end of a night. b_short (more LIGHT and DEEP, much
+less REM) removes most of the REM excess, but not at every length and variant: summed over 30–120 min and both
+variants the excess falls from 153 to 36 pp (about 77 % removed), yet on instantaneous at 60 min 15.5 % REM remains
+(PSG 1.0 %; 61 % of A's excess), and at 90–120 min the correction overshoots into **under-calling REM** (3.5 / 3.6 %
+at 120 min against PSG 9.2 %; 1.4 % at 90 min on mean2min against 6.1 %). DEEP stays under-called in the first hour.
+
+- **Flags.** Low-confidence (LOW_HR_RANGE or a sanity warning) on 100 % of the 30-min proxies, 77–90 % at 60 min,
+  61–81 % at 90–120 min with A and with C-180 (whole nights: 10–26 %): with C-180 83.9 / 79.8 % of the 30–120-min
+  proxies (instantaneous / mean2min), i.e. about 4 in 5, and 35.5 / 64.5 % at 180 min; at 30 min 30–31 of the 31
+  proxies (A) and 28 (C-180) have `SANITY_DEEP_LOW` (the corridors were set for whole nights) and 58–74 % have
+  `LOW_HR_RANGE` (P50 − P10 < 2 bpm in 30 min). No Walch proxy is NOT_ESTIMATED; on BIDSleep 1–3 of 253 per length
+  (NO_HR_DATA, LOW_COVERAGE).
+- **Flags in the current build** (the stage-share checks run only on sessions of at least
+  `post.proportionsMinSessionMin` = 180 min, section 8; developed in parallel with this experiment and merged after
+  it). Sessions shorter than 180 min get no `SANITY_*` warning, so on them low-confidence is `LOW_HR_RANGE` alone.
+  `naps-verify` on the merged build (`out/naps-verify-merge`, build `713a0663…`, default parameters) reproduces A on
+  568 of 568 nights and C-180 on 2840 of 2840 proxies: the same confusion matrices and estimation status, the
+  `SANITY_*` codes of 1787 proxies shorter than 180 min dropped and nothing else different (180-min proxies
+  unchanged). Low-confidence with C-180 on Walch is then 58.1 / 74.2 % at 30 min, 32.3 / 45.2 % at 60, 25.8 / 25.8 %
+  at 90 and 16.1 / 19.4 % at 120 min, 33.1 / 41.1 % pooled over 30–120 min (instantaneous / mean2min; BIDSleep
+  40.4 / 45.5 %), and 35.5 / 64.5 % at 180 min as above. The flag therefore no longer marks most naps; the stages,
+  and so every accuracy and share error above, are the same.
+- **BIDSleep (EEG headband, secondary;** its labels have 36 % N3 in the first 30 min of sleep, Walch 15 %): worse
+  variant pooled A 0.363 / 101.0, B-120 0.362 / 101.0, B-180 0.359 / 102.2, C-120 0.424 / 87.0, C-180 0.434 / 87.8
+  (accuracy / E); C-180 − A ΔE −9.9 [−12.2, −7.5] / −12.9 [−15.7, −10.1] pp, Δaccuracy +0.055 [0.044, 0.066] / +0.074
+  [0.061, 0.087]: the same direction as Walch.
+- **Sessions between 120 and 180 min (post hoc, reporting only, not pre-registered;** `train.py naps-posthoc`,
+  `out/naps-posthoc`; first computed by the auditors). The pre-registered grid had no length between 120 and 180 min,
+  yet with T = 180 every session shorter than 3 h gets b_short — with the app's default source filter (90 min) that
+  includes short nights of 90–180 min. Proxies of 150 and 170 min decoded like the experiment's (the 120-min proxies
+  decoded again: 1136 of 1136 identical to the stored records); Walch, C-180 − A at 150 / 170 min: instantaneous ΔE
+  +5.6 [−5.5, 16.8] / +7.6 [−2.2, 17.0] pp (E 62.6 → 68.2, 55.6 → 63.2), Δaccuracy +0.038 [−0.008, 0.085] / +0.033
+  [−0.010, 0.076]; mean2min ΔE −14.3 [−24.6, −4.3] / −10.2 [−19.6, −1.4] pp, Δaccuracy +0.042 [−0.007, 0.091] /
+  +0.060 [0.023, 0.101]; Δκ within ±0.03, every CI includes 0. b_short trades A's REM excess (17–25 % REM against PSG
+  10–12 %) for a deficit (2.0–4.5 %) and over-calls DEEP (34–38 % against 28–30 %), so `SANITY_DEEP_HIGH` fires on
+  45–55 % of these proxies (A 13–26 %) and more of them are low-confidence on instantaneous (58 / 68 % vs 48 / 39 %;
+  experiment build, which checked every session: the current build runs no sanity check below 180 min).
+  BIDSleep: ΔE between −3.3 and +1.8 pp (CIs include 0), Δaccuracy +0.03 to +0.06 (CIs exclude 0). For 2–3-hour
+  sessions the correction is therefore a wash on share error (better on one variant, worse on the other), slightly
+  better on accuracy and wrong in the other direction on REM; a follow-up should pre-register L ∈ {150, 170} and
+  proxies that end with an awakening.
+- **Fold-level fits.** b_short_g(180) over the 10 groups: AWAKE −1.17 … +0.10, LIGHT +0.10 … +0.88, DEEP +0.03 …
+  +0.79, REM −0.85 … −0.34; D = Σ|T − P| 0.002–0.079 (T = 120: D ≤ 0.097).
+- **Final model.** b_short fitted by the same fixed point on the LOSO out-of-fold proxies (L = 30–120 min) of all 31
+  Walch subjects, both variants pooled, at the final decoder (EXPLICIT, 0.5, 0, β = 1): **stageLogBiasShort =
+  (−0.094, +0.417, +0.270, −0.593)** (AWAKE / LIGHT / DEEP / REM); relative to LIGHT, DEEP × e^(−0.147) ≈ 0.86 and REM
+  × e^(−1.010) ≈ 0.36 (whole-night b: 0.59 and 0.82). The 8-decode budget left D = 0.133 (the decoded REM share
+  over the accepted steps after the start: 1.0, 22.6, 2.0, 13.8 and 2.5 %, over all eight decodes 0–30 %; PSG
+  5.8 %); in-sample (reporting only) E 65.3 / 66.6 pp, accuracy 0.510 / 0.535. **The shipped constant is a worse fit
+  than the configuration that was validated:** in-sample it decodes 10.5 / 59.3 / 27.7 / 2.5 % against PSG 10.9 /
+  52.7 / 30.6 / 5.8 % (REM under-called by more than half), whereas the per-group fits behind the C-180 row reached
+  D 0.002–0.079. Its values lie inside the range of the fold fits (their mean is (−0.276, +0.508, +0.293, −0.525)).
+  It is kept as fitted because the pre-registration fixed the fit procedure; replacing it post hoc (a larger budget,
+  the mean of the fold fits) would be a new, unvalidated choice for a future pre-registration. The validated numbers
+  are the C-180 row above (b_short fitted per group, never on the evaluated subject).
+- **Implementation** (`:core-algo`): `hybrid.shortSessionMaxMin` = **180** (TrainedDefaults; 0 = off), bundle field
+  `stageLogBiasShort` (validated, in the fingerprint when present). Disclosed deviation from the pre-registration's
+  implementation note, which had "absent = no bias on short sessions (B)": a bundle *without* `stageLogBiasShort`
+  keeps its `stageLogBias` on short sessions (A), because B was the worst candidate; it changes no candidate result
+  and not the decision (the shipped bundle carries the field). Verified with the new build and its *default*
+  parameters (`train.py naps-verify`): fold bundles carrying b_g and b_short_g(180) reproduce A on 568 of 568 whole
+  nights and C-180 on 2840 of 2840 proxies session by session; the installed bundle
+  (`pulsestages-walch+bidsleep-mlp-naps-final`, = `bias-final` + `stageLogBiasShort`) runs on every night and proxy
+  (RULES only on low coverage, never the HMM fallback). The new bundle fingerprint and the new AlgoParams field change
+  the params hash of every estimate (offered for recomputation), and personal classifier deltas fitted for the
+  previous bundle are ignored (section 10) until the user calibrates again.
+
+**Conclusion.** For naps the estimate is rough: with the adopted correction about half of the 30-s epochs agree with
+PSG (accuracy 0.39–0.62 depending on length and variant, κ ≈ 0.1–0.3), the summed share error is about twice that of a
+whole night (62–90 vs 32–39 pp), and on the experiment's build most naps were flagged low-confidence (about 4 in 5 of
+the 30–120-min proxies, every 30-min one; with the sanity check skipped below 180 min, as in the current build,
+33–41 %, see "Flags in the current build"). For a 30-min nap the stage breakdown is no better than calling everything light sleep (0.64 / 72
+pp); from 60 to 120 min the corrected decoder's shares are closer to PSG than that (62–90 vs 94–100 pp) but its
+accuracy is not higher. The correction makes naps less wrong — mainly by removing most of the default's spurious REM,
+overshooting into too little REM at 90–120 min — and leaves sessions of 180 min or more unchanged. Short nights of
+90–180 min, which the app estimates with its default settings, get it too; at 150–170 min (post hoc, not
+pre-registered) it is no clear gain there.
+
+**Limitations of the proxies.** They are the first L minutes of a night: evening circadian phase and the sleep
+pressure of a full day awake, not an afternoon nap, whose stage mix and sleep onset may differ; they end
+inside sleep, whereas a real nap ends with an awakening (and the model's time-to-end features expect wake near the
+end); a real nap's post-session wake context is not represented (here: no data after the end); the session start is
+the PSG sleep onset − 5 min (a watch may detect a nap late, which cost 0.01–0.04 κ on nights, section 13.8); 31 young
+healthy adults in a lab; b_short is fitted on these 31 Walch subjects only; no length between 120 and 180 min was in
+the pre-registered grid (the 150- and 170-min results above are post hoc), and proxies are not short nights either
+(a 2-hour night ends with an awakening and comes after a different evening).
+
 ## 14. Published results for context
 
 None of these is directly comparable (other inputs, class sets, protocols); they calibrate expectations. Read from the
@@ -1210,21 +1432,41 @@ real PSG κ in section 13.
 - **Long-term context untested.** The elevated-HR rule and the personalization (calibration, population EM) cannot be
   validated on these datasets (one night per Walch subject); they are implemented as specified and unit-tested on
   synthetic data only.
-- **Naps unvalidated.** Both datasets contain whole nights only. Naps (the source setting `minSessionMin` lowered, e.g.
-  to 30) are estimated by models trained on nights (elapsed / remaining-time features, HSMM durations), so their
-  hypnograms carry no validated accuracy; the nap thresholds of 180 min (`baselineMinSessionMin`,
-  `proportionsMinSessionMin`, section 9) are a physiological choice (shorter than any regular night, longer than
-  typical naps), not fitted.
 - **Supervised HMM not usable as is.** On these 2-minute data the per-stage hrNorm means are not ordered as the
   specification's HMM assumes (DEEP 1.28 > LIGHT 0.90), so the supervised estimates — although they score higher than
   the physiology table (0.117 vs 0.070) — fail the validity gate and are not the defaults; the HMM (the app's
   fallback when no usable bundle is present) therefore keeps the specification's table, and its EM adaptation and
   personalization work as specified. The HMM's cycle-phase prior and step factors were not estimated.
+- **No real nap validated.** Both datasets contain whole nights only. Naps (the source setting `minSessionMin`
+  lowered, e.g. to 30) are estimated by models trained on nights (elapsed / remaining-time features, HSMM durations),
+  so their hypnograms carry no accuracy validated on real naps, only on the nap proxies of the next item; the nap
+  thresholds of 180 min of the long-term context and the stage-share checks (`baselineMinSessionMin`,
+  `proportionsMinSessionMin`, section 9) are a physiological choice (shorter than any regular night, longer than
+  typical naps), not fitted, whereas `hybrid.shortSessionMaxMin` = 180 was chosen over 120 by the pre-registered nap
+  experiment (section 13.11).
+- **Naps are only roughly estimated, and only on proxies.** No open dataset has labelled daytime naps; the nap
+  experiment (section 13.11) cut the first 30–180 min of the labelled nights. On these proxies, with the adopted
+  short-session bias, about half of the 30-s epochs agree with PSG (κ ≈ 0.1–0.3), the summed stage-share error is about
+  twice a night's, on the experiment's build most naps were flagged low-confidence (about 4 in 5, every 30-min one; the
+  sanity corridors were set for whole nights; the current build skips them below 180 min, which leaves 33–41 % flagged
+  for a too-small heart-rate range), and a 30-min nap is no better than "all light sleep". The proxies are evening sleep after a full
+  day awake (not the afternoon circadian phase or a nap's sleep pressure), they end inside sleep instead of with an
+  awakening, and a real nap's post-session wake context is not represented; b_short was fitted on 31 Walch subjects
+  and its final fit did not converge within the pre-registered 8 decodes (D = 0.133; in-sample it decodes 2.5 % REM
+  against 5.8 % PSG, a worse fit than the validated per-group fits).
+- **Short nights get the nap correction.** The threshold (180 min) applies to every session, and the app's default
+  source filter (90 min) already estimates sessions of 90–180 min, so short nights are decoded with b_short too. No
+  length between 120 and 180 min was in the pre-registered evaluation; post hoc, at 150–170 min, b_short was better
+  on one sampling variant and worse on the other in share error, slightly better in accuracy, and replaced the
+  default's REM excess with a REM deficit (2–4.5 % against 10–12 % PSG). With `hybrid.shortSessionMaxMin` = 120,
+  sessions of 2 h or more keep the whole-night b (b_short was validated on 30–120-min proxies only; 150–170 post hoc).
 - **Selection and seed optimism.** Configuration, classifier, BIDSleep step handling and the experiments were chosen
   by the same outer-LOSO score, and their differences are within the paired CIs; the shipped seed scored best of four
   (0.334 vs a mean of 0.317, without b). Read 0.32 as the expected κ of the procedure. The stage-proportion candidate
   was picked from four by the outer Walch minute error, so its E (147 min) is slightly optimistic as well; its κ was
-  only a constraint.
+  only a constraint. Likewise the nap threshold (180 vs 120 min) was chosen by the pre-registered rule on the outer
+  held-out proxies it is reported on; C-180 and C-120 are within noise of each other (paired ΔE −3.1 [−7.3, 0.9] /
+  −0.6 [−5.6, 4.2] pp), so C-180's 0.488 / 72.3 pp are slightly optimistic.
 - **Nested selection mode.** The decoder hyper-parameters were chosen with the cheaper per-group nested selection
   (section 12.3), which is leak-free but uses ≈ 80 % of the training subjects for the choice and yields only 10
   distinct inner selections; EXPLICIT vs GEOMETRIC is not decided by them.
@@ -1270,7 +1512,23 @@ mise exec -- python -I tools/train/train.py bias-report --run bias-base     # re
 mise exec -- python -I tools/train/train.py bias-final --run bias-base --out-run bias-final \
     --selection-from tools/train/out/loso-v2/summary.json --install-model
 mise exec -- python -I tools/train/train.py defaults --run bias-final --write   # TrainedDefaults.kt (beta = 1)
-# 6. rebuild with the new defaults and check
+# 6. naps (pre-registered, section 13.11; on the bias-base fold artefacts, no retraining): nap proxies, candidates,
+#    the final bundle with b_short, TrainedDefaults with shortSessionMaxMin; after rebuilding, the implementation check
+mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps --context-run loso-v2 --jobs 12
+mise exec -- python -I tools/train/train.py naps-report --out-run naps         # re-render its report (no algo-cli)
+mise exec -- python -I tools/train/train.py naps-final --exp naps --base-run bias-final --out-run naps-final \
+    --install-model
+mise exec -- python -I tools/train/train.py defaults --run naps-final --write   # + HYBRID_SHORT_SESSION_MAX_MIN
+mise exec -- ./gradlew :algo-cli:installDist
+mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify
+#    the same check on the build that also skips the sanity check below 180 min (post.proportionsMinSessionMin)
+mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify-merge
+#    audit follow-up (post hoc, reporting only): the experiment again with the committed code, compared file by file,
+#    proxies of 150 / 170 min, C-180 vs C-120, the rule with the context estimators, flags / shares / both kappas
+mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps-rerun --context-run loso-v2 --jobs 12
+mise exec -- python -I tools/train/train.py naps-posthoc --exp naps --final naps-final --rerun naps-rerun \
+    --out-run naps-posthoc --jobs 12
+# 7. rebuild with the new defaults and check
 mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist ktlintCheck detekt
 mise exec -- python -I -m pytest tools/train/tests -q
 ```
@@ -1291,6 +1549,21 @@ another directory); `train.py bias-report` re-renders its `summary.json` / `repo
 `trained_defaults.json`, `summary.json`). Both `bias` and `bias-final` refuse an `algo-cli` build other than the run's
 unless `--allow-other-build` is given (then logged and recorded in `summary.json` as `runAlgoCliSha256`; BASE must
 still reproduce the run night by night). The run directories are not committed: keep `tools/train/out/{bias-base,
-bias-final}` (and the worktree's `commands.log`) with the other runs; the pre-registration and that log are also
-committed under `docs/prereg/`. The full per-subject nested selection (`--selection per-subject`, 1504
-inner-CV runs) was started once and stopped; the logged projection was more than 2.5 h for the nested selection alone.
+bias-final, naps, naps-final, naps-verify, naps-verify-merge, naps-rerun, naps-posthoc}` (and the worktrees'
+`commands.log` files) with
+the other runs; the pre-registration and that log are also committed under `docs/prereg/`. `train.py naps` writes
+`out/<out-run>/` (`repro/` — the night-level reproduction, `fits.json` — every b_short fit with its trace,
+`results.jsonl` — every decoded session per decoding kind, `summary.json`, `report.md`, `algocli.log`; `commands.log`
+holds the pre-registration and the START / RESULT lines, committed as `docs/prereg/commands-naps.log`); it reads
+`bias-base`, `bias-base/bias` and `loso-v2` without writing to them and fails unless A and BASE reproduce
+`bias-base/bias` night by night. `naps-final` writes `out/naps-final/{final/hybrid_model.json, trained_defaults.json, summary.json}` for
+`defaults`; `naps-verify` fails unless the current build with its default parameters reproduces A on the nights and
+the adopted candidate on the proxies (a build that runs the sanity check only from `post.proportionsMinSessionMin`,
+as its metrics report, must give the stored warnings without the `SANITY_*` codes of shorter sessions; the summary
+counts them and gives the build's low-confidence rates); `naps-posthoc` writes `out/naps-posthoc/{summary.json, report.md,
+results.jsonl}` (reporting only; it fails unless its re-decoded 120-min proxies equal the stored ones, with the same
+`SANITY_*` rule) and compares a
+re-run (`--rerun`) with the stored experiment file by file. Every nap run records `meta.code` (SHA-256 of `train.py`
+and `pulsetrain/*.py`, git commit, modified files). The full per-subject nested selection (`--selection per-subject`,
+1504 inner-CV runs) was started once and stopped; the logged projection was more than 2.5 h for the nested selection
+alone.

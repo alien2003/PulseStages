@@ -8,10 +8,11 @@ import kotlin.math.ln
 
 /**
  * Per-epoch log emissions `[session epoch][state]` of the hybrid decoder:
- * - scaled likelihood `emissionWeight · (log p(s|x) − priorExponent · log prior_s) + stageLogBias_s` on epochs with
- *   heart-rate data (0 = likelihood 1 without data), where p(s|x) is the classifier posterior with the personal bias
- *   deltas added to its logits, priorExponent = β of `p(s|x) / prior_s^β` (1 = the classic hybrid scaled likelihood)
- *   and stageLogBias the bundle's optional per-stage log-bias (0 when absent);
+ * - scaled likelihood `emissionWeight · (log p(s|x) − priorExponent · log prior_s) + b_s` on epochs with heart-rate
+ *   data (0 = likelihood 1 without data), where p(s|x) is the classifier posterior with the personal bias deltas
+ *   added to its logits, priorExponent = β of `p(s|x) / prior_s^β` (1 = the classic hybrid scaled likelihood) and b
+ *   the bundle's optional per-stage log-bias ([stageBias]: `stageLogBiasShort` on sessions shorter than
+ *   `hybrid.shortSessionMaxMin` minutes when the bundle has it, otherwise `stageLogBias`; 0 when absent);
  * - `timePriorWeight · (log P(s | bin) − log prior_s)` from the bundle's time table (zeros → ε, bins past the end use
  *   the last row; bin = minutes from the session start to the epoch midpoint / binMinutes);
  * - ln(fewStepsAwakeFactor) for AWAKE with 1 … awakeStepThreshold−1 steps, ln(elevatedAwakeFactor) for AWAKE on
@@ -36,7 +37,8 @@ internal class HybridEmissions(
         val params = night.params
         val logPriors = DoubleArray(states) { ln(model.classPriors[it]) }
         val priorExponent = params.hybrid.priorExponent
-        val stageBias = DoubleArray(states) { model.stageLogBias?.get(it) ?: 0.0 }
+        val sessionMinutes = (night.input.sessionEndMs - night.input.sessionStartMs) / MS_PER_MINUTE
+        val stageBias = stageBias(model, sessionMinutes, params.hybrid.shortSessionMaxMin)
         val epsilon = params.hmm.epsilon
         val timeTable =
             model.timePrior.table.map { row -> DoubleArray(states) { ln(maxOf(row[it], epsilon)) - logPriors[it] } }
@@ -73,8 +75,24 @@ internal class HybridEmissions(
         fun at(k: Int): DoubleArray = EpochEvidence.logFactors(night, k, night.params).also { it[SleepStage.AWAKE.index] += elevated }
     }
 
-    private companion object {
-        val AWAKE = SleepStage.AWAKE.index
-        const val HALF = 0.5
+    internal companion object {
+        private val AWAKE = SleepStage.AWAKE.index
+        private const val HALF = 0.5
+        private const val MS_PER_MINUTE = 60_000.0
+
+        /**
+         * The per-stage log-bias b of a session of [sessionMinutes] minutes: the bundle's `stageLogBiasShort` when
+         * the session is shorter than [shortSessionMaxMin] (> 0) and the bundle has one, otherwise its
+         * `stageLogBias`; zeros when the chosen field is absent.
+         */
+        fun stageBias(
+            model: HybridModel,
+            sessionMinutes: Double,
+            shortSessionMaxMin: Double,
+        ): DoubleArray {
+            val short = shortSessionMaxMin > 0 && sessionMinutes < shortSessionMaxMin
+            val bias = if (short) model.stageLogBiasShort ?: model.stageLogBias else model.stageLogBias
+            return DoubleArray(SleepStage.COUNT) { bias?.get(it) ?: 0.0 }
+        }
     }
 }

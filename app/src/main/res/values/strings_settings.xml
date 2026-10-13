@@ -162,6 +162,8 @@
     <string name="set_hyb_emission_weight_hint">Exponent of the classifier\'s scaled likelihoods (1 = as trained).</string>
     <string name="set_hyb_prior_exponent_title">Class-prior exponent</string>
     <string name="set_hyb_prior_exponent_hint">Exponent β of the class priors in the scaled likelihoods p(stage | x) / prior^β (1 = divide by the priors, 0 = raw posteriors, which favour light sleep).</string>
+    <string name="set_hyb_short_session_title">Short-session (nap) threshold</string>
+    <string name="set_hyb_short_session_hint">Sessions shorter than this (minutes) use the model\'s separate stage correction for naps. With the default minimum session length (90 min) this also applies to short nights below this value. 0 = off: every session gets the whole-night correction. Nap estimates stay rough.</string>
     <string name="set_hyb_elevated_awake_title">Awake factor (elevated)</string>
     <string name="set_hyb_elevated_awake_hint">Awake likelihood multiplier on nights with elevated heart rate.</string>
     <string name="set_post_min_deep_title">Minimum deep bout</string>

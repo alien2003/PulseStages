@@ -43,8 +43,8 @@ def _keys(obj, skip=("emissions", "meanBouts", "transitions")):
 
 def test_bundle_keys_match_interchange_doc():
     b = _make("mlp")
-    assert list(b) == [k for k in bundle.TOP_LEVEL_KEYS if k != "stageLogBias"]   # optional, absent by default
-    biased = bundle.with_stage_log_bias(b, [0.1, 0.0, -0.2, 0.1])
+    assert list(b) == [k for k in bundle.TOP_LEVEL_KEYS if k not in bundle.STAGE_BIAS_KEYS]   # optional, absent
+    biased = bundle.with_stage_log_bias_short(bundle.with_stage_log_bias(b, [0.1, 0.0, -0.2, 0.1]), [0.0, 0.2, 0.1, -0.3])
     assert list(biased) == list(bundle.TOP_LEVEL_KEYS)
     assert _keys(biased) == bundle_doc_keys()
     assert b["classOrder"] == ["AWAKE", "LIGHT", "DEEP", "REM"] and b["schemaVersion"] == 1
@@ -89,6 +89,8 @@ def test_round_trip(tmp_path):
     (lambda b: b.update(featureSetVersion=1.5), "featureSetVersion"),
     (lambda b: b.update(stageLogBias=[0.0, 0.1, 0.2]), "stageLogBias"),
     (lambda b: b.update(stageLogBias=[0.0, 0.1, float("inf"), 0.0]), "stageLogBias"),
+    (lambda b: b.update(stageLogBiasShort=[0.0, 0.1, 0.2]), "stageLogBiasShort"),
+    (lambda b: b.update(stageLogBiasShort=[0.0, float("nan"), 0.0, 0.0]), "stageLogBiasShort"),
 ])
 def test_validation_rejects(mutate, msg):
     b = copy.deepcopy(_make())

@@ -98,3 +98,34 @@ def to_float_list(a) -> list:
 
     arr = np.asarray(a, dtype=float)
     return arr.tolist()
+
+
+CODE_ROOT = Path(__file__).resolve().parents[1]           # tools/train
+
+
+def code_fingerprint(root: Path = CODE_ROOT) -> dict:
+    """Identity of the analysis code behind a result: SHA-256 of ``train.py`` and every ``pulsetrain/*.py`` under
+    ``root`` (relative path -> digest), one digest over them all, and the git commit of ``root`` with the hashed files
+    that differ from it (``git`` None when ``root`` is not in a git work tree). Recorded in the ``meta`` of the nap
+    runs next to the algo-cli fingerprint and the pre-registration digest."""
+    import hashlib
+    import subprocess
+
+    root = Path(root)
+    files = [p for p in [root / "train.py", *sorted((root / "pulsetrain").glob("*.py"))] if p.is_file()]
+    digests = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+    total = hashlib.sha256("".join(f"{k}\0{v}\n" for k, v in sorted(digests.items())).encode("utf-8")).hexdigest()
+
+    def git(*args: str) -> str | None:
+        try:
+            r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return r.stdout if r.returncode == 0 else None
+
+    head = git("rev-parse", "HEAD")
+    state = None
+    if head is not None:
+        status = git("status", "--porcelain", "--", *digests) or ""
+        state = {"head": head.strip(), "modified": sorted(line[3:].strip() for line in status.splitlines() if line)}
+    return {"sha256": total, "files": digests, "git": state}

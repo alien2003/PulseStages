@@ -9,6 +9,8 @@
 - ``HYBRID_PRIOR_EXPONENT``: ``hybrid.priorExponent`` of the patch when a run chose it (the pre-registered
   stage-proportion experiment, :mod:`pulsetrain.bias`; ``selection.priorExponent.note`` explains the choice),
   else 1.0;
+- ``HYBRID_SHORT_SESSION_MAX_MIN``: ``hybrid.shortSessionMaxMin`` of the patch when a run chose it (the
+  pre-registered nap experiment, :mod:`pulsetrain.naps`; ``selection.shortSessionMaxMin.note``), else 0.0 (off);
 - ``HMM_EMISSIONS``, ``HMM_MEAN_BOUTS``, ``HMM_TRANSITIONS``, ``HMM_TIME_PRIOR``: the supervised MLE estimates when
   the trained HMM scored higher than the physiology table and passed the validity gate (``report.hmm_validity``),
   otherwise references to the specification's defaults (``EmissionTable.PHYSIOLOGY``, ``MeanBouts()``,
@@ -147,6 +149,17 @@ def render(defaults: Mapping, selection: Mapping, run: str, created_at: str, dat
     L += _kdoc(f"Hybrid decoder: exponent beta of the class priors in the scaled likelihood p(s | x) / prior_s^beta "
                f"({why}).", "    ")
     L.append(f"    const val HYBRID_PRIOR_EXPONENT: Double = {beta}")
+    L.append("")
+    if "shortSessionMaxMin" in hyb:
+        short = _num(hyb["shortSessionMaxMin"], "shortSessionMaxMin")
+        if not float(hyb["shortSessionMaxMin"]) >= 0:
+            raise DefaultsError("hybrid.shortSessionMaxMin must be >= 0")
+        why = str((sel.get("shortSessionMaxMin") or {}).get("note") or f"chosen in run {run}")
+    else:
+        short, why = "0.0", "not part of this run's selection: 0 = off, every session uses the bundle's stageLogBias"
+    L += _kdoc(f"Hybrid decoder: sessions shorter than this many minutes use the bundle's stageLogBiasShort instead "
+               f"of stageLogBias ({why}).", "    ")
+    L.append(f"    const val HYBRID_SHORT_SESSION_MAX_MIN: Double = {short}")
     L.append("")
     if trained_hmm:
         h = defaults["hmm"]

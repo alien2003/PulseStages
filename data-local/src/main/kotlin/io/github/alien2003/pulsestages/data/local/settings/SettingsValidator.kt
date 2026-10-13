@@ -284,6 +284,7 @@ private fun Checker.checkHybrid(
     atLeast("$p.emissionWeight", v.emissionWeight, 0.0)
     atLeast("$p.elevatedAwakeFactor", v.elevatedAwakeFactor, 0.0)
     atLeast("$p.priorExponent", v.priorExponent, 0.0)
+    atLeast("$p.shortSessionMaxMin", v.shortSessionMaxMin, 0.0)
 }
 
 private fun Checker.checkPost(

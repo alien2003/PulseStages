@@ -129,7 +129,61 @@ reproduce the run night by night) and `--out-name` to keep the original results;
 bias-033541ae --allow-other-build` reproduced `bias/results.jsonl` and `decisions.json` byte for byte. Run outputs
 are never committed: when a worktree is removed, move its `out/bias-base`, `out/bias-final`, `out/prereg-bias.md` and
 `out/commands.log` next to the other runs of the main checkout's `tools/train/out`, since `defaults --run bias-final`
-needs `bias-final`.
+needs `bias-final` (likewise `out/naps`, `out/naps-final`, `out/naps-verify`, `out/naps-verify-merge`, `out/naps-rerun`,
+`out/naps-posthoc` and `out/prereg-naps.md` of the nap experiment: `defaults --run naps-final` generates the current
+`TrainedDefaults.kt`).
+
+Nap experiment (pre-registered: `docs/prereg/prereg-naps.md`, a verbatim copy of `tools/train/out/prereg-naps.md`
+with SHA-256 in `docs/prereg/prereg-naps.md.sha256` and the timestamped log `out/naps/commands.log` as
+`docs/prereg/commands-naps.log`, checked by `tests/test_prereg.py`; ALGORITHM.md section 13.11), post hoc on the fold
+artefacts of `bias-base` and `bias-base/bias` (read only, no retraining):
+
+```sh
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps --context-run loso-v2
+mise exec -- python -I tools/train/train.py naps-report --out-run naps        # re-render it from results.jsonl
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-final --exp naps --base-run bias-final \
+    --out-run naps-final --install-model                                       # C adopted: bundle + stageLogBiasShort
+mise exec -- python -I tools/train/train.py defaults --run naps-final --write  # + HYBRID_SHORT_SESSION_MAX_MIN
+mise exec -- ./gradlew :algo-cli:installDist                                   # the build implementing it
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify
+# the same check on the build merged with post.proportionsMinSessionMin (no sanity check below 180 min):
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final \
+    --out-run naps-verify-merge
+# audit follow-up, post hoc and reporting only (no decision depends on it):
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps-rerun --context-run loso-v2
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-posthoc --exp naps --final naps-final \
+    --rerun naps-rerun --out-run naps-posthoc
+```
+
+`naps` (`pulsetrain/naps.py`) cuts nap proxies from the OHealth-like night files (the first L in {30, 60, 90, 120,
+180} min of every session, heart rate / steps of the 30 min before, nothing after the end, the labels inside),
+re-evaluates the whole nights first (A = fold bundle + the fold-level b of candidate (b), BASE = no b, RULES,
+HMM-table) and fails unless A / BASE reproduce `bias-base/bias/results.jsonl` night by night; then it fits the
+short-session bias b_short per (variant, outer group, T in {120, 180}) with the fixed point of `bias.py` on the
+inner out-of-fold proxies (L < T) of the group's Walch selection subjects, decodes every proxy of every held-out
+subject per decoding kind (A, BASE, C-120, C-180, RULES, HMM-table) and assembles the candidates A, B-T (b off below
+T) and C-T (b_short below T); metrics per session (accuracy, summed share error in percentage points, kappa reported
+only, NOT_ESTIMATED reasons, low-confidence / sanity flags), per length and pooled over 30-120 min, paired bootstrap
+CIs vs A, the pre-registered rule (Walch, worse variant: lowest error among candidates with accuracy >= A - 0.01).
+`naps-final` fits the final b_short on the LOSO out-of-fold proxies of all Walch subjects and writes
+`out/naps-final/{final/hybrid_model.json, trained_defaults.json, summary.json}`; `naps-verify` checks that a build
+implementing `hybrid.shortSessionMaxMin` / `stageLogBiasShort` reproduces A on every night and the adopted candidate on
+every proxy with its *default* parameters. The experiment's build checked the stage shares of every session; a build
+that runs the sanity check only on sessions of at least `post.proportionsMinSessionMin` (read from the parameters its
+metrics report) must give the stored warnings without the `SANITY_*` codes of shorter sessions, and the summary counts
+those sessions (`sanityCodesDropped`) and gives the build's low-confidence rate per dataset, variant and length
+(`lowConfidenceRate`). `naps-posthoc` (`pulsetrain/naps_posthoc.py`; reporting only, not pre-registered) decodes
+proxies of 150 and 170 min with A and the adopted C (and the 120-min proxies again, which must equal the stored ones,
+with the same `SANITY_*` rule; on such a build its flag tables have no sanity flags below 180 min), compares C-180 with C-120, scores RULES / HMM-table / "always LIGHT" by the rule as if they
+had been candidates, tabulates flags, stage shares of both variants, the REM excess and both kappa definitions (mean
+per subject vs chunk-pooled), checks the final b_short fit against the fold fits and, with `--rerun`, compares a
+re-run of `naps` with the stored run file by file (`--no-decode` skips the algo-cli part).
+
+Provenance: every nap run records `meta.code` in its `summary.json` (SHA-256 of `train.py` and each `pulsetrain/*.py`,
+one digest over them, the git commit and the hashed files that differ from it) next to the algo-cli fingerprint and
+the pre-registration digest. Commit a pre-registration, with the analysis code it names, before the first run: the
+nap pre-registration was committed together with its results, so its timing rests on file times and the run's log
+(ALGORITHM.md section 13.11).
 
 `JAVA_OPTS=-Xmx2g` only caps the heap of each algo-cli JVM (24 of them run in parallel); it does not change results.
 The shipped model and defaults come from the steps listed with their exact commands in ALGORITHM.md, section 17
@@ -143,7 +197,8 @@ every phase). Rebuild algo-cli only between runs and log the rebuild in `tools/t
 
 `defaults` renders `out/<run>/trained_defaults.json` into the generated Kotlin object `TrainedDefaults`
 (`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`,
-`emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it) and HMM (`emissions`, `meanBouts`,
+`emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it, `shortSessionMaxMin` — 0 = off
+unless the run chose it) and HMM (`emissions`, `meanBouts`,
 `transitions`) defaults from it. The HMM
 fields hold the supervised estimates only when HMM-trained beat the physiology table by the selection rule;
 otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` / `TransitionWeights()`, and `HmmParams.PHYSIOLOGY`
@@ -260,6 +315,12 @@ sensitivity/{summary.json,report.md}         train.py sensitivity
 bias/{summary.json,report.md,decisions.json,results.jsonl}   train.py bias (stage-proportion experiment; bias-report)
 ```
 
+`train.py naps` writes `out/<out-run>/` (default `naps`): `repro/` (night-level reproduction), `fits.json`,
+`results.jsonl` (per decoded session and kind), `summary.json`, `report.md`, `algocli.log`, `run.log`; its
+`commands.log` holds the pre-registration and the START / RESULT lines. `train.py naps-posthoc` writes
+`out/<out-run>/` (default `naps-posthoc`): `summary.json`, `report.md`, `results.jsonl` (the new decodes),
+`algocli.log`.
+
 ### algo-cli interface (verified against the real launcher in PART B)
 
 Checked on real night files with the installDist launcher; `tests/fake_algo_cli.py` writes the same formats.
@@ -296,8 +357,8 @@ Checked on real night files with the installDist launcher; `tests/fake_algo_cli.
 
 Raw downloads (`data/raw/`) and everything derived from them (`data/nights/`, `out/`, models in progress) stay local
 and are never committed — only the scripts, `requirements.txt`, the tests and the links / citations in DATASETS.md
-are (the final model is committed as an app asset; the stage-proportion pre-registration and its command log, which
-hold no data but aggregate numbers, are committed under `docs/prereg/`). Downloaded files are treated as untrusted input: nothing from
+are (the final model is committed as an app asset; the stage-proportion and nap pre-registrations and their command
+logs, which hold no data but aggregate numbers, are committed under `docs/prereg/`). Downloaded files are treated as untrusted input: nothing from
 them is executed, and every script that reads them is run with `python -I` (isolated mode: no current directory or
 user site-packages on `sys.path`).
 
@@ -307,7 +368,7 @@ user site-packages on `sys.path`).
 download.py            dataset download + checksum verification
 prepare.py             night-file generation (all variants), summary.csv, manifest.json
 train.py               training / LOSO CLI (run | report | final | defaults | compare | sensitivity | bias | bias-report |
-                       bias-final)
+                       bias-final | naps | naps-report | naps-final | naps-verify | naps-posthoc)
 pulsetrain/ohealth.py  2-min HR resampling, session windows, label mapping, coverage proxy
 pulsetrain/pedometer.py  accelerometer step detector
 pulsetrain/walch.py    sleep-accel readers;  pulsetrain/bidsleep.py  BIDSleep readers
@@ -321,5 +382,7 @@ pulsetrain/report.py   metrics, selection rule + HMM validity gate, paired boots
 pulsetrain/train_final.py  final model + trained_defaults.json;  pulsetrain/kotlin_defaults.py  TrainedDefaults.kt
 pulsetrain/robustness.py   post-hoc: cross-run comparisons, session-boundary sensitivity, no-steps evaluation
 pulsetrain/bias.py     pre-registered stage-proportion experiment (prior exponent, proportion matching) + its final model
+pulsetrain/naps.py     pre-registered nap-proxy experiment (short-session bias) + its final model and implementation check
+pulsetrain/naps_posthoc.py  post-hoc analyses of the nap experiment (reporting only)
 tests/                 pytest (synthetic data only; tests/fake_algo_cli.py stands in for algo-cli)
 ```

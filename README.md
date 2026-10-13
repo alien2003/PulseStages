@@ -84,6 +84,22 @@ These numbers come from [ALGORITHM.md §13.1](ALGORITHM.md#131-headline-walch-ps
 section is the authoritative source; if it differs from this paragraph, it wins. Limitations are in
 [§16](ALGORITHM.md#16-limitations).
 
+### Naps
+
+PulseStages can estimate daytime naps if you lower "Minimum session length" (`minSessionMin`, 90 min by default) to
+30 min, but treat the result as a rough sketch, not a stage breakdown. No public dataset has labelled naps, so it was
+tested on the first 30–180 minutes of the 31 lab nights: about half of the 30-second epochs matched polysomnography,
+and for a 30-minute nap the result was no better than calling the whole nap light sleep. Sessions shorter than 3 hours
+now get their own stage correction, which removes most of the false REM sleep the night-trained model put into naps.
+Sessions of 3 hours or more are decoded exactly as before. With the default settings, short nights of 90 minutes to
+3 hours also get the nap correction. The planned test covered sessions up to 2 hours; a later check at 150 and 170
+minutes found no clear improvement there (the correction then shows too little REM). In the planned test about 4 in
+5 naps were marked low-confidence, mostly because their stage shares looked implausible for a night. Sessions shorter
+than 3 hours no longer get that check, so now only a too-small heart-rate range marks a nap (about 1 in 3 to 2 in 5 of
+the tested naps of up to 2 hours, and 3 in 5 to 3 in 4 of the 30-minute ones). The estimate itself is unchanged, so an
+unmarked nap is still only a rough sketch. Details:
+[ALGORITHM.md §13.11](ALGORITHM.md#1311-daytime-naps-nap-proxies-and-a-short-session-bias-pre-registered-adopted).
+
 ## Screenshots
 
 These screenshots contain no real health data. They are rendered on the JVM by `ScreenshotsTest` (Robolectric native
@@ -281,12 +297,15 @@ Android 14+ it uses an `activity-alias` with `android.intent.action.VIEW_PERMISS
 - Fragments of one night from one app with a gap shorter than `mergeGapMin` (30 min) are merged into one night. The
   gap is written as AWAKE.
 - A merged night shorter than `minSessionMin` (90 min) is treated as a nap and skipped.
-- Naps can be estimated too: lower `minSessionMin` (Settings → Sources), for example to 30 min. Then:
+- Naps can be estimated too: lower `minSessionMin` (Settings → Sources), for example to 30 min (see [Naps](#naps)).
+  Then:
   - sessions shorter than `baselineMinSessionMin` (180 min, Settings → Features) do not count for the heart-rate
     baseline and are never marked "elevated heart rate";
   - sessions shorter than `proportionsMinSessionMin` (180 min, Settings → Post-processing) get no sanity check of the
     stage shares, so a nap without deep sleep is not flagged as implausible;
   - a nap that ends less than `mergeGapMin` before the night is merged into the night (the gap is AWAKE).
+- Every estimated session shorter than 3 hours (`hybrid.shortSessionMaxMin`, 180 min) uses the short-session
+  correction: naps, and with the default 90 min also short nights of 90–180 min.
 
 ### Health Connect's own "Data sources and priority"
 
@@ -796,6 +815,10 @@ The full list is in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
 - **Training data.** The model was trained on Apple Watch heart rate from healthy adults (Walch: 29 ± 9 years). OPPO's
   2-minute values may be computed differently. Older people, sleep disorders, beta blockers, arrhythmias and athletes are not
   represented.
+- **Naps.** No dataset has labelled naps. On nap-length segments of the validation nights the estimate is rough
+  (about half the epochs right; ALGORITHM.md §13.11). The low-confidence flag no longer marks most naps (the
+  stage-share check skips sessions under 3 hours), so its absence says little. Short nights under 3 hours get the nap
+  correction too; the planned test covered only sessions up to 2 hours.
 - **Session boundaries.** The validation used session boundaries derived from PSG. Real OHealth boundaries come from
   the watch, and a late start or early end costs about 0.01–0.04 κ.
 - **Untested on real data.** The elevated-heart-rate rule and personalization could not be validated on the datasets.

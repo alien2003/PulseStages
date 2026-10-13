@@ -103,8 +103,8 @@ class HybridModelTest {
                 explicitNulls = true
             }
         val full = canonical.encodeToJsonElement(HybridModel.serializer(), model).jsonObject
-        assertTrue("stageLogBias" in full)
-        assertEquals(Fingerprints.of(JsonObject(full - "stageLogBias")), model.fingerprint())
+        assertTrue("stageLogBias" in full && "stageLogBiasShort" in full)
+        assertEquals(Fingerprints.of(JsonObject(full - "stageLogBias" - "stageLogBiasShort")), model.fingerprint())
 
         val biased = model.copy(stageLogBias = listOf(0.3, -0.2, -0.5, 0.4))
         val parsed = HybridModel.parse(biased.toJson())
@@ -119,6 +119,29 @@ class HybridModelTest {
         assertInvalid(JsonObject(tree + ("stageLogBias" to three)).toString(), "stageLogBias must have 4")
         assertThrows(HybridModelException::class.java) { model.copy(stageLogBias = listOf(0.0, Double.NaN, 0.0, 0.0)) }
         assertInvalid(JsonObject(tree + ("stageLogBias" to JsonPrimitive("high"))).toString(), "malformed")
+    }
+
+    @Test
+    fun `the optional short-session log-bias is validated and fingerprinted only when present`() {
+        assertNull(model.stageLogBiasShort)
+        assertTrue("stageLogBiasShort" !in tree, "absent from the JSON of a bundle without it")
+        val biased = model.copy(stageLogBias = listOf(0.3, -0.2, -0.5, 0.4))
+        val withShort = biased.copy(stageLogBiasShort = listOf(-0.1, 0.4, 0.3, -0.6))
+        val parsed = HybridModel.parse(withShort.toJson())
+        assertEquals(withShort, parsed)
+        assertEquals(listOf(-0.1, 0.4, 0.3, -0.6), parsed.stageLogBiasShort)
+        assertEquals(withShort.fingerprint(), parsed.fingerprint())
+        // Adding the short-session bias changes the fingerprint; a bundle without it keeps its old one.
+        assertNotEquals(biased.fingerprint(), withShort.fingerprint())
+        assertEquals(biased.fingerprint(), HybridModel.parse(biased.toJson()).fingerprint())
+        // The same numbers under the other key are a different bundle.
+        assertNotEquals(
+            model.copy(stageLogBias = listOf(-0.1, 0.4, 0.3, -0.6)).fingerprint(),
+            model.copy(stageLogBiasShort = listOf(-0.1, 0.4, 0.3, -0.6)).fingerprint(),
+        )
+        val three = JsonArray(List(3) { JsonPrimitive(0.1) })
+        assertInvalid(JsonObject(tree + ("stageLogBiasShort" to three)).toString(), "stageLogBiasShort must have 4")
+        assertThrows(HybridModelException::class.java) { model.copy(stageLogBiasShort = listOf(0.0, 0.0, Double.POSITIVE_INFINITY, 0.0)) }
     }
 
     @Test

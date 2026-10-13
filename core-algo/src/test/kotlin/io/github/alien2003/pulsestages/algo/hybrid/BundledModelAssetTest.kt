@@ -44,6 +44,33 @@ class BundledModelAssetTest {
             assertEquals(SleepStage.COUNT, bias.size)
             assertTrue(bias.all { it.isFinite() } && abs(bias.sum()) < 1e-6, "$bias")
         }
+        // The short-session (nap) log-bias (ALGORITHM.md section 13.11), when present: centred, finite.
+        model.stageLogBiasShort?.let { bias ->
+            assertEquals(SleepStage.COUNT, bias.size)
+            assertTrue(bias.all { it.isFinite() } && abs(bias.sum()) < 1e-6, "$bias")
+        }
+    }
+
+    @Test
+    fun `a nap runs with the bundled model and the default short-session threshold`() {
+        val night = SyntheticNightGenerator(SEED).generate()
+        val start = night.input.sessionStartMs
+        val defaults = AlgoParams()
+        for (minutes in listOf(30L, 60L, 90L, 179L)) {
+            val nap =
+                night.input.copy(
+                    sessionEndMs = start + minutes * MINUTE_MS,
+                    heartRate = night.input.heartRate.filter { it.timeMs <= start + minutes * MINUTE_MS },
+                    steps = emptyList(),
+                )
+            val outcome = SleepStager(model).run(nap, defaults)
+            assertTrue(outcome is EstimationOutcome.Estimated, "$minutes min: $outcome")
+            val estimate = (outcome as EstimationOutcome.Estimated).estimate
+            assertEquals(EstimatorType.HYBRID, estimate.estimator, "$minutes min")
+            assertTrue(estimate.warnings.none { it.code == WarningCode.HYBRID_MODEL_UNAVAILABLE }, "${estimate.warnings}")
+            assertEquals(nap.sessionStartMs, estimate.stages.first().startMs)
+            assertEquals(nap.sessionEndMs, estimate.stages.last().endMs)
+        }
     }
 
     @Test
@@ -74,5 +101,6 @@ class BundledModelAssetTest {
 
     private companion object {
         const val SEED = 4242L
+        const val MINUTE_MS = 60_000L
     }
 }

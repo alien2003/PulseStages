@@ -192,6 +192,9 @@ data class TrainingInfo(
  *   the emission score of every epoch with heart-rate data; null = no bias). Fitted by the training scripts on
  *   out-of-fold decodes of the training nights so that the decoded stage shares match the true ones (proportion
  *   matching); it belongs to the classifier it corrects, hence to the bundle and its fingerprint.
+ * @property stageLogBiasShort optional per-stage log-bias `[bA, bL, bD, bR]` used INSTEAD of [stageLogBias] on
+ *   sessions shorter than `hybrid.shortSessionMaxMin` minutes (naps; null = such sessions keep [stageLogBias]).
+ *   Fitted like [stageLogBias], on out-of-fold decodes of nap-length sessions cut from the training nights.
  */
 @Serializable
 data class HybridModel(
@@ -210,6 +213,7 @@ data class HybridModel(
     val hmm: HmmEstimates? = null,
     val training: TrainingInfo? = null,
     val stageLogBias: List<Double>? = null,
+    val stageLogBiasShort: List<Double>? = null,
 ) {
     init {
         HybridModelValidator.validate(this)
@@ -222,9 +226,9 @@ data class HybridModel(
 
     /**
      * SHA-256 (lower-case hex) of the canonical JSON of the bundle (every field, object keys sorted, no whitespace).
-     * It identifies the model in the params hash. Optional fields introduced after the first bundles ([stageLogBias])
-     * are left out when absent, so a bundle without them keeps the fingerprint it always had (and personal models
-     * fitted for it stay valid).
+     * It identifies the model in the params hash. Optional fields introduced after the first bundles ([stageLogBias],
+     * [stageLogBiasShort]) are left out when absent, so a bundle without them keeps the fingerprint it always had (and
+     * personal models fitted for it stay valid).
      */
     fun fingerprint(): String = fingerprintValue
 
@@ -259,7 +263,7 @@ data class HybridModel(
         const val SCHEMA_VERSION: Int = 1
 
         /** Optional keys that do not enter the fingerprint when they are null (added after schema 1 shipped). */
-        private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias")
+        private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias", "stageLogBiasShort")
 
         private val JSON: Json =
             Json {
@@ -315,10 +319,17 @@ internal object HybridModelValidator {
         ensure(model.timePrior.table.isNotEmpty()) { "timePrior.table is empty" }
         model.timePrior.table.forEachIndexed { i, row -> probabilities("timePrior.table[$i]", row) }
         model.hmm?.emissions?.let { validateEmissions(it) }
-        model.stageLogBias?.let { bias ->
-            ensure(bias.size == SleepStage.COUNT) { "stageLogBias must have ${SleepStage.COUNT} entries, has ${bias.size}" }
-            ensure(bias.all { it.isFinite() }) { "stageLogBias entries must be finite: $bias" }
-        }
+        stageBias("stageLogBias", model.stageLogBias)
+        stageBias("stageLogBiasShort", model.stageLogBiasShort)
+    }
+
+    private fun stageBias(
+        name: String,
+        bias: List<Double>?,
+    ) {
+        if (bias == null) return
+        ensure(bias.size == SleepStage.COUNT) { "$name must have ${SleepStage.COUNT} entries, has ${bias.size}" }
+        ensure(bias.all { it.isFinite() }) { "$name entries must be finite: $bias" }
     }
 
     private fun validateStandardization(

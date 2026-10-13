@@ -2,7 +2,9 @@
 
 The ``hmm`` block holds the supervised HMM estimates in the AlgoParams JSON shape (EmissionTable / MeanBouts /
 TransitionWeights field names of core-algo/.../params/AlgoParams.kt). ``stageLogBias`` (optional) is the per-stage
-log-bias of the scaled likelihoods fitted by the proportion matching of :mod:`pulsetrain.bias`.
+log-bias of the scaled likelihoods fitted by the proportion matching of :mod:`pulsetrain.bias`;
+``stageLogBiasShort`` (optional) replaces it on sessions shorter than AlgoParams ``hybrid.shortSessionMaxMin``
+(the nap experiment of :mod:`pulsetrain.naps`).
 """
 
 from __future__ import annotations
@@ -21,8 +23,9 @@ SCHEMA_VERSION = 1
 CLASS_ORDER = list(STAGES)
 TOP_LEVEL_KEYS = ("schemaVersion", "modelId", "featureSetVersion", "featureNames", "standardization", "classOrder",
                   "classifier", "classPriors", "durations", "boutTransitions", "initialStage", "timePrior", "hmm",
-                  "training", "stageLogBias")
-OPTIONAL_KEYS = ("hmm", "stageLogBias")
+                  "training", "stageLogBias", "stageLogBiasShort")
+OPTIONAL_KEYS = ("hmm", "stageLogBias", "stageLogBiasShort")
+STAGE_BIAS_KEYS = ("stageLogBias", "stageLogBiasShort")
 REQUIRED_KEYS = tuple(k for k in TOP_LEVEL_KEYS if k not in OPTIONAL_KEYS)
 TRAINING_KEYS = ("dataset", "license", "subjects", "nights", "variants", "createdAt", "notes")
 MEAN_BOUT_KEYS = tuple(mean_bout_key(s) for s in range(N_STAGES))
@@ -185,10 +188,11 @@ def validate_bundle(b: Mapping, expected_feature_names: Sequence[str] | None = N
                 _prob_vector(row, N_STAGES, f"timePrior.table[{i}]", errs)
     if "hmm" in b:
         _validate_hmm(b["hmm"], errs)
-    if "stageLogBias" in b:
-        v = b["stageLogBias"]
-        if not isinstance(v, list) or len(v) != N_STAGES or not all(_is_num(x) for x in v):
-            errs.append(f"stageLogBias must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
+    for key in STAGE_BIAS_KEYS:
+        if key in b:
+            v = b[key]
+            if not isinstance(v, list) or len(v) != N_STAGES or not all(_is_num(x) for x in v):
+                errs.append(f"{key} must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
     tr = b["training"]
     if not isinstance(tr, Mapping) or set(tr) != set(TRAINING_KEYS):
         errs.append(f"training must have exactly {list(TRAINING_KEYS)}")
@@ -236,9 +240,23 @@ def with_stage_log_bias(bundle: Mapping, bias: Sequence[float] | None) -> dict:
 
     core-algo adds ``stageLogBias[s]`` to the emission score of every epoch with heart-rate data (docs/INTERCHANGE.md
     section 3); the key goes last, after ``training``, like the Kotlin field."""
-    out = {k: v for k, v in bundle.items() if k != "stageLogBias"}
+    out = {k: v for k, v in bundle.items() if k not in STAGE_BIAS_KEYS}
     if bias is not None:
         out["stageLogBias"] = [float(x) for x in bias]
+    if "stageLogBiasShort" in bundle:
+        out["stageLogBiasShort"] = bundle["stageLogBiasShort"]
+    validate_bundle(out)
+    return out
+
+
+def with_stage_log_bias_short(bundle: Mapping, bias: Sequence[float] | None) -> dict:
+    """A copy of ``bundle`` with ``stageLogBiasShort`` set to ``bias`` (AWAKE, LIGHT, DEEP, REM), or removed for None.
+
+    core-algo uses it instead of ``stageLogBias`` on sessions shorter than ``hybrid.shortSessionMaxMin`` minutes
+    (docs/INTERCHANGE.md section 3); the key goes last, after ``stageLogBias``, like the Kotlin field."""
+    out = {k: v for k, v in bundle.items() if k != "stageLogBiasShort"}
+    if bias is not None:
+        out["stageLogBiasShort"] = [float(x) for x in bias]
     validate_bundle(out)
     return out
 

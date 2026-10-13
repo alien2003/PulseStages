@@ -107,6 +107,38 @@ class HybridEmissionsTest {
     }
 
     @Test
+    fun `sessions shorter than shortSessionMaxMin use the short-session log-bias, all others the whole-night one`() {
+        val start = synthetic.input.sessionStartMs
+        val night = synthetic.input.copy(steps = emptyList())
+        val nap = night.copy(sessionEndMs = start + 90 * minute)
+        val whole = listOf(0.4, -0.1, -0.7, 0.25)
+        val short = listOf(-0.3, 0.6, 0.2, -0.5)
+        val bundle = model.copy(stageLogBias = whole, stageLogBiasShort = short)
+        val cases =
+            listOf(
+                Triple(nap, 180.0, short),
+                Triple(nap, 90.1, short),
+                Triple(nap, 90.0, whole), // 90 min is not shorter than 90
+                Triple(nap, 0.0, whole), // 0 = off
+                Triple(night, 180.0, whole), // a whole night
+            )
+        for ((input, threshold, expected) in cases) {
+            val params = AlgoParams().let { it.copy(hybrid = it.hybrid.copy(emissionWeight = 0.8, shortSessionMaxMin = threshold)) }
+            val prepared = NightPreparer.prepare(input, params)
+            val rows = HybridEmissions(prepared, bundle, DenseNetwork(bundle), null).withOffsets(zero)
+            val asWritten = model.copy(stageLogBias = expected)
+            for (k in rows.indices) assertRow(prepared, params, null, k, rows[k], asWritten)
+        }
+        // A bundle without stageLogBiasShort keeps its stageLogBias on short sessions (and no bias without either).
+        val none = List(SleepStage.COUNT) { 0.0 }
+        val shortOnly = model.copy(stageLogBiasShort = short)
+        assertEquals(whole, HybridEmissions.stageBias(model.copy(stageLogBias = whole), 90.0, 180.0).toList())
+        assertEquals(none, HybridEmissions.stageBias(model, 90.0, 180.0).toList())
+        assertEquals(short, HybridEmissions.stageBias(shortOnly, 30.0, 180.0).toList())
+        assertEquals(none, HybridEmissions.stageBias(shortOnly, 400.0, 180.0).toList())
+    }
+
+    @Test
     fun `a change of the prior exponent is a stage log-bias of w_e times the change times ln prior`() {
         // e(beta) = w (ln p - beta ln pi) = e(1) + w (1 - beta) ln pi: both are per-stage constants on the epochs
         // with heart-rate data, so a fitted stage log-bias absorbs any beta (ALGORITHM.md section 7).

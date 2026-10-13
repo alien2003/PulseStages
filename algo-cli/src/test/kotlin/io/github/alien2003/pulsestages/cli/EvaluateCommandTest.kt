@@ -385,6 +385,22 @@ class EvaluateCommandTest {
     }
 
     @Test
+    fun `the short-session log-bias applies only to sessions shorter than shortSessionMaxMin`() {
+        val biased = dir.resolve("short-biased.json")
+        Files.writeString(biased, SyntheticHybridModels.default.copy(stageLogBiasShort = listOf(0.0, 3.0, 0.0, 0.0)).toJson())
+        assertTrue(records.all { it.input.sessionEndMs - it.input.sessionStartMs > 180 * 60_000L }, "whole nights")
+        val grid = dir.resolve("short-grid.json")
+        Files.writeString(grid, """[{}, {"hybrid": {"shortSessionMaxMin": 0.0}}, {"hybrid": {"shortSessionMaxMin": 100000.0}}]""")
+        val out = dir.resolve("short-grid-out.json")
+        val input = arrayOf("--nights", nightsDir().toString(), "--model", biased.toString(), "--params", pinnedFile().toString())
+        ok("evaluate", *input, "--param-grid", grid.toString(), "--out", out.toString())
+        val blocks = checkNotNull(readJson(out)["grid"]).jsonArray.map { it.jsonObject }
+        assertEquals(180.0, blocks[0].obj("params").obj("hybrid").num("shortSessionMaxMin"), "the default is 180 min")
+        assertEquals(blocks[1].obj("pooled"), blocks[0].obj("pooled"), "nights are longer than the default threshold")
+        assertTrue(lightPredicted(blocks[2]) > lightPredicted(blocks[0]), "every session short: the LIGHT bias of +3 applies")
+    }
+
+    @Test
     fun `bad inputs give the documented exit codes`() {
         val nights = nightsDir().toString()
         val out = dir.resolve("x.json").toString()

@@ -210,7 +210,11 @@ def predict(n, rows, estimator, params, bundle):
         hp = params.get("hybrid", {})
         ew, tw = hp.get("emissionWeight", 1.0), hp.get("timePriorWeight", 1.0)
         beta = hp.get("priorExponent", 1.0)
-        bias = bundle.get("stageLogBias") or [0.0] * 4
+        short_max = hp.get("shortSessionMaxMin", 0.0)       # like core-algo HybridEmissions.stageBias
+        session_min = (n["sessionEndMs"] - n["sessionStartMs"]) / 60_000.0
+        short = short_max > 0 and session_min < short_max
+        bias = ((bundle.get("stageLogBiasShort") or bundle.get("stageLogBias")) if short
+                else bundle.get("stageLogBias")) or [0.0] * 4
         prior = bundle["classPriors"]
         table, bm = bundle["timePrior"]["table"], bundle["timePrior"]["binMinutes"]
         for r in rows:

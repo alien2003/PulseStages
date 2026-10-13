@@ -522,6 +522,14 @@ internal val hybridSection =
                     { it.algo.hybrid.priorExponent },
                     { s, v -> s.hybrid { it.copy(priorExponent = v) } },
                 ),
+                numberField(
+                    "$HYB.shortSessionMaxMin",
+                    R.string.set_hyb_short_session_title,
+                    R.string.set_hyb_short_session_hint,
+                    { it.algo.hybrid.shortSessionMaxMin },
+                    { s, v -> s.hybrid { it.copy(shortSessionMaxMin = v) } },
+                    unit = UNIT_MIN,
+                ),
             ),
     )
 

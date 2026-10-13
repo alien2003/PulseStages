@@ -1,0 +1,159 @@
+2026-10-13T22:24:35+02:00 NOTE commands.log of worktree .worktrees/nap-eval (branch fix/nap-eval, base 99df6ae); runs it reads, read-only: tools/train/out/{loso-v2,bias-base,bias-final} (symlinks into the main checkout)
+2026-10-13T22:24:35+02:00 PRE-REGISTRATION naps (written before any proxy was built or decoded; full text also in tools/train/out/prereg-naps.md):
+  # Pre-registration: daytime naps (short sessions) of the HYBRID decoder (worktree nap-eval, branch fix/nap-eval)
+  
+  Written 2026-10-13T22:24:35+02:00, BEFORE any result on nap proxies exists (no proxy has been built, decoded or
+  scored; no candidate code has been run). The only numbers known are the published night-level numbers of
+  ALGORITHM.md section 13 (runs `loso-v2`, `bias-base`, `bias-base/bias`, `bias-final`). Also appended verbatim to
+  `tools/train/out/naps/commands.log`.
+  
+  ## Question
+  
+  A user who takes daytime naps sets the app's source filter `minSessionMin` to 30 min, so sessions of 30 min and
+  longer are estimated by the shipped default (HYBRID-MLP [walch+bid-zero], EXPLICIT HSMM, emissionWeight 0.5,
+  timePriorWeight 0, beta 1, bundle stageLogBias b = (+0.090, +0.216, -0.318, +0.012)). Is that good enough for naps,
+  or does it need a change for short sessions? b was fitted on whole nights (stage mix of a full night); a nap has a
+  different mix. No open dataset has labelled daytime naps, so the evaluation uses NAP PROXIES cut from the labelled
+  nights.
+  
+  ## Nap proxies
+  
+  For every OHealth-like night file (`tools/train/data/nights/<variant>/`, variants `instantaneous` and `mean2min`;
+  Walch PSG = headline, BIDSleep EEG headband = secondary) and every length L in {30, 60, 90, 120, 180} min:
+  
+  - session start s0 = the night's OHealth-like session start (first non-wake 30-s epoch - 5 min, clipped to the scored
+    range, exactly as `prepare.py` builds it); session end s1 = s0 + L min. Every prepared session is at least 199 min
+    long (Walch) / 242.5 min (BIDSleep), so s1 never passes the night's session end (a night where it would is skipped
+    and counted);
+  - heart rate: the night file's samples with s0 - 30 min <= t <= s1 (the context BEFORE the session as available in
+    the night file, which holds heart rate from s0 - 30 min where it exists); steps: the step records with
+    end > s0 - 30 min and end <= s1; labels: the 30-s label epochs fully inside [s0, s1];
+  - NO data after s1. A real nap is followed by wakefulness (higher heart rate, often steps), which the nights cannot
+    supply; dropping the post-session context instead of using the continuing sleep of the night is the conservative
+    choice (the decoder gets no help from the context after the end, and no misleading sleep context either);
+  - proxy id = `<night id>-nap<L>`, subject and variant unchanged.
+  
+  Stated limitations of the proxies (reported with the results): they are the first L minutes of a NIGHT (evening
+  circadian phase, after a full day awake, sleep onset taken from PSG - 5 min), not an afternoon nap; they end inside
+  sleep, whereas a real nap ends with an awakening (and the model was trained with sessions that end at the final
+  awakening + 5 min, so its time-to-end features expect wake near the end); a real nap's post-session wake context is
+  not represented.
+  
+  ## Fold artefacts, reproduction gate
+  
+  No classifier is retrained. Every held-out subject is decoded with its LOSO outer fold bundle of run `bias-base`
+  (`hybrid/walch+bid-zero/<variant>/mlp/folds/<subject>.json`) and the decoder choice theta_g = (durationModel,
+  emissionWeight, timePriorWeight) of its (variant, outer group g) from the nested per-group selection, beta = 1.
+  The fold-level b_g of the adopted candidate (b) of the stage-proportion experiment (`bias-base/bias/decisions.json`,
+  `choices.B.bias`, fitted on the inner out-of-fold decodes of g's Walch selection subjects, never on g's subjects) is
+  the shipped default's b at fold level.
+  
+  Gate before any proxy is decoded: with the worktree's algo-cli build (fingerprint recorded), the night-level
+  evaluation of (A) the shipped default (fold bundle + b_g) and of BASE (fold bundle, no b) on all 284 nights of both
+  headline variants must reproduce `bias-base/bias/results.jsonl` (candidates B and BASE) night by night (confusion
+  matrix, warnings, estimated / skipped); RULES and HMM-table (the physiology table) on the nights must reproduce the
+  per-night confusion matrices of `loso-v2/results.jsonl`. If the HYBRID check fails, stop and document; the context
+  estimators' check is reported either way.
+  
+  ## Candidates (sessions shorter than a threshold T, T in {120, 180} min)
+  
+  Session length = (s1 - s0) in minutes; "short" = strictly below T. Sessions >= T are decoded exactly as by (A) in
+  every candidate, so whole nights (all >= 199 min) are unaffected by construction (verified by re-running the night
+  evaluation; see "If adopted").
+  
+  - (A) shipped default: fold bundle + b_g for every session (no special case).
+  - (B-T) b off for short sessions: short sessions decoded with the fold bundle without b (= BASE); others as (A).
+  - (C-T) separate short-session bias b_short: short sessions decoded with the fold bundle carrying b_short_g(T)
+    instead of b_g; others as (A). b_short_g(T) = the deterministic fixed point of `pulsetrain/bias.py`
+    (`fit_stage_bias`, unchanged: start b = 0, eta = 1, proposal b + eta * ln(T_s / max(P_s, 1e-4)) centred, accepted
+    when D = sum_s |T_s - P_s| decreases, else eta halved, at most 8 decodes, stop at D <= 0.005; shares over the
+    pooled scored 30-s chunks of the fit set) per (variant, outer group g, T) on the TRAINING folds' proxies only: the
+    proxies with L < T (L in {30, 60, 90} for T = 120; {30, 60, 90, 120} for T = 180) of the Walch nights of g's
+    inner held-out selection subjects (`selection/<key>.json` evalSubjects / evalNights), each decoded by its inner
+    fold model (`work/walch+bid-zero/<variant>/mlp/<key>/models`) at theta_g, beta = 1 — the same fit set as b_g, cut
+    into proxies; never a subject of g.
+  - Every held-out subject (Walch and BIDSleep) is decoded with every candidate; BIDSleep numbers are secondary,
+    outside the rule.
+  - Context only (not candidates): RULES (AlgoParams defaults) and HMM-table (the specification's physiology table,
+    `loso.physiology_hmm_patch`), untrained, on the same proxies.
+  
+  The five candidates are A, B-120, B-180, C-120, C-180. With T = 120 the L = 120 proxies are not short (L = 120 is
+  not < 120) and are decoded as (A); L = 180 proxies are (A) in every candidate (reported for context, outside the
+  rule).
+  
+  ## Metrics (per candidate, dataset, variant and L; and pooled over L in {30, 60, 90, 120})
+  
+  Per session, on its scored 30-s chunks (prediction at the chunk midpoint, `IntervalScoring`; chunks predicted UNKNOWN
+  inside long heart-rate gaps are not scored): confusion matrix; accuracy = correct / scored chunks; true and predicted
+  shares T_s, P_s of AWAKE / LIGHT / DEEP / REM; summed share error E = 100 * sum over the four stages of |P_s - T_s|
+  (percentage points, 0-200); per-stage |P_s - T_s|; per-stage minute errors (informational).
+  
+  - E (rule): mean over the sessions of the L; pooled over L = mean over the four L of the per-L mean E.
+  - accuracy (rule): per L the pooled accuracy over all scored chunks of the sessions of that L; pooled over L = mean
+    over the four L of the per-L accuracy (each length counts equally). Also reported: mean per-session accuracy.
+  - Cohen's kappa: mean per-subject kappa over the subjects where it is defined (the subject's sessions of that L
+    pooled; Walch = one session; undefined when the chance agreement is 1, i.e. truth and prediction are the same
+    single stage), with the number of subjects where it is defined; also pooled over all chunks of the L. REPORTED,
+    NOT USED for selection: it is unstable on 30-min segments that contain one or two stages.
+  - stage shares: pooled predicted vs true shares (chunks of all sessions of the L) and mean per-session shares.
+  - NOT_ESTIMATED: sessions not estimated (algo-cli `skipped`, by reason: SESSION_TOO_SHORT, NO_HR_DATA, LOW_COVERAGE,
+    NO_LABELS) and estimated sessions with no scored chunk; rate per L.
+  - flags: share of estimated sessions with a sanity warning (SANITY_DEEP_HIGH / SANITY_REM_HIGH / SANITY_DEEP_LOW,
+    each and any), with LOW_HR_RANGE, low-confidence (LOW_HR_RANGE or any sanity warning = the night's
+    `flags.lowConfidence`), RULES_FALLBACK_LOW_COVERAGE, CYCLE_PRIOR_DISABLED (informational) and DATA_GAPS.
+  - paired per-subject differences candidate - (A) with 95 % percentile bootstrap CIs (`report.paired_bootstrap`,
+    10 000 resamples of subjects, seed 0), per variant, pooled over L and per L: E (subject value = mean over the
+    subject's sessions), accuracy (subject value = mean over L of the subject's pooled accuracy at L; per L the
+    subject's pooled accuracy) and, per L, kappa (subjects where defined in both).
+  
+  ## Adoption rule (verbatim)
+  
+  On Walch, worse sampling variant, pooled over L in {30, 60, 90, 120} (and reported per L): adopt the candidate with
+  the lowest mean summed share error among those whose accuracy >= (accuracy of A - 0.01); ties -> higher accuracy;
+  else keep A.
+  
+  Operational definitions: accuracy worse = min over {instantaneous, mean2min} of the pooled-over-L accuracy; E worse
+  = max over the two variants of the pooled-over-L E (each criterion on its own worse variant); A competes (it
+  qualifies trivially); ties = E worse within 0.05 percentage points of the lowest; remaining ties -> the order A,
+  B-120, B-180, C-120, C-180 (A first). Adopting A means: no change.
+  
+  ## If B or C is adopted
+  
+  - core-algo: `HybridParams.shortSessionMaxMin` (minutes; sessions strictly shorter use the short-session bias; 0 =
+    off = today's behaviour), validated (finite, >= 0), in AlgoParams and hence in the params hash; for C an optional
+    bundle field `stageLogBiasShort` = [bA, bL, bD, bR] (absent = no bias on short sessions, which is B), validated
+    (exactly 4 finite numbers), part of the bundle fingerprint when present (a bundle without it keeps its
+    fingerprint), documented in docs/INTERCHANGE.md. Default of `shortSessionMaxMin` = the adopted T.
+  - C's final b_short: the same fixed point on the LOSO out-of-fold proxies (L < T) of all 31 Walch subjects, both
+    headline variants pooled, each decoded by its own outer fold bundle (no b) at the final decoder parameters
+    (EXPLICIT, 0.5, 0, beta 1), added to the shipped bundle (`bias-final/final/hybrid_model.json`, otherwise
+    unchanged) and installed; TrainedDefaults gains the threshold.
+  - Verification: the new build with the new defaults / bundle reproduces (A) night by night on all 284 nights of both
+    headline variants (nights >= T unaffected) and the adopted candidate's proxy results exactly.
+  - Kotlin and Python tests, ALGORITHM.md section 13.11, INTERCHANGE.md, PLAN.md, README.
+  
+  If A is kept: no code change to the decoder; ALGORITHM.md section 13.11 documents the experiment and the plain
+  conclusion either way.
+2026-10-13T22:24:35+02:00 NOTE prereg-naps.md sha256 10ebc9f4bd3edcb5e5f8de62bdf6f2899a3b8e2a84ea2fb0b3e20bb70bfa3815
+2026-10-13T22:29:25+02:00 START mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps --context-run loso-v2 --jobs 12 (algo-cli: this worktree's installDist build of 99df6ae; prereg-naps.md unchanged, sha256 10ebc9f4bd3edcb5e5f8de62bdf6f2899a3b8e2a84ea2fb0b3e20bb70bfa3815)
+2026-10-13T22:32:00+02:00 RESULT naps (summary.json / report.md of out/naps, algo-cli bb321bcb): reproduction gate passed (1136/1136 HYBRID night decodes identical to bias-base/bias candidates B / BASE; RULES / HMM-table RULES/instantaneous 284/284, RULES/mean2min 284/284, HMM-table/instantaneous 284/284, HMM-table/mean2min 284/284 identical to loso-v2). Walch worse variant pooled over L 30-120: A acc 0.413 E 93.1; B-120 acc 0.353 E 99.9; B-180 acc 0.323 E 106.8; C-120 acc 0.473 E 75.5; C-180 acc 0.488 E 72.3. Threshold acc 0.403; qualifying A, C-120, C-180; ADOPTED C-180 by the pre-registered rule.
+2026-10-13T22:33:35+02:00 START mise exec -- python -I tools/train/train.py naps-final --exp naps --base-run bias-final --out-run naps-final --install-model (C-180 adopted: final b_short on the LOSO out-of-fold proxies L 30-120 of the 31 Walch subjects, both variants, at EXPLICIT / 0.5 / 0; same build bb321bcb)
+2026-10-13T22:34:12+02:00 RESULT naps-final: stageLogBiasShort = (-0.094, +0.417, +0.270, -0.593) AWAKE / LIGHT / DEEP / REM, D = 0.133 after 8 decodes (accepted step 6; the decoded REM share oscillated between 0.020 and 0.226 over steps 3-7, true 0.058); in-sample on the LOSO OOF proxies (reporting only): E 65.3 / 66.6 pp, accuracy (mean over L) 0.510 / 0.535 (inst / mean2min). Bundle out/naps-final/final/hybrid_model.json = bias-final's bundle + stageLogBiasShort, modelId pulsestages-walch+bidsleep-mlp-naps-final; installed to app/src/main/assets/models/hybrid_model.json; trained_defaults.json + hybrid.shortSessionMaxMin = 180.
+2026-10-13T22:37:56+02:00 BUILD algo-cli installDist at 22:37:49 (core-algo: hybrid.shortSessionMaxMin, bundle stageLogBiasShort, TrainedDefaults.HYBRID_SHORT_SESSION_MAX_MIN = 180.0 regenerated by 'train.py defaults --run naps-final --write'); fingerprint sha256 f0ae1c7bb2a8342f9c79d34af792bcf74ae35866b76788bfbc062033a8ddccc3. Deviation from the prereg's implementation note, disclosed: a bundle WITHOUT stageLogBiasShort keeps its stageLogBias on short sessions (A), not 'no bias' (B, the worst candidate); no effect on any candidate result or the decision, the shipped bundle carries stageLogBiasShort.
+2026-10-13T22:37:56+02:00 START mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify (new build f0ae1c7b; default shortSessionMaxMin, i.e. not passed)
+2026-10-13T22:38:15+02:00 RESULT naps-verify (build f0ae1c7b, default params, fold bundles carrying b_g AND b_short_g(180)): 568 / 568 whole nights identical to A (bias-base/bias candidate B), 2840 / 2840 proxies identical to candidate C-180 of out/naps; final bundle out/naps-final accepted on all 3408 sessions (1695 / 1704 estimated per variant: the 8 BIDSleep proxies without HR / coverage + 0 nights; 3 RULES fallbacks for low coverage, no HMM fallback).
+2026-10-13T22:38:22+02:00 NOTE correction of the previous line: 9 (not 8) BIDSleep proxies per variant are not estimated (L 30: 3, 60: 2, 90: 2, 120: 1, 180: 1; NO_HR_DATA / LOW_COVERAGE), 1704 - 1695 = 9; all 568 nights are estimated.
+2026-10-13T22:52:21+02:00 NOTE committed on fix/nap-eval: core-algo hybrid.shortSessionMaxMin (default 180 via TrainedDefaults, regenerated from naps-final) + bundle stageLogBiasShort, app setting + strings (en/ru), data-local validator, bundle out/naps-final installed, pulsetrain/naps.py + train.py naps / naps-report / naps-final / naps-verify, tests (Kotlin: app 170, algo-cli 14, core-algo 232, data-local 107, work 71, data-hc 211, all green with ktlintCheck and detekt; Python: tools/train/tests incl. test_naps.py and the naps checks of test_prereg.py), ALGORITHM.md section 13.11 (+ summary, sections 1, 7, 9, 11, 12.3, 13, 16, 17), INTERCHANGE.md, PLAN.md, README (Naps, en + ru), CHANGELOG; this log is committed as docs/prereg/commands-naps.log and the prereg as docs/prereg/prereg-naps.md (sha256 10ebc9f4bd3edcb5e5f8de62bdf6f2899a3b8e2a84ea2fb0b3e20bb70bfa3815).
+2026-10-13T23:21:22+02:00 NOTE audit follow-up (auditors reviewed the nap evaluation; branch fix/nap-eval at 2bd5eee + uncommitted fixes). The analyses below are POST HOC and REPORTING ONLY: not pre-registered, several of their numbers were first computed by the auditors, and no decision depends on them (C-180 stays adopted by the pre-registered rule). Code identity from now on recorded in each summary's meta.code (SHA-256 of train.py and pulsetrain/*.py); at this point: all files 1572860dd739cffd0cfa4479e42b3ea2909a72e360b02c12f447bdeb7881f2b4, pulsetrain/naps.py 7b7c843692088b8896caa8ef42d5f1e230d75eb8a214a24c8c53d538804bab3c, pulsetrain/naps_posthoc.py c6c51370824270e5df93e35ab8db103593e55ca5725f83a6fe3c7258a4b82d28. algo-cli build f0ae1c7b (installDist of 2bd5eee + a KDoc-only edit; fingerprint unchanged).
+2026-10-13T23:21:22+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps-rerun --context-run loso-v2 --jobs 12 (re-run of the whole experiment with the committed analysis code, to be compared file by file with out/naps, whose naps.py was rewritten at 22:33:15 after that run)
+2026-10-13T23:22:40+02:00 RESULT naps-rerun (build f0ae1c7b, committed analysis code): reproduction gate passed again (1136/1136 HYBRID night decodes; RULES / HMM-table 4 x 284/284); results.jsonl, fits.json, report.md and repro/summary.json byte for byte identical to out/naps, decision C-180 unchanged; 223 algo-cli calls, all rc=0.
+2026-10-13T23:22:40+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-posthoc --run bias-base --exp naps --final naps-final --rerun naps-rerun --out-run naps-posthoc --jobs 12 (post hoc, reporting only: proxies of 150 / 170 min with A and C-180 + the 120-min proxies again as a check; C-180 vs C-120; the rule with RULES / HMM-table / always LIGHT as if candidates; flags, shares, REM excess, both kappa definitions; final fit vs fold fits; the re-run comparison)
+2026-10-13T23:23:26+02:00 RESULT naps-posthoc (out/naps-posthoc, build f0ae1c7b; reporting only): 120-min proxies decoded again, 1136/1136 identical to out/naps. Walch 150 / 170 min, C-180 - A: instantaneous dE +5.6 [-5.5, 16.8] / +7.6 [-2.2, 17.0] pp, dacc +0.038 [-0.008, 0.085] / +0.033 [-0.010, 0.076]; mean2min dE -14.3 [-24.6, -4.3] / -10.2 [-19.6, -1.4], dacc +0.042 [-0.007, 0.091] / +0.060 [0.023, 0.101]; REM predicted 2.0-4.5 % (C-180) vs 17-25 % (A), PSG 10-12 %; DEEP 34-38 % vs PSG 28-30 % (SANITY_DEEP_HIGH 45-55 %). C-180 - C-120 (Walch, pooled 30-120): dE -3.1 [-7.3, 0.9] / -0.6 [-5.6, 4.2], dacc +0.015 [0.001, 0.030] / +0.017 [-0.003, 0.037] (inst / mean2min). The rule with RULES / HMM-table / always LIGHT as if candidates would pick RULES (acc worse 0.472, E worse 70.8 < 72.3 of C-180; kappa 0.015 / 0.029). Low-confidence C-180 Walch: L30 100/100, L60 87.1/87.1, L90 77.4/71.0, L120 71.0/61.3, L180 35.5/64.5 %; pooled 30-120 83.9/79.8 %. REM excess summed over L 30-120 and both variants 153.0 (A) -> 35.6 pp (C-180); at 60 min instantaneous 61 % of A's excess remains; C-180 under-calls REM at 120 min (both variants) and 90 min (mean2min). Final b_short: D 0.133, decoded REM 2.5 % vs PSG 5.8 % in-sample, fold fits D 0.002-0.079, shipped values inside the fold range. naps-rerun vs naps: every compared file identical.
+2026-10-13T23:31:26+02:00 NOTE committed on fix/nap-eval as 'fix(train): address nap-evaluation audit findings': pulsetrain/naps_posthoc.py + train.py naps-posthoc, meta.code provenance (util.code_fingerprint) in naps / naps-final / naps-verify, tests; ALGORITHM.md (summary, sections 7, 13, 13.11, 16, 17), README (en + ru), CHANGELOG, PLAN.md, tools/train/README.md, app hint strings (en + ru) and the shortSessionMaxMin KDoc now say that short nights of 90-180 min also get b_short, that 120-180 min was not pre-registered, "about 4 in 5" low-confidence instead of "almost all", both variants' shares and the REM under-call, C-180 vs C-120 within noise, RULES close on the rule's metrics, the final fit's REM 2.5 % vs 5.8 %, and the provenance limits. No change to the decision, the bundle, TrainedDefaults or decoding (algo-cli fingerprint f0ae1c7b unchanged). Gradle test / ktlintCheck / detekt green (app 170, algo-cli 14, core-algo 232, data-local 107, work 71, data-hc 211); Python tools/train/tests 233 passed. This log is committed as docs/prereg/commands-naps.log.
+2026-10-14T00:24:27+02:00 BUILD algo-cli installDist at 00:23:55 of the squash merge of fix/nap-eval into main (c5bba7c + fix/nap-eval, uncommitted; main adds features.baselineMinSessionMin and post.proportionsMinSessionMin = 180, the latter switches the sanity check off for sessions shorter than 180 min); fingerprint sha256 713a0663830269f0332c3a88913a12028cf0391b078d8197f194cea1283df65a
+2026-10-14T00:24:27+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify-merge --jobs 16 (merge check: the merged build with its default parameters)
+2026-10-14T00:30:00+02:00 RESULT naps-verify on the merged build 713a0663 (rc=2, output moved to out/naps-verify-merge-strict): 568 / 568 whole nights identical to A; 1053 / 2840 proxies identical to C-180. Every one of the 1787 differing proxies is shorter than 180 min and has the stored confusion matrix, estimation status and warnings except the SANITY_* codes, which are absent (main's post.proportionsMinSessionMin = 180 skips the sanity check below 180 min); all 568 proxies of 180 min are identical. No stage changed.
+2026-10-14T00:30:00+02:00 NOTE pulsetrain/naps.py: verify_implementation reads post.proportionsMinSessionMin from the parameters the build reports in its metrics and expects the stored warnings without SANITY_* on shorter sessions (expected_warnings); it now reports sanityCheckMinSessionMin, sanityCodesDropped and the build's low-confidence rate per dataset / variant / L. naps_posthoc.decode_between applies the same rule to its 120-min reproduction check. Tests added (tools/train/tests/test_naps.py).
+2026-10-14T00:30:00+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify-merge --jobs 16 (merged build 713a0663, default parameters)
+2026-10-14T00:30:19+02:00 RESULT naps-verify-merge (merged build 713a0663, default parameters, updated check): 568 / 568 whole nights identical to A, 2840 / 2840 proxies identical to C-180 (sanity check from 180 min; SANITY_* codes dropped on 1787 shorter proxies, no other difference); final bundle accepted on all 3408 sessions (1695 / 1704 estimated per variant, 1692 HYBRID, 3 RULES). Low-confidence (LOW_HR_RANGE only below 180 min) of C-180, Walch inst / mean2min: L30 58.1 / 74.2, L60 32.3 / 45.2, L90 25.8 / 25.8, L120 16.1 / 19.4, L180 35.5 / 64.5 %, pooled 30-120 33.1 / 41.1 % (experiment build: 83.9 / 79.8 %); BIDSleep pooled 40.4 / 45.5 %.
+2026-10-14T00:36:24+02:00 FINAL CHECKS (squash merge of fix/nap-eval into main c5bba7c): mise exec -- ./gradlew assembleDebug assembleRelease test ktlintCheck detekt BUILD SUCCESSFUL (core-algo 283, algo-cli 14, data-local 112, data-hc 219, work 71, app 269 JVM tests, 0 failures; BundledModelAssetTest 3/3; the six rendered screenshots byte-identical to docs/screenshots); mise exec -- python -I -m pytest tools/train/tests -q 234 passed. This log is committed as docs/prereg/commands-naps.log up to this line.

@@ -34,3 +34,33 @@ def test_logged_prereg_equals_the_committed_text_and_precedes_the_runs():
     assert times == sorted(times)                                 # append-only, in time order
     first_bias = next(i for i, x in enumerate(log) if " START " in x and "train.py bias " in x)
     assert start < end < first_bias
+
+
+# ------------------------------------------------------------------------------- nap pre-registration ----
+
+from pulsetrain import naps  # noqa: E402
+
+NAPS_PREREG = REPO / naps.PREREG_PATH
+NAPS_LOG = NAPS_PREREG.parent / "commands-naps.log"
+
+
+def test_naps_prereg_sha256_matches_every_record():
+    digest = hashlib.sha256(NAPS_PREREG.read_bytes()).hexdigest()
+    assert digest == naps.PREREG_SHA256
+    assert (NAPS_PREREG.parent / "prereg-naps.md.sha256").read_text().split() == [digest, NAPS_PREREG.name]
+    assert f"NOTE prereg-naps.md sha256 {digest}" in NAPS_LOG.read_text(encoding="utf-8")
+
+
+def test_logged_naps_prereg_is_the_committed_text_and_precedes_every_run():
+    log = NAPS_LOG.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, x in enumerate(log) if " PRE-REGISTRATION naps " in x)
+    end = next(i for i, x in enumerate(log) if " NOTE prereg-naps.md sha256 " in x)
+    logged = [x[2:] if x.startswith("  ") else x for x in log[start + 1:end]]
+    assert logged == NAPS_PREREG.read_text(encoding="utf-8").splitlines()       # verbatim, timestamp included
+    stamp = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+    times = [m.group(1) for x in log if (m := stamp.match(x))]
+    assert times == sorted(times)                                               # append-only, in time order
+    written = re.search(r"^Written (\S+),", NAPS_PREREG.read_text(encoding="utf-8"), re.M).group(1)
+    assert log[start].startswith(written)
+    first_run = next(i for i, x in enumerate(log) if " START " in x and "train.py naps " in x)
+    assert start < end < first_run

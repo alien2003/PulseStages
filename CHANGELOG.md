@@ -15,16 +15,6 @@ workflow derives versionName and versionCode from the tag (see README, "GitHub: 
   (background estimation and the Home actions keep working with the real data); every build has a single launcher
   icon. The switch is a per-device debug convenience in its own preferences file, not a setting (not exported, not
   part of the params hash). `ReleaseApkTest` checks that the minified release APK has no demo class, resource or text.
-
-### Fixed
-
-- **Settings**: opening the "Features" group crashed the app with `UnknownFormatConversionException`. Its percent
-  fields have the unit "%" (`formatted="false"`), and a text without arguments was still resolved with
-  `Resources.getString(id, *emptyArray())`, which runs `String.format`. Texts without arguments are now read as they
-  are.
-
-### Changed
-
 - **Naps and the elevated-heart-rate baseline**: sessions shorter than `baselineMinSessionMin` (new, Settings →
   Features, 180 min; 0 = as before) no longer enter the rolling nadir baseline and are never compared with it, so
   estimated daytime naps neither inflate the baseline of the nights nor get flagged "elevated heart rate" themselves.
@@ -33,16 +23,38 @@ workflow derives versionName and versionCode from the tag (see README, "GitHub: 
 - **Naps and the stage-share checks**: the sanity check and the proportion calibration run only for sessions of at
   least `proportionsMinSessionMin` (new, Settings → Post-processing, 180 min; 0 = as before); naps no longer get
   `SANITY_DEEP_LOW` and a low-confidence flag for having no deep sleep.
+- **Naps get their own stage correction.** Sessions shorter than 180 min (`hybrid.shortSessionMaxMin`, new setting
+  "Short-session (nap) threshold"; 0 = off) are decoded with the bundle's new short-session log-bias
+  `stageLogBiasShort` instead of the whole-night `stageLogBias`. Chosen by a pre-registered evaluation on nap-length
+  segments of the validation nights (ALGORITHM.md §13.11): accuracy 0.41 → 0.49, summed stage-share error 93 → 72
+  points, most of the false REM in naps removed. Sessions of 180 min or more are decoded exactly as before; with the
+  default "Minimum session length" (90 min), short nights of 90–180 min also get the short-session correction. The
+  pre-registered evaluation covered sessions up to 120 min; a post-hoc check at 150 and 170 min found no clear gain
+  (share error better on one sampling variant, worse on the other; too little REM). Nap estimates remain rough
+  (README, "Naps"). In the evaluation about 4 in 5 naps were flagged low-confidence, mostly by the stage-share sanity
+  check; since that check now skips sessions shorter than 180 min (above), only a too-small heart-rate range flags a
+  nap (about 1 in 3 to 2 in 5 of the evaluated 30–120-min naps; the stages are the same). New bundle
+  `pulsestages-walch+bidsleep-mlp-naps-final` (same classifier); because the bundle and AlgoParams changed, earlier
+  estimates get a new params hash and are offered for recomputation, and the classifier part of a personal
+  calibration fitted for the previous bundle is ignored until you calibrate again.
 - **Source priority**: a session lying mostly inside a longer session of another app while covering at most half of
   it (e.g. a 40-min fragment) is a piece of that night and no longer replaces it, whatever the priority — as long as
   that longer session is used itself; a piece of a session that lost to another night is weighed by priority as before.
-- Both new parameters are part of the params hash: nights estimated before are offered for recomputation.
+- `baselineMinSessionMin` and `proportionsMinSessionMin` are part of the params hash: nights estimated before are
+  offered for recomputation.
 
 ### Added
 
 - Render tests of every Settings group (every field, option, the HMM tables and the About card) and of every other
   screen in its main states, in English and Russian, at font scale 2 and in a wide window; a test that resolves every
   text of the settings catalog; a scan of every string with `%` for invalid format patterns.
+
+### Fixed
+
+- **Settings**: opening the "Features" group crashed the app with `UnknownFormatConversionException`. Its percent
+  fields have the unit "%" (`formatted="false"`), and a text without arguments was still resolved with
+  `Resources.getString(id, *emptyArray())`, which runs `String.format`. Texts without arguments are now read as they
+  are.
 
 ## [0.1.0] - 2026-10-13
 
