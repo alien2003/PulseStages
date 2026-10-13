@@ -38,9 +38,40 @@ that the release manifest has no demo entry).
 
 The mode is stored in the app's private preferences, so it survives a restart until it is switched off again.
 
-## Taking the screenshots
+## The screenshots in the README
+
+The README embeds these files from `docs/screenshots/`. They are rendered on the JVM, without a phone, by
+`app/src/testDebug/.../screenshots/ScreenshotsTest.kt` (Robolectric with native graphics, light theme with the app's own
+palette, a 411 × 891 dp phone at 2×, English): Nights, night detail and Compare use the demo sources described above
+with the bundled model; Home, Settings and Sources use fixed example states (no phone data at all). Every test run
+renders them into `app/build/screenshots/`; to replace the files in `docs/screenshots/`, run from the repository root:
 
 ```sh
+mise exec -- ./gradlew :app:testDebugUnitTest --tests '*ScreenshotsTest' -PrecordScreenshots
+```
+
+Render them again whenever a screen, the bundled model or the default settings change.
+
+| File | Screen | What it should show |
+|---|---|---|
+| `home.png` | Home tab | Health Connect and permission status, sources and schedule, counters, actions |
+| `nights.png` | Nights tab | The 14 demo nights with stage shares and the "Stale" / "Elevated heart rate" / "Low confidence" markers |
+| `night-detail.png` | A night's detail | Hypnogram, heart-rate curve, an epoch's probabilities (tap or drag on the chart first), warnings and actions |
+| `compare.png` | Compare tab | Kappa, per-stage metrics and confusion matrix of the 8 synthetic reference nights |
+| `settings.png` | Settings tab | Backup and reset actions and the first parameter groups |
+| `sources.png` | Settings → Sleep sources | The app list with switches, priority buttons and the manual package field |
+
+## Taking screenshots on the phone
+
+On the phone, Home, Settings and Sources are not switched to demo data: they show the phone's real state, for example
+the counters, the last run and the apps that wrote sleep sessions. Check those pictures for anything personal before
+committing them.
+
+Run these from the repository root, in a shell that has `ADB_WIN` (for example `mise exec -- bash`).
+`docs/screenshots/` must exist before the pull: `wslpath -w` turns a missing directory into a relative Windows path.
+
+```sh
+mkdir -p docs/screenshots
 "$ADB_WIN" install -r "$(wslpath -w app/build/outputs/apk/debug/app-debug.apk)"
 "$ADB_WIN" shell am start -n io.github.alien2003.pulsestages/.demo.DemoActivity --ez enabled true
 # navigate to the screen, then:

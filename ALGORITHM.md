@@ -313,7 +313,7 @@ data × coverage × 0.8 (elevated night) × 0.7 (sanity check failed), clipped t
   the regularization counts in hours of evidence; gradient descent from 0 with step 1/L, L = M/(2E_h) + 2λ); the HMM
   means per state and dimension become μ = (Σx + κ μ_0)/(n + κ) with κ = λ E_h = 600 pseudo-epochs (elevated nights
   excluded), kept only if the hrNorm order holds. Kappa before / after on the held-out nights is shown; the result is
-  stored in Room as the personal model ("reset to global" deletes it).
+  stored in Room as the personal model ("reset to global" deactivates it; the row stays in Room, inactive).
 - **Without reference** (every `emEveryNights` = 30 new nights): unsupervised population EM over all usable nights
   (coverage ≥ 0.6, not elevated), `emIterations` = 3 Baum–Welch iterations pooling the posteriors of the full HMM over
   the nights and updating μ and σ with MAP shrinkage to the *global* table (τ = `personal.emPriorStrength` = 200),
@@ -405,7 +405,7 @@ Defaults are never tuned on synthetic data or by feel (specification §9). Every
 
 Both datasets are open access under the **Open Data Commons Attribution License v1.0 (ODC-By 1.0)**, which allows use,
 derived databases and produced works (including commercial use) with attribution. The bundled model is a produced work
-of both. Attribution notice (also in README and the app's about text):
+of both. Attribution notice (also in README and in the app: Settings → "Versions and licences"):
 
 > Contains information from *Motion and heart rate from a wrist-worn wearable and labeled sleep from
 > polysomnography* (https://physionet.org/content/sleep-accel/1.0.0/) and from *BIDSleep: A Multi-Night

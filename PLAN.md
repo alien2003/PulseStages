@@ -70,7 +70,17 @@ from memory.
   extra training data and a second validation set; PSG-scored Walch remains the headline result.
 - **JUnit:** Jupiter 5.14.4 (latest 5.x; the user asked for JUnit 5) via `de.mannodermaus.android-junit` 2.0.1 in
   Android modules.
-- **Screenshots in docs/** are rendered from synthetic nights, never from real health data.
+- **Screenshots in docs/** are rendered on the JVM by `ScreenshotsTest` (Robolectric native graphics) from synthetic
+  nights and fixed example states (`./gradlew :app:testDebugUnitTest -PrecordScreenshots`), never from real health data.
+- **Default session title** is localized: the specification's Russian title on a Russian system, the English translation
+  otherwise; a title typed in the settings is used verbatim on every locale.
+- **Source priority also applies to staged sessions:** when a higher-priority source recorded the night with its own
+  stages, the overlapping stage-less night of a lower-priority source is a duplicate and is not estimated (our earlier
+  output for it is superseded); if that staged session is deleted later, the night is estimated again.
+- **Settings file stores only values that differ from the defaults**, so data-driven defaults (e.g. a retrained model's
+  decoder parameters) still update after the user edited some other setting; export always writes every value.
+- **A deletion wins:** "Delete my sessions" / "delete this session" cancels a running backfill or recompute, and a
+  backfill or recompute requested before the deletion never re-writes the deleted nights.
 - **Spec vs. "prefer what wins on synthetic tests".** Where a choice can be measured on the open PSG dataset, the
   dataset decides (spec §9 forbids tuning on synthetic data); synthetic tests only guard invariants and regressions.
 
@@ -165,7 +175,7 @@ constructor; pagination samples loop on `!= null`; some pages put `<uses-permiss
 
 Published expectations (Walch 2019 Table 6): 3-class kappa with HR only 0.04–0.17, motion + HR + clock ≈ 0.30.
 4-class kappa ≈ 0.2–0.3 is a realistic target for 2-minute HR without an accelerometer; > 0.5 would indicate leakage.
-Attribution notice for produced works (ODC-By §4.3) goes into README and the app's About text.
+Attribution notice for produced works (ODC-By §4.3) is in README and in the app (Settings → "Versions and licences").
 
 ## 6. Open questions (none blocking)
 
