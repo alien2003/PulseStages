@@ -145,6 +145,33 @@ class FakeHealthRepositoryTest {
         }
 
     @Test
+    fun `the android14 background rule silently reads our own records only and still refuses getChanges`() =
+        runTest {
+            fake.addSleepSession(OHEALTH, start, start + 8 * HOUR_MS)
+            fake.addHeartRate(OHEALTH, start, start + HOUR_MS)
+            fake.writeEstimatedSession(write())
+            val token = fake.sleepChangesToken(setOf(OHEALTH))
+            fake.inBackground = true
+            fake.revoke(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+            fake.backgroundRule = FakeHealthRepository.BackgroundRule.SELF_ONLY
+
+            // No error: the origin filter is replaced by our own package (AOSP android14-release enforceSelfRead).
+            assertEquals(listOf(fake.ownPackage), fake.readSleepSessions(start - HOUR_MS, start + HOUR_MS, null).map { it.packageName })
+            assertEquals(
+                listOf(fake.ownPackage),
+                fake.readSleepSessions(start - HOUR_MS, start + HOUR_MS, setOf(OHEALTH)).map { it.packageName },
+                "OHealth asked, our own records returned",
+            )
+            assertTrue(fake.readHeartRate(start, start + HOUR_MS, setOf(OHEALTH)).isEmpty())
+            assertEquals(listOf(fake.ownPackage), fake.scanSleepOrigins(start - HOUR_MS, start + HOUR_MS).map { it.packageName })
+            assertTrue(fake.sleepChangesToken(setOf(OHEALTH)).isNotBlank())
+            assertThrows<HealthDataException.PermissionDenied> { fake.sleepChanges(token) }
+
+            fake.grant(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+            assertEquals(1, fake.readSleepSessions(start - HOUR_MS, start + HOUR_MS, setOf(OHEALTH)).size, "with the permission")
+        }
+
+    @Test
     fun `history limit, permission revocation, availability and injected failures`() =
         runTest {
             fake.addSleepSession(OHEALTH, start - 40 * DAY, start - 40 * DAY + HOUR_MS)

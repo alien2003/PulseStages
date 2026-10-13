@@ -75,6 +75,8 @@ dependencies {
     testFixturesApi(project(":core-algo"))
     testFixturesApi(project(":data-local"))
     testFixturesApi(libs.kotlinx.coroutines.core)
+    // harnessTest() (testutil/TestData.kt) runs scenarios with runTest; shared with the tests of :work.
+    testFixturesApi(libs.kotlinx.coroutines.test)
     testFixturesImplementation(libs.kotlinx.serialization.json)
 
     testImplementation(platform(libs.junit.bom))

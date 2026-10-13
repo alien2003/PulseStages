@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightDao
+import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import java.time.Clock
 import javax.inject.Inject
@@ -24,6 +25,18 @@ data class EraseReport(
     val markedDeleted: Int,
     val withoutClientRecordId: Int,
 )
+
+/** Result of [MyDataEraser.deleteNight]. */
+enum class DeleteNightResult {
+    /** Our session was deleted and the night marked DELETED. */
+    DELETED,
+
+    /** The night had no output (not estimated, failed, superseded, already deleted); nothing changed. */
+    NO_OUTPUT,
+
+    /** No night with that clientRecordId is known. */
+    NOT_FOUND,
+}
 
 /**
  * "Delete all my sessions from Health Connect": deletes every session this app wrote, by clientRecordId (Health
@@ -68,6 +81,26 @@ class MyDataEraser
                 report
             }
         }
+
+        /**
+         * "Delete my session" of one night: deletes our session with [clientRecordId] from Health Connect (by
+         * clientRecordId, so nobody else's data can be touched) and marks the night DELETED, so automatic syncs do not
+         * write it again (an explicit recompute of the night or a backfill does). A night without an output is left as
+         * it is; the delete is still sent as a safety net (unknown ids are ignored). Throws
+         * [io.github.alien2003.pulsestages.data.hc.HealthDataException] on failure (nothing is marked then).
+         */
+        suspend fun deleteNight(clientRecordId: String): DeleteNightResult =
+            LedgerLock.withLock {
+                val night = nightDao.findByClientRecordId(clientRecordId) ?: return@withLock DeleteNightResult.NOT_FOUND
+                repository.deleteOwnSessions(listOf(clientRecordId))
+                if (night.status == NightStatus.WRITTEN) {
+                    nightDao.markDeleted(listOf(clientRecordId), "deleted by the user (delete my session)", clock.millis())
+                    logger.i(TAG, "deleted our session of this night", nightKey = clientRecordId)
+                    DeleteNightResult.DELETED
+                } else {
+                    DeleteNightResult.NO_OUTPUT
+                }
+            }
 
         private companion object {
             const val TAG = "MyDataEraser"

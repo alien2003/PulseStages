@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Только в отладочных сборках: значок демо-режима (docs/SCREENSHOTS.md). -->
+    <string name="demo_launcher_label">PulseStages демо</string>
+    <string name="demo_toast_on">Демо-режим включён: синтетические ночи</string>
+    <string name="demo_toast_off">Демо-режим выключен: настоящие данные</string>
+</resources>

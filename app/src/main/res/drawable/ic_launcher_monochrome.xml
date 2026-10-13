@@ -1,17 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome layer for themed icons (Android 13+): the foreground artwork in one colour; the launcher tints it. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FF000000"
-        android:pathData="M62,30a16,16 0,1 0,16 22a13,13 0,1 1,-16 -22z" />
-    <path
-        android:strokeColor="#FF000000"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
         android:fillColor="#00000000"
-        android:pathData="M28,62h12l5,-10l7,20l6,-14l4,4h18" />
+        android:pathData="M24,56 H33 L37,46 L42,68 L46,56 H51 M51,56 V47 H57 V64 H63 V52 H69 V41 H75 V56 H84"
+        android:strokeWidth="5"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
 </vector>

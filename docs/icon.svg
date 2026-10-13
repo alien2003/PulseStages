@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PulseStages icon: a heart-rate pulse wave turning into hypnogram steps (same artwork as the adaptive icon). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="216" height="216" viewBox="0 0 108 108" role="img" aria-labelledby="title">
+  <title id="title">PulseStages</title>
+  <rect width="108" height="108" rx="24" ry="24" fill="#002E69"/>
+  <path d="M51,56 V47 H57 V64 H63 V52 H69 V41 H75 V56 H84" fill="none" stroke="#ADC6FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24,56 H33 L37,46 L42,68 L46,56 H51" fill="none" stroke="#FFB4AA" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

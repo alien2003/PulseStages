@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+            Debug builds only: switches the Nights and Compare screens to synthetic demo nights from core-algo's
+            SyntheticNightGenerator (or back) and opens the app. Nothing is read from or written to Health Connect in
+            demo mode. The launcher entry toggles the mode; adb can set it explicitly with the boolean extra
+            "enabled" (see docs/SCREENSHOTS.md).
+        -->
+        <activity
+            android:name=".demo.DemoActivity"
+            android:exported="true"
+            android:label="@string/demo_launcher_label"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthPermissions
+import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository
 import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository.Operation
 import io.github.alien2003.pulsestages.data.hc.testutil.DAY_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
@@ -171,7 +172,7 @@ class BackfillEngineTest {
 
             h.estimator.beforeEstimate = {}
             val restarted =
-                BackfillEngine(h.repository, h.settings, h.ledger.backfillDao, h.windowReader, h.pipeline, h.logger, h.clock)
+                BackfillEngine(h.health, h.settings, h.ledger.backfillDao, h.windowReader, h.pipeline, h.logger, h.clock)
             val report = restarted.run(inBackground = false)
 
             assertEquals(BackfillOutcome.DONE, report.outcome)
@@ -205,6 +206,85 @@ class BackfillEngineTest {
             assertNotEquals(cancelled.state?.startedAt, again.state?.startedAt, "a cancelled backfill starts over")
             assertEquals(20, h.repository.ownSessions().size)
             assertEquals(20, again.state?.nightsEstimated)
+        }
+
+    @Test
+    fun `a cancel before the requested run began stops it and every retry of it, a later request starts over`() =
+        harnessTest(dir) { h ->
+            (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            val requestedAt = h.clock.millis()
+            h.clock.advanceBy(1_000)
+            // The user cancels while the worker is still starting (no state exists yet).
+            h.backfill.cancel()
+            h.repository.clearCalls()
+
+            val first = h.backfill.run(inBackground = false, requestedAtMs = requestedAt)
+            val retry = h.backfill.run(inBackground = false, requestedAtMs = requestedAt)
+
+            assertEquals(BackfillOutcome.CANCELLED, first.outcome)
+            assertEquals(BackfillOutcome.CANCELLED, retry.outcome)
+            assertEquals(0, h.repository.callCount(Operation.READ_SLEEP_SESSIONS), "nothing is read")
+            assertTrue(h.repository.ownSessions().isEmpty())
+
+            h.clock.advanceBy(1_000)
+            val again = h.backfill.run(inBackground = false, requestedAtMs = h.clock.millis())
+            assertEquals(BackfillOutcome.DONE, again.outcome)
+            assertEquals(20, h.repository.ownSessions().size)
+        }
+
+    @Test
+    fun `a cancel while the backfill waits for its retry is honoured by the retry, also after process death`() =
+        harnessTest(dir) { h ->
+            (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            val requestedAt = h.clock.millis()
+            h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.QuotaExceeded("quota"), afterCalls = 2)
+            val waiting = checkNotNull(h.backfill.run(inBackground = false, requestedAtMs = requestedAt).state)
+            assertEquals(BackfillStatus.WAITING_RETRY, waiting.status)
+            assertEquals(1, waiting.windowsDone)
+            val written = h.repository.ownSessions().size
+
+            h.clock.advanceBy(60_000)
+            h.backfill.cancel()
+            h.repository.clearFailures()
+            val restarted =
+                BackfillEngine(h.health, h.settings, h.ledger.backfillDao, h.windowReader, h.pipeline, h.logger, h.clock)
+
+            listOf(h.backfill, restarted).forEach { engine ->
+                val retry = engine.run(inBackground = false, requestedAtMs = requestedAt)
+                assertEquals(BackfillOutcome.CANCELLED, retry.outcome)
+                assertEquals(BackfillStatus.CANCELLED, retry.state?.status)
+                assertEquals(1, retry.state?.windowsDone, "not started over")
+            }
+            assertEquals(written, h.repository.ownSessions().size, "no further night is written")
+        }
+
+    @Test
+    fun `a backfill resumed in the background never reaches DONE, even where Health Connect reads silently`() =
+        harnessTest(dir) { h ->
+            (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.QuotaExceeded("quota"), afterCalls = 2)
+            val waiting = checkNotNull(h.backfill.run(inBackground = false).state)
+            h.repository.clearFailures()
+            val written = h.repository.ownSessions().size
+            // The retry runs later as a background job; the run still thinks it reads in the foreground.
+            h.repository.backgroundRule = FakeHealthRepository.BackgroundRule.SELF_ONLY
+            h.repository.revoke(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+            h.repository.inBackground = true
+
+            val retry = h.backfill.run(inBackground = false)
+
+            assertEquals(BackfillOutcome.BLOCKED, retry.outcome)
+            assertEquals(BlockedReason.BACKGROUND_PERMISSION_MISSING, retry.blockedReason)
+            val state = checkNotNull(retry.state)
+            assertEquals(BackfillStatus.WAITING_RETRY, state.status)
+            assertEquals(waiting.windowsDone, state.windowsDone, "no empty window is counted as done")
+            assertEquals(written, h.repository.ownSessions().size)
+
+            h.repository.inBackground = false
+            val foreground = h.backfill.run(inBackground = false)
+            assertEquals(BackfillOutcome.DONE, foreground.outcome)
+            assertEquals(20, foreground.state?.nightsEstimated)
+            assertEquals(20, h.repository.ownSessions().size)
         }
 
     @Test

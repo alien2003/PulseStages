@@ -66,6 +66,33 @@ class SourceScannerTest {
             assertEquals(0L, result.fromMs)
             assertEquals(1, result.sources.single().sessionCount)
         }
+
+    @Test
+    fun `the configured sources are listed from the settings alone when Health Connect cannot be read`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OTHER_APP, nightStart(3))
+            h.repository.availability = HcAvailability.NOT_SUPPORTED
+            h.settings.set {
+                it.copy(
+                    sources =
+                        it.sources.copy(
+                            sourcePriority = listOf(THIRD_APP, OHEALTH),
+                            sourcePackages = listOf(OHEALTH),
+                            manualPackages = listOf(THIRD_APP),
+                        ),
+                )
+            }
+
+            val configured = h.scanner.configured()
+
+            assertEquals(
+                listOf(
+                    SourceEntry(THIRD_APP, 0, null, enabled = false, priority = 0, manual = true, isOwn = false),
+                    SourceEntry(OHEALTH, 0, null, enabled = true, priority = 1, manual = false, isOwn = false),
+                ),
+                configured,
+            )
+        }
 }
 
 class MyDataEraserTest {

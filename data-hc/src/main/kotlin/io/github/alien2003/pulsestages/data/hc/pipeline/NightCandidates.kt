@@ -284,12 +284,7 @@ class NightCandidateBuilder
         ): NightCandidate {
             val first = fragments.first()
             val lastEnding = fragments.maxWith(compareBy<HcSleepSession>({ it.endMs }, { it.startMs }))
-            val gaps = mutableListOf<TimeSpan>()
-            var coveredUntil = first.endMs
-            fragments.drop(1).forEach { fragment ->
-                if (fragment.startMs > coveredUntil) gaps += TimeSpan(coveredUntil, fragment.startMs)
-                coveredUntil = maxOf(coveredUntil, fragment.endMs)
-            }
+            val gaps = gapsBetween(fragments.map { TimeSpan(it.startMs, it.endMs) })
             val uuids = fragments.map { it.uuid }.distinct().sorted()
             return NightCandidate(
                 packageName = packageName,
@@ -331,3 +326,17 @@ class NightCandidateBuilder
             fun HcSleepSession.hasRealStages(): Boolean = stages.any { it.type !in NON_STAGE_TYPES }
         }
     }
+
+/**
+ * The uncovered time between [spans] sorted by start: every gap between the latest end so far and the next start
+ * (overlapping spans leave no gap). These are the forced-AWAKE spans of a night merged from fragments.
+ */
+internal fun gapsBetween(spans: List<TimeSpan>): List<TimeSpan> {
+    val gaps = mutableListOf<TimeSpan>()
+    var coveredUntil = spans.firstOrNull()?.endMs ?: return gaps
+    spans.drop(1).forEach { span ->
+        if (span.startMs > coveredUntil) gaps += TimeSpan(coveredUntil, span.startMs)
+        coveredUntil = maxOf(coveredUntil, span.endMs)
+    }
+    return gaps
+}

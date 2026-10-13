@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.fake
 
 import io.github.alien2003.pulsestages.algo.ALGO_VERSION
+import io.github.alien2003.pulsestages.algo.model.EpochResult
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
@@ -9,6 +10,7 @@ import io.github.alien2003.pulsestages.algo.model.NightInput
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
+import io.github.alien2003.pulsestages.algo.model.StageProbabilities
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightEstimator
 import java.security.MessageDigest
@@ -19,12 +21,15 @@ import java.security.MessageDigest
  * are AWAKE, epochs without data UNKNOWN, otherwise the mean bpm decides (< 52 DEEP, < 58 LIGHT, < 66 REM, else
  * AWAKE). Coverage below `rulesMinCoverage` → NotEstimated(LOW_COVERAGE); no samples → NotEstimated(NO_HR_DATA).
  * The output obeys the core-algo contract: sorted, contiguous, exactly the session, every interval ≥ one epoch
- * (a final partial epoch joins the previous interval).
+ * (a final partial epoch joins the previous interval). Every estimate carries per-epoch results (mean bpm as the
+ * single feature `meanBpm`, a posterior of 0.7 on the chosen stage). [estimateWith] skips the coverage gates; for
+ * [EstimatorType.RULES] every threshold is [RULES_SHIFT_BPM] higher, so RULES disagrees with the default on some
+ * epochs.
  */
 class FakeNightEstimator(
     override val modelId: String? = "fake-model",
 ) : NightEstimator {
-    /** Every input received, in order. */
+    /** Every input received by [estimate], in order. */
     val inputs: MutableList<NightInput> = mutableListOf()
 
     /** Throws the returned error for an input (per-night failure injection). */
@@ -39,6 +44,9 @@ class FakeNightEstimator(
     /** Estimator type reported in the estimate. */
     var reportedType: EstimatorType = EstimatorType.HYBRID
 
+    /** Extra text mixed into [paramsHash] (stands in for a personal-model fingerprint). */
+    var hashSalt: String = ""
+
     override suspend fun estimate(
         input: NightInput,
         params: AlgoParams,
@@ -48,9 +56,10 @@ class FakeNightEstimator(
         failWhen(input)?.let { throw it }
         val inSession = input.heartRate.filter { it.timeMs in input.sessionStartMs until input.sessionEndMs }
         val epochMs = params.preprocess.epochSec * SECOND_MS
-        val (labels, coverage) = if (inSession.isEmpty()) emptyList<SleepStage>() to 0.0 else label(input, params, epochMs)
+        val labelled = if (inSession.isEmpty()) null else label(input, params, epochMs, shiftBpm = 0.0)
+        val coverage = labelled?.coverage ?: 0.0
         return when {
-            inSession.isEmpty() -> {
+            labelled == null -> {
                 EstimationOutcome.NotEstimated(NotEstimatedReason.NO_HR_DATA, 0.0, "no heart-rate samples in the session")
             }
 
@@ -63,59 +72,98 @@ class FakeNightEstimator(
             }
 
             else -> {
-                val computed = intervals(labels, input.sessionStartMs, input.sessionEndMs, epochMs)
+                val computed = intervals(labelled.epochs.map { it.stage }, input.sessionStartMs, input.sessionEndMs, epochMs)
                 val stages = stagesOverride?.invoke(input, computed) ?: computed
-                EstimationOutcome.Estimated(
-                    NightEstimate(
-                        stages = stages,
-                        coverage = coverage,
-                        confidence = CONFIDENCE_BASE + CONFIDENCE_SLOPE * coverage,
-                        perEpoch = emptyList(),
-                        params = params,
-                        algoVersion = ALGO_VERSION,
-                        paramsHash = paramsHash(params, ""),
-                        estimator = reportedType,
-                        warnings = emptyList(),
-                        flags = NightFlags(),
-                        featureNames = emptyList(),
-                        nadirBpm = inSession.minOf { it.bpm },
-                        hrSampleCount = inSession.size,
-                    ),
-                )
+                EstimationOutcome.Estimated(nightEstimate(input, params, labelled, stages, reportedType))
             }
         }
     }
 
-    /** Per-epoch labels of the session and the share of epochs with data. */
+    override suspend fun estimateWith(
+        type: EstimatorType,
+        input: NightInput,
+        params: AlgoParams,
+    ): NightEstimate {
+        failWhen(input)?.let { throw it }
+        val epochMs = params.preprocess.epochSec * SECOND_MS
+        val labelled = label(input, params, epochMs, shiftBpm = if (type == EstimatorType.RULES) RULES_SHIFT_BPM else 0.0)
+        val stages = intervals(labelled.epochs.map { it.stage }, input.sessionStartMs, input.sessionEndMs, epochMs)
+        return nightEstimate(input, params, labelled, stages, type)
+    }
+
+    private suspend fun nightEstimate(
+        input: NightInput,
+        params: AlgoParams,
+        labelled: Labelled,
+        stages: List<StageInterval>,
+        type: EstimatorType,
+    ): NightEstimate {
+        val inSession = input.heartRate.filter { it.timeMs in input.sessionStartMs until input.sessionEndMs }
+        return NightEstimate(
+            stages = stages,
+            coverage = labelled.coverage,
+            confidence = CONFIDENCE_BASE + CONFIDENCE_SLOPE * labelled.coverage,
+            perEpoch = labelled.epochs,
+            params = params,
+            algoVersion = ALGO_VERSION,
+            paramsHash = paramsHash(params, ""),
+            estimator = type,
+            warnings = emptyList(),
+            flags = NightFlags(),
+            featureNames = listOf(FEATURE_NAME),
+            nadirBpm = inSession.minOfOrNull { it.bpm },
+            hrSampleCount = inSession.size,
+        )
+    }
+
+    /** Per-epoch results of the session and the share of epochs with data. */
+    private class Labelled(
+        val epochs: List<EpochResult>,
+        val coverage: Double,
+    )
+
     private fun label(
         input: NightInput,
         params: AlgoParams,
         epochMs: Long,
-    ): Pair<List<SleepStage>, Double> {
+        shiftBpm: Double,
+    ): Labelled {
         val reachMs = (params.preprocess.maxInterpGapMin * MINUTE_MS / 2).toLong()
-        val epochs = ((input.sessionEndMs - input.sessionStartMs + epochMs - 1) / epochMs).toInt()
+        val count = ((input.sessionEndMs - input.sessionStartMs + epochMs - 1) / epochMs).toInt()
         var withData = 0
-        val labels =
-            (0 until epochs).map { k ->
+        val epochs =
+            (0 until count).map { k ->
                 val from = input.sessionStartMs + k * epochMs
                 val to = minOf(from + epochMs, input.sessionEndMs)
                 val mid = (from + to) / 2
                 val near = input.heartRate.filter { it.timeMs in (from - reachMs)..(to + reachMs) }
                 if (near.isNotEmpty()) withData++
-                when {
-                    input.forcedAwake.any { mid >= it.startMs && mid < it.endMs } -> SleepStage.AWAKE
-                    near.isEmpty() -> SleepStage.UNKNOWN
-                    else -> stageOf(near.map { it.bpm }.average())
-                }
+                val bpm = if (near.isEmpty()) null else near.map { it.bpm }.average()
+                val stage =
+                    when {
+                        input.forcedAwake.any { mid >= it.startMs && mid < it.endMs } -> SleepStage.AWAKE
+                        bpm == null -> SleepStage.UNKNOWN
+                        else -> stageOf(bpm - shiftBpm)
+                    }
+                EpochResult(
+                    index = k,
+                    startMs = from,
+                    hasData = bpm != null,
+                    hrRaw = bpm,
+                    hrSmooth = bpm,
+                    features = listOf(bpm ?: Double.NaN),
+                    posterior = posteriorOf(stage),
+                    stage = stage,
+                )
             }
-        return labels to withData.toDouble() / epochs
+        return Labelled(epochs, if (count == 0) 0.0 else withData.toDouble() / count)
     }
 
-    override fun paramsHash(
+    override suspend fun paramsHash(
         params: AlgoParams,
         extra: String,
     ): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest("$params|model=$modelId|$extra".toByteArray(Charsets.UTF_8))
+        val digest = MessageDigest.getInstance("SHA-256").digest("$params|model=$modelId|$hashSalt|$extra".toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { (it.toInt() and BYTE_MASK).toString(HEX_RADIX).padStart(2, '0') }
     }
 
@@ -126,6 +174,13 @@ class FakeNightEstimator(
             bpm < REM_BELOW -> SleepStage.REM
             else -> SleepStage.AWAKE
         }
+
+    private fun posteriorOf(stage: SleepStage): StageProbabilities {
+        if (stage == SleepStage.UNKNOWN) return StageProbabilities.UNIFORM
+        val values = DoubleArray(SleepStage.COUNT) { OTHER_POSTERIOR }
+        values[stage.index] = CHOSEN_POSTERIOR
+        return StageProbabilities.of(values)
+    }
 
     private fun intervals(
         labels: List<SleepStage>,
@@ -154,15 +209,24 @@ class FakeNightEstimator(
         return result
     }
 
-    private companion object {
-        const val SECOND_MS = 1_000L
-        const val MINUTE_MS = 60_000.0
-        const val DEEP_BELOW = 52.0
-        const val LIGHT_BELOW = 58.0
-        const val REM_BELOW = 66.0
-        const val CONFIDENCE_BASE = 0.2
-        const val CONFIDENCE_SLOPE = 0.6
-        const val BYTE_MASK = 0xff
-        const val HEX_RADIX = 16
+    /** Constants. */
+    companion object {
+        /** How much higher every bpm threshold is for [EstimatorType.RULES] in [estimateWith]. */
+        const val RULES_SHIFT_BPM: Double = 3.0
+
+        /** Name of the single per-epoch feature (the mean bpm of the epoch). */
+        const val FEATURE_NAME: String = "meanBpm"
+
+        private const val SECOND_MS = 1_000L
+        private const val MINUTE_MS = 60_000.0
+        private const val DEEP_BELOW = 52.0
+        private const val LIGHT_BELOW = 58.0
+        private const val REM_BELOW = 66.0
+        private const val CONFIDENCE_BASE = 0.2
+        private const val CONFIDENCE_SLOPE = 0.6
+        private const val CHOSEN_POSTERIOR = 0.7
+        private const val OTHER_POSTERIOR = 0.1
+        private const val BYTE_MASK = 0xff
+        private const val HEX_RADIX = 16
     }
 }

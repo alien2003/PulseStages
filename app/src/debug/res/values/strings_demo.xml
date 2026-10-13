@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug builds only: the demo-mode launcher entry (docs/SCREENSHOTS.md). -->
+    <string name="demo_launcher_label">PulseStages demo</string>
+    <string name="demo_toast_on">Demo mode on: synthetic nights</string>
+    <string name="demo_toast_off">Demo mode off: real data</string>
+</resources>

@@ -21,18 +21,48 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            // The worker and scheduler tests run on Robolectric, which reads the merged test manifest and resources.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 kotlin {
     jvmToolchain(libs.versions.jvmTarget.get().toInt())
 }
 
-dependencies {
-    implementation(project(":core-algo"))
-    implementation(project(":data-local"))
-    implementation(project(":data-hc"))
+// Like :data-local and :data-hc: Robolectric runs offline against the android-all jar resolved (and cached) by Gradle.
+val robolectricAndroidAll = configurations.dependencyScope("robolectricAndroidAll")
+val robolectricAndroidAllClasspath =
+    configurations.resolvable("robolectricAndroidAllClasspath") {
+        extendsFrom(robolectricAndroidAll.get())
+        isTransitive = false
+    }
+val robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
+val prepareRobolectricDependencies =
+    tasks.register<Sync>("prepareRobolectricDependencies") {
+        description = "Copies the android-all jar resolved by Gradle into the directory used by offline Robolectric."
+        from(robolectricAndroidAllClasspath)
+        into(robolectricDependencyDir)
+    }
 
-    implementation(libs.androidx.work.runtime)
+tasks.withType<Test>().configureEach {
+    dependsOn(prepareRobolectricDependencies)
+    inputs.files(prepareRobolectricDependencies).withPropertyName("robolectricDependencies").withNormalizer(ClasspathNormalizer::class.java)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
+}
+
+dependencies {
+    // Types of these modules appear in this module's public API (WorkScheduler takes ScheduleSettings and RecomputeScope).
+    api(project(":core-algo"))
+    api(project(":data-local"))
+    api(project(":data-hc"))
+
+    api(libs.androidx.work.runtime)
+    implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.hilt.android)
@@ -40,7 +70,18 @@ dependencies {
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
 
+    testImplementation(testFixtures(project(":data-hc")))
+    testImplementation(testFixtures(project(":core-algo")))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    // Worker Result mapping (TestListenableWorkerBuilder) and the WorkManager scheduler need a Context: Robolectric
+    // (JUnit 4) via the Vintage engine, with work-testing's test WorkManager.
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.work.testing)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    robolectricAndroidAll(libs.robolectric.android.all.instrumented)
 }

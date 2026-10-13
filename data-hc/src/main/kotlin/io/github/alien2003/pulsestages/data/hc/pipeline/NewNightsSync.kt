@@ -27,6 +27,8 @@ import kotlin.coroutines.cancellation.CancellationException
  * @property pages Changes-API pages processed.
  * @property deletedSessions deleted source sessions seen: DeletionChange ids, plus the sources a re-read no longer found.
  * @property error English detail of an unexpected error, if any.
+ * @property retryable a [SyncOutcome.FAILED] run stopped on a transient Health Connect error (IPC / IO): running again
+ *   later is expected to succeed; false for invalid data and unexpected errors.
  */
 data class SyncReport(
     val outcome: SyncOutcome,
@@ -36,6 +38,7 @@ data class SyncReport(
     val pages: Int = 0,
     val deletedSessions: Int = 0,
     val error: String? = null,
+    val retryable: Boolean = false,
 )
 
 /**
@@ -365,7 +368,11 @@ class NewNightsSync
                     )
                 }
 
-                is HealthDataException.Transient, is HealthDataException.InvalidData -> {
+                is HealthDataException.Transient -> {
+                    SyncReport(SyncOutcome.FAILED, error = e.message, retryable = true)
+                }
+
+                is HealthDataException.InvalidData -> {
                     SyncReport(SyncOutcome.FAILED, error = e.message)
                 }
             }

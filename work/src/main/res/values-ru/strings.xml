@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="work_channel_name">Фоновая оценка</string>
+    <string name="work_channel_description">Ход обработки истории и пересчёта ночей</string>
+    <string name="work_estimate_title">Оценка новых ночей</string>
+    <string name="work_backfill_title">Обработка истории сна</string>
+    <string name="work_recompute_title">Пересчёт ночей</string>
+    <plurals name="work_backfill_progress">
+        <item quantity="one">Неделя %1$d из %2$d · оценена %3$d ночь</item>
+        <item quantity="few">Неделя %1$d из %2$d · оценены %3$d ночи</item>
+        <item quantity="many">Неделя %1$d из %2$d · оценено %3$d ночей</item>
+        <item quantity="other">Неделя %1$d из %2$d · оценено %3$d ночи</item>
+    </plurals>
+    <plurals name="work_recompute_progress">
+        <item quantity="one">%1$d из %2$d ночи</item>
+        <item quantity="few">%1$d из %2$d ночей</item>
+        <item quantity="many">%1$d из %2$d ночей</item>
+        <item quantity="other">%1$d из %2$d ночи</item>
+    </plurals>
+</resources>

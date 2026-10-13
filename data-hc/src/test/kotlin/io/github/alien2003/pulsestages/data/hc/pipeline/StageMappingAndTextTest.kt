@@ -4,6 +4,9 @@ import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.data.hc.HcStage
+import io.github.alien2003.pulsestages.data.hc.HealthPermissions
+import io.github.alien2003.pulsestages.data.local.settings.AppSettings
+import io.github.alien2003.pulsestages.data.local.settings.HrSourcesMode
 import io.github.alien2003.pulsestages.data.local.settings.WriteSettings
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -146,5 +149,33 @@ class SessionTextTest {
         val base = WriteSettings()
         assertNotEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(awakeAsLight = true)))
         assertEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(titleTemplate = "x")))
+    }
+
+    @Test
+    fun `the params hash extra covers what the input is read from - hrSources and the enabled, granted optional channels`() {
+        val settings = AppSettings()
+        val all = HealthPermissions.REQUIRED + HealthPermissions.OPTIONAL
+        val base = OutputOptions.hashExtra(settings, all)
+        val withoutSpo2 = all - HealthPermissions.READ_OXYGEN_SATURATION
+        val anyOrigin = settings.copy(sources = settings.sources.copy(hrSources = HrSourcesMode.ANY))
+        val spo2Off = settings.copy(algo = settings.algo.copy(features = settings.algo.features.copy(useSpo2 = false)))
+
+        assertNotEquals(base, OutputOptions.hashExtra(anyOrigin, all), "heart rate from any origin is other input")
+        assertNotEquals(base, OutputOptions.hashExtra(settings, withoutSpo2), "granting SpO2 later changes the input")
+        assertNotEquals(base, OutputOptions.hashExtra(settings.copy(write = settings.write.copy(awakeAsLight = true)), all))
+        assertEquals(
+            OutputOptions.hashExtra(spo2Off, all),
+            OutputOptions.hashExtra(spo2Off, withoutSpo2),
+            "a channel switched off in the parameters is not read, granted or not",
+        )
+        assertEquals(
+            base,
+            OutputOptions.hashExtra(settings, all + HealthPermissions.READ_HEALTH_DATA_HISTORY),
+            "other grants do not matter",
+        )
+        assertEquals(
+            InputSelection(HrSourcesMode.SAME_AS_SLEEP, spo2 = false, respiratoryRate = true, hrv = true),
+            InputSelection.of(settings, withoutSpo2),
+        )
     }
 }

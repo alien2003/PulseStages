@@ -10,6 +10,8 @@ import io.github.alien2003.pulsestages.data.local.db.NightBaselineEntity
 import io.github.alien2003.pulsestages.data.local.db.NightSourceEntity
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.db.NightSummary
+import io.github.alien2003.pulsestages.data.local.db.PersonalModelDao
+import io.github.alien2003.pulsestages.data.local.db.PersonalModelEntity
 import io.github.alien2003.pulsestages.data.local.db.SourceOutcome
 import io.github.alien2003.pulsestages.data.local.db.SourceSessionDao
 import io.github.alien2003.pulsestages.data.local.db.SourceSessionEntity
@@ -29,8 +31,10 @@ class InMemoryLedger {
     private val links = LinkedHashSet<NightSourceEntity>()
     private val sources = LinkedHashMap<String, SourceSessionEntity>()
     private val baselines = LinkedHashMap<String, NightBaselineEntity>()
+    private val models = LinkedHashMap<Long, PersonalModelEntity>()
     private var backfill: BackfillStateEntity? = null
     private var nextNightId = 1L
+    private var nextModelId = 1L
 
     /** `estimated_nights` + `night_sources`. */
     val nightDao: EstimatedNightDao = Nights()
@@ -43,6 +47,12 @@ class InMemoryLedger {
 
     /** `backfill_state`. */
     val backfillDao: BackfillStateDao = Backfill()
+
+    /** `personal_models`. */
+    val personalModelDao: PersonalModelDao = PersonalModels()
+
+    /** Snapshot of every personal model row, by id. */
+    fun allModels(): List<PersonalModelEntity> = read { models.values.sortedBy { it.id } }
 
     /** Snapshot of every night, by local id. */
     fun allNights(): List<EstimatedNightEntity> = read { nights.values.sortedBy { it.id } }
@@ -328,6 +338,46 @@ class InMemoryLedger {
         override suspend fun upsertRow(state: BackfillStateEntity) {
             write { backfill = state }
         }
+    }
+
+    private inner class PersonalModels : PersonalModelDao() {
+        private val newestFirst = compareByDescending<PersonalModelEntity> { it.createdAt }.thenByDescending { it.id }
+
+        override suspend fun deactivateAll() {
+            write { models.replaceAll { _, model -> model.copy(active = false) } }
+        }
+
+        override suspend fun getActive(): PersonalModelEntity? = read { activeModel() }
+
+        override fun observeActive(): Flow<PersonalModelEntity?> = observeQuery { activeModel() }
+
+        override fun observeAll(): Flow<List<PersonalModelEntity>> = observeQuery { models.values.sortedWith(newestFirst) }
+
+        override suspend fun findById(id: Long): PersonalModelEntity? = read { models[id] }
+
+        override suspend fun delete(id: Long) {
+            write { models.remove(id) }
+        }
+
+        override suspend fun insertRow(model: PersonalModelEntity): Long =
+            write {
+                val id = nextModelId++
+                models[id] = model.copy(id = id)
+                id
+            }
+
+        override suspend fun setActive(id: Long): Int =
+            write {
+                val model = models[id]
+                if (model == null) {
+                    0
+                } else {
+                    models[id] = model.copy(active = true)
+                    1
+                }
+            }
+
+        private fun activeModel(): PersonalModelEntity? = models.values.filter { it.active }.maxByOrNull { it.id }
     }
 
     private companion object {

@@ -77,8 +77,14 @@ class NightPipeline
     ) {
         private val deps = PipelineDeps(repository, estimator, ledger, titles, logger, clock, estimationDispatcher)
 
-        /** The params hash of [settings] (algorithm parameters, model fingerprints and output options). */
-        fun currentParamsHash(settings: AppSettings): String = estimator.paramsHash(settings.algo, OutputOptions.hashExtra(settings.write))
+        /**
+         * The params hash of [settings] with the [granted] permissions (algorithm parameters, model fingerprints, input
+         * selection and output options, see [OutputOptions.hashExtra]).
+         */
+        suspend fun currentParamsHash(
+            settings: AppSettings,
+            granted: Set<String>,
+        ): String = estimator.paramsHash(settings.algo, OutputOptions.hashExtra(settings, granted))
 
         /**
          * Processes [nights] with [settings]. [granted] are the granted Health Connect permissions (optional channels
@@ -93,7 +99,7 @@ class NightPipeline
             shouldStop: () -> Boolean = { false },
         ): PipelineReport =
             LedgerLock.withLock {
-                val run = NightRun(deps, settings, trigger, granted, currentParamsHash(settings), nights.candidates)
+                val run = NightRun(deps, settings, trigger, granted, currentParamsHash(settings, granted), nights.candidates)
                 var report = PipelineReport(found = nights.nightCount, skipped = nights.skipped.size)
                 val remaining = nights.candidates.iterator()
                 var stopped = false
@@ -118,7 +124,7 @@ class NightPipeline
             granted: Set<String>,
         ): PipelineReport =
             LedgerLock.withLock {
-                val run = NightRun(deps, settings, PipelineTrigger.NEW_NIGHTS, granted, currentParamsHash(settings), emptyList())
+                val run = NightRun(deps, settings, PipelineTrigger.NEW_NIGHTS, granted, currentParamsHash(settings, granted), emptyList())
                 PipelineReport().add(run.supersedeLeftovers(), run.takeSuperseded())
             }
 

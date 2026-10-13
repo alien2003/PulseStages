@@ -16,3 +16,11 @@ annotation class HealthConnectDispatcher
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class EstimationDispatcher
+
+/**
+ * Qualifies the repository that talks to Health Connect directly (HealthConnectRepository), behind the unqualified
+ * HealthRepository the app uses (BackgroundRuleHealthRepository, which enforces the background rule on top of it).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class PlatformHealthRepository

@@ -3,13 +3,16 @@ package io.github.alien2003.pulsestages.data.hc.pipeline
 import io.github.alien2003.pulsestages.data.hc.HcAvailability
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthPermissions
+import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository
 import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository.Operation
+import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
 import io.github.alien2003.pulsestages.data.hc.testutil.DAY_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.NOON
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.OTHER_APP
+import io.github.alien2003.pulsestages.data.hc.testutil.OWN
 import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.harnessTest
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
@@ -478,6 +481,69 @@ class NewNightsSyncTest {
 
             val atStart = h.sync.run(inBackground = false)
             assertEquals(SyncOutcome.BACKGROUND_READ_BLOCKED, atStart.outcome)
+        }
+
+    /**
+     * Three written OHealth nights; then the source set changes (a re-read with a new token is due) and the app is
+     * really in the background on a Health Connect that reads silently there (android14-release), without the
+     * background permission — e.g. a retried "estimate now" that thinks it reads in the foreground.
+     */
+    private suspend fun PipelineHarness.silentBackgroundRereadDue() {
+        (3 downTo 1).forEach { repository.addNight(OHEALTH, nightStart(it)) }
+        assertEquals(SyncOutcome.SUCCESS, sync.run(inBackground = false).outcome)
+        assertEquals(3, repository.ownSessions().size)
+        settings.set { it.copy(sources = it.sources.copy(sourcePackages = listOf(OHEALTH, OTHER_APP))) }
+        clock.advanceBy(HOUR_MS)
+        repository.backgroundRule = FakeHealthRepository.BackgroundRule.SELF_ONLY
+        repository.revoke(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+        repository.inBackground = true
+    }
+
+    @Test
+    fun `a re-read by a run that is really in the background deletes nothing, even where Health Connect reads silently`() =
+        harnessTest(dir) { h ->
+            h.silentBackgroundRereadDue()
+
+            val report = h.sync.run(inBackground = false)
+
+            assertEquals(SyncOutcome.BACKGROUND_READ_BLOCKED, report.outcome)
+            assertEquals(BlockedReason.BACKGROUND_PERMISSION_MISSING, report.pipeline.blockedReason)
+            assertEquals(0, report.deletedSessions)
+            assertEquals(3, h.repository.ownSessions().size, "our sessions are kept")
+            assertTrue(h.ledger.allNights().all { it.status == NightStatus.WRITTEN }, "no night is taken for deleted")
+            assertNull(h.syncState.tokenFor(setOf(OHEALTH, OTHER_APP)), "the re-read is not recorded as done")
+
+            h.repository.inBackground = false
+            val foreground = h.sync.run(inBackground = false)
+            assertEquals(SyncOutcome.SUCCESS, foreground.outcome)
+            assertEquals(0, foreground.deletedSessions)
+            assertEquals(3, h.repository.ownSessions().size)
+            assertNotNull(h.syncState.tokenFor(setOf(OHEALTH, OTHER_APP)))
+        }
+
+    @Test
+    fun `control - without the background rule the silent re-read would take every night for deleted`() =
+        harnessTest(dir) { h ->
+            h.silentBackgroundRereadDue()
+            val pipeline =
+                NightPipeline(h.repository, h.estimator, h.nightLedger, { "t" }, h.logger, h.clock, h.estimationDispatcher)
+            val unprotected =
+                NewNightsSync(
+                    h.repository,
+                    h.settings,
+                    h.syncState,
+                    NightWindowReader(h.repository, h.builder, OWN),
+                    pipeline,
+                    h.logger,
+                    h.clock,
+                )
+
+            val report = unprotected.run(inBackground = false)
+
+            assertEquals(SyncOutcome.SUCCESS, report.outcome, "no error at all")
+            assertEquals(3, report.deletedSessions)
+            assertTrue(h.repository.ownSessions().isEmpty())
+            assertTrue(h.ledger.allNights().all { it.status == NightStatus.SOURCE_DELETED })
         }
 
     @Test

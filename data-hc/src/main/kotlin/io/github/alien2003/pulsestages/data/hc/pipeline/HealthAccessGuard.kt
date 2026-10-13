@@ -40,10 +40,13 @@ data class AccessCheck(
 
 /**
  * Checks, before any read, that Health Connect is available and the required permissions are granted, and the
- * background guard: a background run without READ_HEALTH_DATA_IN_BACKGROUND must not read at all, because Health
- * Connect rejects every read of other apps' data (and `getChanges`) from the background with a SecurityException; only
- * reads filtered to exactly our own package still work (AOSP `HealthConnectServiceImpl.readRecords`, self-read
- * enforcement).
+ * background guard: a background run without READ_HEALTH_DATA_IN_BACKGROUND must not read at all. From the background
+ * Health Connect only serves reads of our own data: newer versions reject other reads (and `getChanges`) with a
+ * SecurityException, android14-release silently returns our own records only (AOSP
+ * `HealthConnectServiceImpl.readRecords`, self-read enforcement). [check] decides from the state the caller passes at
+ * the start of a run; while the run goes on, [io.github.alien2003.pulsestages.data.hc.BackgroundRuleHealthRepository]
+ * enforces the rule on every read with the app's real foreground state, so a run that loses the foreground stops with
+ * a refusal that [reasonForDenial] classifies, instead of reading nothing.
  */
 class HealthAccessGuard
     @Inject

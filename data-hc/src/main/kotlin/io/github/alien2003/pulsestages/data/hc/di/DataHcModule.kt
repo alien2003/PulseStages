@@ -7,9 +7,12 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.github.alien2003.pulsestages.data.hc.AppForegroundState
+import io.github.alien2003.pulsestages.data.hc.BackgroundRuleHealthRepository
 import io.github.alien2003.pulsestages.data.hc.DelaySleeper
 import io.github.alien2003.pulsestages.data.hc.HealthConnectRepository
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
+import io.github.alien2003.pulsestages.data.hc.ProcessImportanceForegroundState
 import io.github.alien2003.pulsestages.data.hc.RetryPolicy
 import io.github.alien2003.pulsestages.data.hc.Sleeper
 import io.github.alien2003.pulsestages.data.hc.pipeline.DefaultTitleProvider
@@ -21,7 +24,8 @@ import kotlinx.coroutines.Dispatchers
 
 /**
  * Provides the Health Connect layer: our package name, the dispatchers, the retry policy and sleeper of the
- * repository, the zone-offset fallback and the default title. The pipeline classes are constructor-injected; the
+ * repository, the zone-offset fallback, the app's foreground state (for the background rule) and the default title.
+ * The pipeline classes are constructor-injected; the
  * [io.github.alien2003.pulsestages.data.hc.pipeline.NightEstimator] binding (an adapter over core-algo's
  * `SleepStager`) must be provided by :work or :app.
  */
@@ -58,15 +62,24 @@ object DataHcModule {
     /** Fallback zone offsets of the device's default zone. */
     @Provides
     fun provideZoneOffsetProvider(): ZoneOffsetProvider = SystemZoneOffsetProvider
+
+    /** Whether Health Connect sees the app in the foreground, from the process importance. */
+    @Provides
+    fun provideAppForegroundState(): AppForegroundState = ProcessImportanceForegroundState
 }
 
 /** Interface bindings of the Health Connect layer. */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DataHcBindingsModule {
-    /** The real Health Connect repository. */
+    /** The repository that talks to Health Connect. */
     @Binds
-    abstract fun bindHealthRepository(implementation: HealthConnectRepository): HealthRepository
+    @PlatformHealthRepository
+    abstract fun bindPlatformHealthRepository(implementation: HealthConnectRepository): HealthRepository
+
+    /** The repository the app uses: Health Connect with its background rule enforced on every version. */
+    @Binds
+    abstract fun bindHealthRepository(implementation: BackgroundRuleHealthRepository): HealthRepository
 
     /** The localized default title from resources. */
     @Binds

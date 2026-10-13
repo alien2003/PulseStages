@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import java.time.Clock
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
@@ -31,7 +31,10 @@ enum class BackfillOutcome {
     /** Health Connect unavailable / permission missing / background read not allowed; resumable later. */
     BLOCKED,
 
-    /** Cancelled by the user ([BackfillEngine.cancel]); the next run starts over. */
+    /**
+     * Cancelled by the user ([BackfillEngine.cancel]), during the run or before it began (see `requestedAtMs`); a run
+     * requested after the cancel starts over.
+     */
     CANCELLED,
 
     /** A transient error stopped the run; WAITING_RETRY, resumable. */
@@ -70,7 +73,11 @@ data class BackfillReport(
  * - the cursor and the counters are persisted after every window; a RUNNING / WAITING_RETRY state is resumed from
  *   the cursor (after process death, a quota error or a transient error); DONE / CANCELLED / FAILED / IDLE start over;
  * - [cancel] stops a running backfill between nights and marks it CANCELLED; coroutine cancellation (WorkManager
- *   stopping the worker) leaves it RUNNING so it resumes next time;
+ *   stopping the worker) leaves it RUNNING so it resumes next time. A cancel is durable for the run it was meant for:
+ *   a run with `requestedAtMs` (when the user started this backfill, the same for every retry of the work) stops
+ *   without processing anything when a cancel was requested at or after that time — even when the cancel arrived
+ *   before the run began (while the worker was still starting) or the process died in between (the CANCELLED state
+ *   is persisted then); only a backfill requested after the cancel starts over;
  * - progress is reported after every window through `onProgress`; `nightsEstimated` counts the nights that have an
  *   up-to-date estimate afterwards (written now or already current), so a resumed window is not under-counted.
  */
@@ -88,25 +95,54 @@ class BackfillEngine
     ) {
         private val guard = HealthAccessGuard(repository)
         private val runLock = Mutex()
-        private val cancelRequested = AtomicBoolean(false)
+
+        /** The cancel requests so far ([cancel]). */
+        private val cancels = AtomicReference(CancelMark(count = 0, atMs = Long.MIN_VALUE))
+
+        /** How many times [cancel] was called and when it was last called (epoch ms). */
+        private data class CancelMark(
+            val count: Int,
+            val atMs: Long,
+        )
+
+        /** Whether a cancel request applies to the current run; see [run]. */
+        private class CancelScope(
+            private val requestedAtMs: Long?,
+            private val atStart: CancelMark,
+        ) {
+            fun appliesTo(mark: CancelMark): Boolean =
+                if (requestedAtMs == null) mark.count != atStart.count else mark.count > 0 && mark.atMs >= requestedAtMs
+        }
+
+        @Volatile
+        private var scope = CancelScope(null, cancels.get())
+
+        /** True while [run] is in progress in this process. */
+        val isRunning: Boolean get() = runLock.isLocked
 
         /** The persisted state (null = never started). */
         val state: Flow<BackfillStateEntity?> get() = backfillDao.observe()
 
         /**
-         * Runs (or resumes) the backfill. [inBackground] is true for WorkManager runs; [onProgress] receives the state
-         * after it is persisted (start and every window). Never throws except for cancellation.
+         * Runs (or resumes) the backfill. [inBackground] is true when the app is in the background at the start (Health
+         * Connect's background rule applies). [requestedAtMs] is when the user asked for this backfill (the enqueue time
+         * of the work, the same for its retries): a [cancel] at or after it applies to this run even when it came before
+         * the run began, and a CANCELLED state stored at or after it ends the run at once ([BackfillOutcome.CANCELLED],
+         * nothing processed, the state left as it is). Without it the run counts as requested now: only cancels made
+         * during the run apply and a CANCELLED state starts over. [onProgress] receives the state after it is persisted
+         * (start and every window). Never throws except for cancellation.
          */
         @Suppress("TooGenericExceptionCaught") // Every failure is persisted and reported, never thrown.
         suspend fun run(
             inBackground: Boolean,
+            requestedAtMs: Long? = null,
             onProgress: suspend (BackfillStateEntity) -> Unit = {},
         ): BackfillReport {
             if (!runLock.tryLock()) return BackfillReport(BackfillOutcome.ALREADY_RUNNING, null)
             try {
-                cancelRequested.set(false)
+                scope = CancelScope(requestedAtMs, cancels.get())
                 return try {
-                    execute(inBackground, onProgress)
+                    cancelledBeforeStart(requestedAtMs) ?: execute(inBackground, onProgress)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: HealthDataException) {
@@ -121,12 +157,16 @@ class BackfillEngine
             }
         }
 
-        /** Requests cancellation: a running backfill stops before its next night; the state becomes CANCELLED. */
+        /**
+         * Requests cancellation: a running backfill stops before its next night, one that has not begun yet (or is
+         * waiting for a retry) does not start; the state becomes CANCELLED.
+         */
         suspend fun cancel() {
-            cancelRequested.set(true)
+            val now = clock.millis()
+            cancels.updateAndGet { CancelMark(it.count + 1, maxOf(now, it.atMs)) }
             val current = backfillDao.get() ?: return
             if (current.status == BackfillStatus.RUNNING || current.status == BackfillStatus.WAITING_RETRY) {
-                backfillDao.save(current.copy(status = BackfillStatus.CANCELLED, updatedAt = clock.millis()))
+                backfillDao.save(current.copy(status = BackfillStatus.CANCELLED, updatedAt = now))
                 logger.i(TAG, "backfill cancelled by the user")
             }
         }
@@ -134,6 +174,16 @@ class BackfillEngine
         /** Forgets the state (back to "never started"); does not touch Health Connect or the nights. */
         suspend fun reset() {
             backfillDao.clear()
+        }
+
+        /** The report of a run that a cancel requested at or after [requestedAtMs] stops before it begins, or null. */
+        private suspend fun cancelledBeforeStart(requestedAtMs: Long?): BackfillReport? {
+            if (requestedAtMs == null) return null
+            val stored = backfillDao.get()
+            val cancelledInStore = stored?.status == BackfillStatus.CANCELLED && stored.updatedAt >= requestedAtMs
+            val cancelled = cancelledInStore || scope.appliesTo(cancels.get())
+            if (cancelled) logger.i(TAG, "backfill not started: cancelled after it was requested")
+            return if (cancelled) BackfillReport(BackfillOutcome.CANCELLED, stored) else null
         }
 
         private suspend fun execute(
@@ -186,7 +236,7 @@ class BackfillEngine
             if (isCancelled()) return WindowResult(state, cancelled(state))
             val windowEnd = minOf(state.cursorMs + state.windowDays * DAY_MS, state.rangeEndMs)
             val nights = windowReader.nightsInWindow(state.cursorMs, windowEnd, settings)
-            val report = pipeline.process(nights, settings, PipelineTrigger.BACKFILL, granted, shouldStop = cancelRequested::get)
+            val report = pipeline.process(nights, settings, PipelineTrigger.BACKFILL, granted, shouldStop = ::cancelRequested)
             val interrupted = interruption(state, report)
             val after = if (interrupted == null) state.advancedBy(windowEnd, report, clock.millis()) else state
             val stop = interrupted ?: if (isCancelled()) cancelled(after) else null
@@ -288,7 +338,9 @@ class BackfillEngine
             )
         }
 
-        private suspend fun isCancelled(): Boolean = cancelRequested.get() || backfillDao.get()?.status == BackfillStatus.CANCELLED
+        private fun cancelRequested(): Boolean = scope.appliesTo(cancels.get())
+
+        private suspend fun isCancelled(): Boolean = cancelRequested() || backfillDao.get()?.status == BackfillStatus.CANCELLED
 
         private suspend fun cancelled(state: BackfillStateEntity): BackfillReport {
             logger.i(TAG, "backfill stopped: cancelled")

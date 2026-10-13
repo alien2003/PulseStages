@@ -148,5 +148,8 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.kotlinx.coroutines.test)
+    // FakeHealthRepository, FakeSettingsRepository, TestClock and RecordingLogger for the ViewModel tests.
+    testImplementation(testFixtures(project(":data-hc")))
     testRuntimeOnly(libs.junit.platform.launcher)
 }

@@ -125,7 +125,7 @@ class NightPipelineRepairTest {
     fun `missing zone offsets keep the offset first used - a later zone change rewrites nothing`() =
         harnessTest(dir) { h ->
             var zone = 10_800
-            val reader = NightWindowReader(h.repository, NightCandidateBuilder(OWN) { zone }, OWN)
+            val reader = NightWindowReader(h.health, NightCandidateBuilder(OWN) { zone }, OWN)
             h.repository.addNight(OHEALTH, nightStart(1), startZoneOffsetSec = null, endZoneOffsetSec = null)
 
             suspend fun process(trigger: PipelineTrigger): PipelineReport {

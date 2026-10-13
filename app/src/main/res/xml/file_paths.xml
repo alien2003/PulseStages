@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files PulseStages offers through its FileProvider: only cache/shared/ (exported log and data files). -->
+<paths>
+    <cache-path
+        name="shared"
+        path="shared/" />
+</paths>

@@ -9,7 +9,6 @@ import io.github.alien2003.pulsestages.data.hc.EstimatedSessionWrite
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.HcStage
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
-import io.github.alien2003.pulsestages.data.hc.HealthPermissions
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.WriteResult
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightEntity
@@ -18,7 +17,6 @@ import io.github.alien2003.pulsestages.data.local.db.SourceOutcome
 import io.github.alien2003.pulsestages.data.local.db.SourceSessionEntity
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
-import io.github.alien2003.pulsestages.data.local.settings.HrSourcesMode
 import io.github.alien2003.pulsestages.data.local.settings.OverwritePolicy
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -37,6 +35,9 @@ internal class PipelineDeps(
 ) {
     /** Classifies permission errors raised in the middle of a run. */
     val guard: HealthAccessGuard = HealthAccessGuard(repository)
+
+    /** Reads the estimation input of a night. */
+    val inputReader: NightInputReader = NightInputReader(repository, ledger.baselines)
 }
 
 /** The result of one unit of work of a [NightRun] (a night, or a repair). */
@@ -135,6 +136,7 @@ internal class NightRun(
     private val clock = deps.clock
     private val estimationDispatcher = deps.estimationDispatcher
     private val guard = deps.guard
+    private val inputReader = deps.inputReader
 
     /** Outputs superseded since the last [takeSuperseded]. */
     private var superseded: Int = 0
@@ -360,28 +362,7 @@ internal class NightRun(
         return (byUuid + overlapping).distinctBy { it.clientRecordId }
     }
 
-    private suspend fun buildInput(candidate: NightCandidate): NightInput {
-        val params = settings.algo
-        val marginMs = params.preprocess.contextMarginMin * MINUTE_MS
-        val fromMs = candidate.startMs - marginMs
-        val toMs = candidate.endMs + marginMs
-        val packages = if (settings.sources.hrSources == HrSourcesMode.SAME_AS_SLEEP) setOf(candidate.packageName) else null
-        val features = params.features
-        val spo2 = features.useSpo2 && HealthPermissions.READ_OXYGEN_SATURATION in granted
-        val respiratory = features.useRespiratoryRate && HealthPermissions.READ_RESPIRATORY_RATE in granted
-        val hrv = features.useHrv && HealthPermissions.READ_HEART_RATE_VARIABILITY in granted
-        return NightInput(
-            sessionStartMs = candidate.startMs,
-            sessionEndMs = candidate.endMs,
-            heartRate = repository.readHeartRate(fromMs, toMs, packages),
-            steps = repository.readSteps(fromMs, toMs, packages),
-            spo2 = if (spo2) repository.readSpo2(fromMs, toMs, packages) else emptyList(),
-            respiratoryRate = if (respiratory) repository.readRespiratoryRate(fromMs, toMs, packages) else emptyList(),
-            hrv = if (hrv) repository.readHrv(fromMs, toMs, packages) else emptyList(),
-            forcedAwake = candidate.forcedAwake,
-            baselineNadirBpm = ledger.baselines.baselineBefore(candidate.startMs, features.baselineNights),
-        )
-    }
+    private suspend fun buildInput(candidate: NightCandidate): NightInput = inputReader.read(NightSpan.of(candidate), settings, granted)
 
     private suspend fun write(
         candidate: NightCandidate,
@@ -680,7 +661,6 @@ internal class NightRun(
     /** Constants. */
     companion object {
         private const val TAG = "NightPipeline"
-        private const val MINUTE_MS = 60_000L
         private const val SECOND_MS = 1_000L
         private const val VERSION_FACTOR = 1_000L
         private const val MAX_REASON_LENGTH = 500

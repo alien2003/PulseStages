@@ -4,31 +4,108 @@
 
     <!--
         PulseStages never talks to the network. Strip INTERNET even if a library manifest requests it;
-        NoInternetPermissionTest verifies the merged debug and release manifests.
+        MergedManifestTest verifies the merged debug and release manifests.
     -->
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />
 
+    <!--
+        Health Connect permissions (declared under <manifest>, see PLAN.md §4). Required: sleep read/write, heart rate,
+        steps. Optional data channels: SpO2, respiratory rate, HRV (the app works without them). Special, feature-gated:
+        history older than 30 days (backfill) and background reads (WorkManager).
+    -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.WRITE_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
+    <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+
+    <!-- Long-running history backfill: WorkManager foreground service of type dataSync with a progress notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        Package visibility (Android 11+):
+        - the Health Connect APK, so that getSdkStatus can see it on Android 9–13;
+        - OHealth, the default sleep source;
+        - every Health Connect client: each one declares the permission-rationale activity (ACTION_SHOW_PERMISSIONS_RATIONALE
+          up to Android 13, VIEW_PERMISSION_USAGE + HEALTH_PERMISSIONS on Android 14+), so the apps that wrote the data
+          are visible and the Sources, Home and Compare screens can show their label and icon from PackageManager.
+        No QUERY_ALL_PACKAGES. MergedManifestTest verifies these entries.
+    -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="com.heytap.health.international" />
+
+        <intent>
+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+
+            <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+        </intent>
+    </queries>
+
     <application
         android:name=".PulseStagesApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.PulseStages">
 
+        <!-- adjustResize: the edge-to-edge window receives IME insets (imePadding) instead of being panned. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.PulseStages">
+            android:theme="@style/Theme.PulseStages"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Privacy policy / permission rationale. Health Connect opens it from the "privacy policy" link of its
+            permission screen: through ACTION_SHOW_PERMISSIONS_RATIONALE up to Android 13 (APK) ...
+        -->
+        <activity
+            android:name=".PermissionsRationaleActivity"
+            android:exported="true"
+            android:label="@string/rationale_title"
+            android:theme="@style/Theme.PulseStages">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            ... and through VIEW_PERMISSION_USAGE + HEALTH_PERMISSIONS on Android 14+. Mandatory: without it Android 14+
+            does not grant health permissions and Android 16 revokes them.
+        -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".PermissionsRationaleActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <!--
             WorkManager is initialised on demand through Configuration.Provider (PulseStagesApp) so that
@@ -44,6 +121,27 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+        </provider>
+
+        <!--
+            The backfill worker runs as a foreground service; Android 14+ requires its type in the manifest. :work
+            declares the same type; replacing (instead of merging) keeps the merged value exactly "dataSync".
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge"
+            tools:replace="android:foregroundServiceType" />
+
+        <!-- Shares files written to cache/shared/ (log export) with the app the user picks in the share sheet. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
         </provider>
     </application>
 

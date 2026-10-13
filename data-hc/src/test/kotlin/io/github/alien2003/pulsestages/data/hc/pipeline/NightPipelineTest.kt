@@ -92,7 +92,10 @@ class NightPipelineTest {
             )
             assertEquals("HYBRID", notes.getValue("algo").jsonPrimitive.content)
             assertEquals("1", notes.getValue("version").jsonPrimitive.content)
-            assertEquals(h.pipeline.currentParamsHash(h.settings.current), notes.getValue("paramsHash").jsonPrimitive.content)
+            assertEquals(
+                h.pipeline.currentParamsHash(h.settings.current, h.repository.granted),
+                notes.getValue("paramsHash").jsonPrimitive.content,
+            )
             assertEquals("1.0", notes.getValue("coverage").jsonPrimitive.content)
             assertEquals(listOf(source.uuid), notes.getValue("sourceUuids").jsonArray.map { it.jsonPrimitive.content })
             assertEquals("240", notes.getValue("hrSamples").jsonPrimitive.content)
@@ -195,9 +198,9 @@ class NightPipelineTest {
             h.repository.addNight(OHEALTH, nightStart(1))
             h.processRecent()
             val before = h.repository.ownSessions().single()
-            val oldHash = h.pipeline.currentParamsHash(h.settings.current)
+            val oldHash = h.pipeline.currentParamsHash(h.settings.current, h.repository.granted)
             h.settings.set { it.copy(algo = it.algo.copy(preprocess = it.algo.preprocess.copy(smoothWindowEpochs = 7))) }
-            val newHash = h.pipeline.currentParamsHash(h.settings.current)
+            val newHash = h.pipeline.currentParamsHash(h.settings.current, h.repository.granted)
             assertNotEquals(oldHash, newHash)
 
             val report = h.processRecent()
@@ -549,7 +552,7 @@ class NightPipelineTest {
             val start = nightStart(1)
             h.repository.addNight(OHEALTH, start, durationMs = 4 * HOUR_MS)
             h.repository.addNight(OHEALTH, start + 4 * HOUR_MS + 20 * MINUTE_MS, durationMs = 3 * HOUR_MS)
-            val plainHash = h.pipeline.currentParamsHash(h.settings.current)
+            val plainHash = h.pipeline.currentParamsHash(h.settings.current, h.repository.granted)
             h.settings.set { it.copy(write = it.write.copy(awakeAsLight = true)) }
 
             h.processRecent()

@@ -39,9 +39,11 @@ import kotlin.math.abs
  * - permissions: revoking a required permission makes the corresponding calls throw PermissionDenied; optional
  *   channels return empty lists; without READ_HEALTH_DATA_HISTORY other apps' records starting before
  *   [historyStartMs] are invisible; in [inBackground] mode without READ_HEALTH_DATA_IN_BACKGROUND only reads
- *   filtered to exactly our own package work, every other read (any origin, or another package) and the Changes API
- *   throw PermissionDenied, like the platform's `SecurityException` (AOSP `HealthConnectServiceImpl.readRecords`:
- *   self-read enforcement in the background, `maybeEnforceOnlyCallingPackageDataRequested`);
+ *   filtered to exactly our own package work as asked; with [BackgroundRule.THROWS] every other read (any origin, or
+ *   another package) and the Changes API throw PermissionDenied, like the platform's `SecurityException`
+ *   (android15-release and later: `maybeEnforceOnlyCallingPackageDataRequested`); with [BackgroundRule.SELF_ONLY]
+ *   those reads silently return our own records only and only `getChanges` throws (android14-release:
+ *   `enforceSelfRead`, `RecordHelper.getReadTableWhereClause`);
  * - [availability] other than AVAILABLE makes every call throw Unavailable;
  * - error injection ([failOn], [quotaAfter]) for quota / transient / any [HealthDataException].
  *
@@ -96,6 +98,18 @@ class FakeHealthRepository(
         SCAN_ORIGINS,
     }
 
+    /** What a read of other apps' data does in the background without READ_HEALTH_DATA_IN_BACKGROUND. */
+    enum class BackgroundRule {
+        /** Throws PermissionDenied (Health Connect built from android15-release and later). */
+        THROWS,
+
+        /**
+         * Silently reads our own records only, as if the origin filter were our package; `getChanges` still throws
+         * (Health Connect built from android14-release).
+         */
+        SELF_ONLY,
+    }
+
     /** When an insert with an existing clientRecordId replaces the stored record. */
     enum class UpsertRule {
         /** Android 14+ platform: replace iff `newVersion >= storedVersion`. */
@@ -117,6 +131,9 @@ class FakeHealthRepository(
 
     /** The app is not in the foreground right now (a WorkManager run, or a foreground run that lost the foreground). */
     var inBackground: Boolean = false
+
+    /** How background reads without READ_HEALTH_DATA_IN_BACKGROUND behave. */
+    var backgroundRule: BackgroundRule = BackgroundRule.THROWS
 
     /** Without READ_HEALTH_DATA_HISTORY other apps' records starting before this are invisible; null = no limit. */
     var historyStartMs: Long? = null
@@ -370,8 +387,7 @@ class FakeHealthRepository(
     ): List<HcSleepSession> {
         enter(Operation.READ_SLEEP_SESSIONS)
         if (packages != setOf(ownPackage) || HealthPermissions.WRITE_SLEEP !in granted) requirePermission(HealthPermissions.READ_SLEEP)
-        requireBackgroundAccess(packages)
-        return querySessions(startMs, endMs, packages)
+        return querySessions(startMs, endMs, readablePackages(packages))
     }
 
     override suspend fun readHeartRate(
@@ -382,11 +398,11 @@ class FakeHealthRepository(
         enter(Operation.READ_HEART_RATE)
         requirePermission(HealthPermissions.READ_HEART_RATE)
         if (startMs >= endMs || packages?.isEmpty() == true) return emptyList()
-        requireBackgroundAccess(packages)
+        val readable = readablePackages(packages)
         return synchronized(lock) {
             heartRateSeries
                 .filter { it.startMs in (startMs - LEFT_PADDING_MS) until endMs }
-                .filter { packages == null || it.packageName in packages }
+                .filter { readable == null || it.packageName in readable }
                 .filter { isVisible(it.packageName, it.startMs) }
                 .flatMap { it.samples }
                 .filter { it.timeMs in startMs until endMs }
@@ -402,11 +418,11 @@ class FakeHealthRepository(
         enter(Operation.READ_STEPS)
         requirePermission(HealthPermissions.READ_STEPS)
         if (startMs >= endMs || packages?.isEmpty() == true) return emptyList()
-        requireBackgroundAccess(packages)
+        val readable = readablePackages(packages)
         return synchronized(lock) {
             stepRecords
                 .filter { it.startMs in (startMs - LEFT_PADDING_MS) until endMs }
-                .filter { packages == null || it.packageName in packages }
+                .filter { readable == null || it.packageName in readable }
                 .filter { isVisible(it.packageName, it.startMs) }
                 .map { it.value }
                 .filter { it.endMs > startMs && it.startMs < endMs }
@@ -434,7 +450,8 @@ class FakeHealthRepository(
 
     override suspend fun sleepChangesToken(packages: Set<String>): String {
         enter(Operation.CHANGES_TOKEN)
-        requireChangesAccess()
+        requirePermission(HealthPermissions.READ_SLEEP)
+        if (backgroundRule == BackgroundRule.THROWS) requireChangesAccess()
         if (packages.isEmpty()) throw HealthDataException.InvalidData("a changes token needs at least one package")
         return synchronized(lock) { issueToken(sequence, packages) }
     }
@@ -496,8 +513,7 @@ class FakeHealthRepository(
     ): List<SleepOriginStats> {
         enter(Operation.SCAN_ORIGINS)
         requirePermission(HealthPermissions.READ_SLEEP)
-        requireBackgroundAccess(packages = null)
-        return querySessions(startMs, endMs, packages = null)
+        return querySessions(startMs, endMs, readablePackages(packages = null))
             .groupBy { it.packageName }
             .map { (packageName, list) -> SleepOriginStats(packageName, list.size, list.maxOf { it.endMs }) }
             .sortedWith(compareByDescending<SleepOriginStats> { it.sessionCount }.thenBy { it.packageName })
@@ -606,11 +622,11 @@ class FakeHealthRepository(
     ): List<T> {
         enter(channel.operation)
         if (channel.permission !in granted || startMs >= endMs || packages?.isEmpty() == true) return emptyList()
-        requireBackgroundAccess(packages)
+        val readable = readablePackages(packages)
         return synchronized(lock) {
             channel.records
                 .filter { it.startMs in startMs until endMs }
-                .filter { packages == null || it.packageName in packages }
+                .filter { readable == null || it.packageName in readable }
                 .filter { isVisible(it.packageName, it.startMs) }
                 .sortedBy { it.startMs }
                 .map { it.value }
@@ -629,16 +645,18 @@ class FakeHealthRepository(
 
     /**
      * The platform's background rule: without READ_HEALTH_DATA_IN_BACKGROUND a caller that is not in the foreground
-     * may only read with an origin filter of exactly its own package; anything else is a SecurityException.
+     * may only read with an origin filter of exactly its own package. Anything else is a SecurityException
+     * ([BackgroundRule.THROWS]) or is silently read as our own package ([BackgroundRule.SELF_ONLY]). Returns the origin
+     * filter the read actually uses (null = any origin).
      */
-    private fun requireBackgroundAccess(packages: Set<String>?) {
+    private fun readablePackages(packages: Set<String>?): Set<String>? {
         val backgroundBlocked = inBackground && HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND !in synchronized(lock) { granted.toSet() }
         // An empty origin set reads nothing (the repository never calls Health Connect for it).
-        if (backgroundBlocked && packages?.isEmpty() != true && packages != setOf(ownPackage)) {
-            throw HealthDataException.PermissionDenied(
-                "fake: reading other apps' data in the background needs READ_HEALTH_DATA_IN_BACKGROUND (origins $packages)",
-            )
-        }
+        if (!backgroundBlocked || packages?.isEmpty() == true || packages == setOf(ownPackage)) return packages
+        if (backgroundRule == BackgroundRule.SELF_ONLY) return setOf(ownPackage)
+        throw HealthDataException.PermissionDenied(
+            "fake: reading other apps' data in the background needs READ_HEALTH_DATA_IN_BACKGROUND (origins $packages)",
+        )
     }
 
     private fun requirePermission(permission: String) {

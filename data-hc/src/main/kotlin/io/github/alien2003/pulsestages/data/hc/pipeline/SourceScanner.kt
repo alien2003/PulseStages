@@ -5,6 +5,7 @@ import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.SleepOriginStats
 import io.github.alien2003.pulsestages.data.hc.di.OwnPackageName
 import io.github.alien2003.pulsestages.data.local.settings.SettingsRepository
+import io.github.alien2003.pulsestages.data.local.settings.SourceSettings
 import kotlinx.coroutines.flow.first
 import java.time.Clock
 import javax.inject.Inject
@@ -67,27 +68,38 @@ class SourceScanner
             val fullHistory = HealthPermissions.READ_HEALTH_DATA_HISTORY in repository.grantedPermissions()
             val fromMs = if (fullHistory) 0L else now - RECENT_DAYS * DAY_MS
             val stats = repository.scanSleepOrigins(fromMs, now + 1).associateBy { it.packageName }
+            return SourceScanResult(entries(settings, stats), fullHistory, fromMs, now)
+        }
 
+        /**
+         * The listed and manually added packages from the settings alone, in priority order, without reading Health
+         * Connect (session counts 0, no last session): what the Sources screen shows when [scan] failed, so the
+         * stored source settings stay editable.
+         */
+        suspend fun configured(): List<SourceEntry> = entries(settingsRepository.settings.first().sources, emptyMap())
+
+        private fun entries(
+            settings: SourceSettings,
+            stats: Map<String, SleepOriginStats>,
+        ): List<SourceEntry> {
             val listed = (settings.sourcePriority + settings.sourcePackages + settings.manualPackages).distinct()
             val others =
                 stats.values
                     .filter { it.packageName !in listed }
                     .sortedWith(compareByDescending<SleepOriginStats> { it.sessionCount }.thenBy { it.packageName })
             val ordered = listed + others.map { it.packageName }
-            val entries =
-                ordered.map { packageName ->
-                    val stat = stats[packageName]
-                    SourceEntry(
-                        packageName = packageName,
-                        sessionCount = stat?.sessionCount ?: 0,
-                        lastSessionEndMs = stat?.lastSessionEndMs,
-                        enabled = packageName in settings.sourcePackages && packageName != ownPackage,
-                        priority = settings.sourcePriority.indexOf(packageName).takeIf { it >= 0 },
-                        manual = packageName in settings.manualPackages,
-                        isOwn = packageName == ownPackage,
-                    )
-                }
-            return SourceScanResult(entries, fullHistory, fromMs, now)
+            return ordered.map { packageName ->
+                val stat = stats[packageName]
+                SourceEntry(
+                    packageName = packageName,
+                    sessionCount = stat?.sessionCount ?: 0,
+                    lastSessionEndMs = stat?.lastSessionEndMs,
+                    enabled = packageName in settings.sourcePackages && packageName != ownPackage,
+                    priority = settings.sourcePriority.indexOf(packageName).takeIf { it >= 0 },
+                    manual = packageName in settings.manualPackages,
+                    isOwn = packageName == ownPackage,
+                )
+            }
         }
 
         /** Constants. */

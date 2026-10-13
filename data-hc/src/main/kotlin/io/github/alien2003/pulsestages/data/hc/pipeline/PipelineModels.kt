@@ -1,41 +1,105 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
+import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightInput
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.data.hc.HealthPermissions
+import io.github.alien2003.pulsestages.data.local.settings.AppSettings
+import io.github.alien2003.pulsestages.data.local.settings.HrSourcesMode
 import io.github.alien2003.pulsestages.data.local.settings.WriteSettings
 
 /**
- * Estimates the stages of one night. Implemented in :work / :app by an adapter over core-algo's `SleepStager`
- * (with the bundled hybrid model and the active personal model); tests use a simple deterministic fake.
+ * Estimates the stages of one night. Implemented in :work by an adapter over core-algo's `SleepStager` (with the
+ * bundled hybrid model and the active personal model); tests use a simple deterministic fake.
  *
  * Not a `fun interface`: besides [estimate] it exposes the params hash and the model id of the configuration it
- * runs with.
+ * runs with. The configuration may change at run time (the active personal model lives in the ledger), which is why
+ * [paramsHash] suspends: it always describes the configuration the next [estimate] uses.
  */
 interface NightEstimator {
-    /** Id of the hybrid model in use, or null when none is loaded. */
+    /** Id of the hybrid model in use, or null when none is loaded (yet). */
     val modelId: String?
 
-    /** Estimates one night; must be deterministic for the same input and params. */
+    /** Estimates one night with the coverage gates and the configured estimator; deterministic for the same input and params. */
     suspend fun estimate(
         input: NightInput,
         params: AlgoParams,
     ): EstimationOutcome
 
     /**
-     * SHA-256 hex of [params] plus the model fingerprints plus [extra] (output options that change the written data,
-     * see [OutputOptions.hashExtra]). Two nights with equal hashes and algorithm versions are considered up to date.
+     * Estimates one night with [type] regardless of `params.estimator` and without the coverage gates (the "compare
+     * with RULES" of the night detail screen).
      */
-    fun paramsHash(
+    suspend fun estimateWith(
+        type: EstimatorType,
+        input: NightInput,
+        params: AlgoParams,
+    ): NightEstimate
+
+    /**
+     * SHA-256 hex of [params] plus the model fingerprints plus [extra] (input selection and output options that change
+     * the estimate or the written data, see [OutputOptions.hashExtra]). Two nights with equal hashes and algorithm
+     * versions are considered up to date.
+     */
+    suspend fun paramsHash(
         params: AlgoParams,
         extra: String,
     ): String
 }
 
-/** Output options that change what is written and therefore belong in the params hash. */
+/**
+ * What the estimation input of a night is read from besides the algorithm parameters: the origins of heart rate and
+ * steps (`hrSources`: the night's own package, or any origin) and the optional channels that are both enabled in the
+ * parameters (`features.useSpo2` / `useRespiratoryRate` / `useHrv`) and granted. Changing it changes the input of the
+ * same night (granting SpO2 later turns that channel on), so it is part of the params hash.
+ *
+ * @property hrSources origins of heart rate and steps.
+ * @property spo2 SpO2 is read.
+ * @property respiratoryRate respiratory rate is read.
+ * @property hrv HRV is read.
+ */
+data class InputSelection(
+    val hrSources: HrSourcesMode,
+    val spo2: Boolean,
+    val respiratoryRate: Boolean,
+    val hrv: Boolean,
+) {
+    /** The part of the params hash's `extra` that describes this selection. */
+    fun hashPart(): String = "hrSources=$hrSources;spo2=$spo2;respiratoryRate=$respiratoryRate;hrv=$hrv"
+
+    /** Constructors. */
+    companion object {
+        /** The selection of [settings] with the [granted] Health Connect permissions. */
+        fun of(
+            settings: AppSettings,
+            granted: Set<String>,
+        ): InputSelection {
+            val features = settings.algo.features
+            return InputSelection(
+                hrSources = settings.sources.hrSources,
+                spo2 = features.useSpo2 && HealthPermissions.READ_OXYGEN_SATURATION in granted,
+                respiratoryRate = features.useRespiratoryRate && HealthPermissions.READ_RESPIRATORY_RATE in granted,
+                hrv = features.useHrv && HealthPermissions.READ_HEART_RATE_VARIABILITY in granted,
+            )
+        }
+    }
+}
+
+/** Input selection and output options that change what is estimated or written and therefore belong in the params hash. */
 object OutputOptions {
-    /** The `extra` part of the params hash for [write] (the title template is deliberately not part of it). */
+    /** The output part of the params hash's `extra` for [write] (the title template is deliberately not part of it). */
     fun hashExtra(write: WriteSettings): String = "awakeAsLight=${write.awakeAsLight}"
+
+    /**
+     * The `extra` part of the params hash of nights estimated with [settings] and the [granted] permissions: the
+     * output options of `settings.write` and the [InputSelection].
+     */
+    fun hashExtra(
+        settings: AppSettings,
+        granted: Set<String>,
+    ): String = hashExtra(settings.write) + ";" + InputSelection.of(settings, granted).hashPart()
 }
 
 /** Why the pipeline was started; decides how existing outputs are treated. */

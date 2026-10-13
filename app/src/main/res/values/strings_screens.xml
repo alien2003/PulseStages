@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Home, Nights, night detail and Compare (UI part 2). Every string also exists in values-ru/strings_screens.xml. -->
+    <string name="action_delete">Delete</string>
+    <string name="value_not_available">—</string>
+    <string name="demo_banner">Demo mode: synthetic nights. Nothing is read from or written to Health Connect.</string>
+
+    <string name="error_hc_permission">Health Connect refused: a permission is missing. Grant it on the Home tab.</string>
+    <string name="error_hc_unavailable">Health Connect is not available.</string>
+    <string name="error_hc_quota">Health Connect\'s rate limit was reached. Try again later.</string>
+    <string name="error_hc_transient">Health Connect did not respond. Try again.</string>
+    <string name="error_hc_invalid">Health Connect rejected the data (see the log).</string>
+
+    <string name="result_cancelled">Cancelled.</string>
+    <string name="result_done">Done.</string>
+    <string name="result_failed">The run failed; see the log.</string>
+    <string name="result_busy">Health Connect stayed busy, so the run gave up. Try again later.</string>
+    <string name="result_already_running">Another run was already in progress.</string>
+    <string name="result_blocked_permission">Nothing was read: a required permission is missing.</string>
+    <string name="result_blocked_background">Nothing was read in the background: allow background access on the Home tab.</string>
+    <string name="result_night_recomputed">Night recomputed.</string>
+    <string name="result_night_not_recomputed">The night was not rewritten: it cannot be estimated, or the overwrite policy is “never”.</string>
+    <string name="result_summary_estimate">Estimate new: %1$s (found %2$d, skipped %3$d).</string>
+    <string name="result_summary_backfill">Backfill finished: %1$s (found %2$d, skipped %3$d).</string>
+    <string name="result_summary_recompute">Recompute finished: %1$s (skipped %3$d).</string>
+    <string name="result_with_failures">%1$s %2$s</string>
+
+    <string name="model_global">Global model</string>
+    <string name="model_personal_calibrated">Personal model (calibrated on reference nights)</string>
+    <string name="model_personal_em">Personal model (adapted to your nights)</string>
+
+    <string name="sync_outcome_success">success</string>
+    <string name="sync_outcome_partial">done, some nights failed</string>
+    <string name="sync_outcome_quota">rate limit reached, will retry</string>
+    <string name="sync_outcome_permission">a permission is missing</string>
+    <string name="sync_outcome_unavailable">Health Connect unavailable</string>
+    <string name="sync_outcome_background">no background access</string>
+    <string name="sync_outcome_failed">failed</string>
+    <string name="sync_outcome_cancelled">cancelled</string>
+
+    <string name="home_status_failed_title">Status unavailable</string>
+    <string name="home_status_failed">The app\'s records could not be read.</string>
+    <string name="home_hc_update_detail">On Android 9–13 Health Connect is an app from Google Play; install or update it there.</string>
+    <string name="home_hc_unavailable_detail">Health Connect needs Android 9 or later and does not work in work profiles. PulseStages cannot work without it.</string>
+    <string name="home_permissions_title">Permissions</string>
+    <string name="home_permissions_unknown">The permissions could not be read</string>
+    <string name="home_permissions_unknown_detail">Health Connect did not answer. Try again.</string>
+    <string name="home_permissions_blocked">Health Connect no longer shows the permission dialog. Open its settings to grant the permissions.</string>
+    <string name="home_permissions_blocked_detail">The permission request was cancelled twice, so Health Connect will not show it again. Grant the permissions in Health Connect\'s settings.</string>
+    <string name="home_notifications_title">Notifications (backfill progress)</string>
+    <string name="home_notifications_missing">Not allowed: the backfill runs without a progress notification.</string>
+    <string name="home_notifications_denied">Notifications stay off; the backfill still runs, without a progress notification.</string>
+    <string name="home_action_open_hc_settings">Open Health Connect settings</string>
+    <string name="home_action_allow_notifications">Allow notifications</string>
+    <string name="home_action_notification_settings">Notification settings</string>
+
+    <string name="home_schedule_title">Sources and schedule</string>
+    <string name="home_sources_label">Sleep sources</string>
+    <string name="home_hr_sources_label">Heart rate and steps</string>
+    <string name="home_last_run_label">Last run</string>
+    <string name="home_last_run_never">Never</string>
+    <string name="home_last_run_running">Running since %1$s</string>
+    <string name="home_last_run_value">%1$s · %2$s</string>
+    <string name="home_next_run_label">Next automatic run</string>
+    <string name="home_next_run_none">Not scheduled yet</string>
+    <string name="home_model_label">Model</string>
+
+    <string name="home_counters_title">Source sessions</string>
+    <string name="home_counters_hint">Sleep sessions of the enabled sources in the app\'s records. Stale nights were estimated with other settings.</string>
+    <string name="home_counter_found">found</string>
+    <string name="home_counter_estimated">estimated</string>
+    <string name="home_counter_skipped">skipped</string>
+    <string name="home_counter_stale">stale</string>
+    <string name="home_counter_failed">failed</string>
+
+    <string name="home_jobs_title">Actions</string>
+    <string name="home_jobs_not_ready">These actions need Health Connect and the required permissions.</string>
+    <string name="home_job_pending">Waiting to run…</string>
+    <string name="home_job_retrying">Waiting for a retry: Health Connect was busy.</string>
+    <string name="home_estimate_title">New nights</string>
+    <string name="home_estimate_body">Checks Health Connect for new sleep sessions and estimates them now. This also runs automatically every hour and once a day.</string>
+    <string name="home_estimate_running">Estimating new nights…</string>
+    <string name="home_action_estimate">Estimate new</string>
+    <string name="home_backfill_title">History backfill</string>
+    <string name="home_backfill_body">Estimates every past night in the background, one week at a time. It continues after a restart and can be cancelled.</string>
+    <string name="home_backfill_body_limited">Estimates every past night in the background, one week at a time. Without access to history Health Connect returns only the last 30 days.</string>
+    <string name="home_backfill_running">Backfill running…</string>
+    <string name="home_backfill_progress">Week %1$d of %2$d · nights found: %3$d, estimated: %4$d</string>
+    <string name="home_backfill_started">Backfill started.</string>
+    <string name="home_backfill_cancelling">Cancelling the backfill…</string>
+    <string name="home_backfill_done">The last backfill finished on %1$s: %2$s.</string>
+    <string name="home_backfill_cancelled">The last backfill was cancelled after week %1$d of %2$d.</string>
+    <string name="home_backfill_failed">The last backfill stopped with an error after week %1$d of %2$d (see the log).</string>
+    <string name="home_backfill_interrupted">A backfill was interrupted after week %1$d of %2$d; resume it to continue.</string>
+    <string name="home_backfill_was_limited">History was limited to the last 30 days (no access to history).</string>
+    <string name="home_action_backfill">Backfill history</string>
+    <string name="home_action_backfill_resume">Resume backfill</string>
+    <string name="home_recompute_title">Recompute</string>
+    <string name="home_recompute_body">Estimates every night again with the current settings and rewrites its session in Health Connect.</string>
+    <string name="home_recompute_never">“Existing sessions” is set to “Never overwrite” in Settings: a recompute does not rewrite nights that already have a session, it only estimates nights without one.</string>
+    <string name="home_recompute_running">Recomputing…</string>
+    <string name="home_recompute_progress">Recomputing nights: %1$d of %2$d</string>
+    <string name="home_recompute_all_started">Recompute of all nights started.</string>
+    <string name="home_recompute_stale_started">Recompute of the stale nights started.</string>
+    <string name="home_recompute_confirm_title">Recompute all nights?</string>
+    <string name="home_recompute_confirm_body">Every night is estimated again with the current settings and its session in Health Connect is rewritten. This can take a while.</string>
+    <string name="home_action_recompute_all">Recompute all</string>
+    <string name="home_action_recompute_stale">Recompute stale nights</string>
+    <string name="home_delete_title">Your sessions in Health Connect</string>
+    <string name="home_delete_body">Deletes every sleep session PulseStages wrote to Health Connect. Data of other apps is never touched.</string>
+    <string name="home_delete_running">Deleting…</string>
+    <string name="home_delete_none">PulseStages had no sessions in Health Connect.</string>
+    <string name="home_delete_confirm_title">Delete all my sessions?</string>
+    <string name="home_delete_confirm_body">Every sleep session written by PulseStages is deleted from Health Connect. Your watch\'s data stays. Automatic runs do not write these nights again; a backfill or a recompute would.</string>
+    <string name="home_action_delete_all">Delete my sessions from Health Connect</string>
+
+    <string name="nights_marker_stale">Stale</string>
+    <string name="nights_marker_elevated_hr">Elevated heart rate</string>
+    <string name="nights_marker_low_confidence">Low confidence</string>
+
+    <string name="not_estimated_no_hr">There is no heart-rate data for this night.</string>
+    <string name="not_estimated_low_coverage">Too little of the night has heart-rate data.</string>
+    <string name="not_estimated_too_short">The session is too short.</string>
+
+    <string name="night_detail_stale">Stale: estimated with other settings or an older algorithm. Recompute it to update its session.</string>
+    <string name="night_detail_no_stages">No stages were written for this night.</string>
+    <string name="night_detail_actions">Actions</string>
+    <string name="night_chart_gap">No data</string>
+    <string name="night_chart_hr_label">bpm</string>
+    <string name="night_chart_hr_raw">Heart rate</string>
+    <string name="night_chart_hr_smooth">Smoothed</string>
+    <string name="night_epoch_inspect">Show epoch details</string>
+    <string name="cd_hr_chart">Heart rate between %1$d and %2$d bpm</string>
+    <string name="cd_previous_epoch">Previous epoch</string>
+    <string name="cd_next_epoch">Next epoch</string>
+    <string name="night_inspection_loading">Reading the heart rate from Health Connect…</string>
+    <string name="night_inspection_hint">Tap or drag on the charts to see the probabilities of an epoch.</string>
+    <string name="night_inspection_differs">The heart-rate curve and the probabilities come from a new estimate with the current settings; it can differ from what was written.</string>
+    <string name="night_inspection_not_estimated">With the current settings this night is not estimated. %1$s</string>
+    <string name="night_inspection_failed">The night could not be estimated again.</string>
+    <string name="night_epoch_title">Epoch %1$s–%2$s</string>
+    <string name="night_epoch_stage">Estimate now: %1$s · written: %2$s</string>
+    <string name="night_epoch_posteriors">Probabilities</string>
+    <string name="night_epoch_hr">Heart rate %1$s bpm, smoothed %2$s bpm</string>
+    <string name="night_epoch_no_hr">No heart-rate data in this epoch.</string>
+    <string name="night_epoch_features">Features</string>
+    <string name="night_action_recompute">Recompute</string>
+    <string name="night_action_compare_rules">Compare with RULES</string>
+    <string name="night_action_export">Export CSV</string>
+    <string name="night_action_delete">Delete my session</string>
+    <string name="night_recompute_started">Recompute started.</string>
+    <string name="night_recompute_running">Recomputing this night…</string>
+    <string name="night_recompute_blocked_never">“Existing sessions” is set to “Never overwrite” in Settings, so this night\'s session is not rewritten. Change that setting to recompute it.</string>
+    <string name="night_compare_title">Comparison with RULES</string>
+    <string name="night_compare_agreement">Agreement with RULES: kappa %1$s · accuracy %2$s</string>
+    <string name="night_compare_primary">Current estimate (%1$s)</string>
+    <string name="night_compare_rules">Rules estimator</string>
+    <string name="night_compare_hint">Both estimates use the same heart rate. RULES is the simple threshold estimator; the difference shows what the model adds.</string>
+    <string name="night_export_done">CSV saved: %1$s</string>
+    <string name="night_export_failed">Could not write the CSV file.</string>
+    <string name="night_delete_confirm_title">Delete this session?</string>
+    <string name="night_delete_confirm_body">The PulseStages session of this night is deleted from Health Connect. Your watch\'s data stays. Automatic runs do not write it again; Recompute would.</string>
+    <string name="night_delete_done">Session deleted from Health Connect.</string>
+    <string name="night_delete_no_output">This night has no PulseStages session in Health Connect.</string>
+
+    <string name="stage_short_awake">Wake</string>
+    <string name="stage_short_light">Light</string>
+    <string name="stage_short_deep">Deep</string>
+    <string name="stage_short_rem">REM</string>
+
+    <string name="compare_searching">Searching Health Connect for reference nights…</string>
+    <string name="compare_error_generic">Could not read the reference nights.</string>
+    <string name="compare_empty_explanation">A reference night is a sleep session that another app (another watch, a ring, a sleep-lab app) wrote to Health Connect with real sleep stages: light, deep, REM. PulseStages estimates the same night from its heart rate and compares both. Sessions without stages, like the ones OHealth writes, cannot serve as references.</string>
+    <string name="compare_kappa">Kappa</string>
+    <string name="compare_accuracy">Accuracy</string>
+    <string name="compare_macro_f1">Macro F1</string>
+    <string name="compare_minutes_error">Mean error per night: deep %1$s, REM %2$s, awake %3$s.</string>
+    <string name="compare_stages_title">Per stage</string>
+    <string name="compare_stages_hint">Accuracy: share of the reference\'s time in a stage that the estimate got right (recall). Precision: share of the estimate\'s time in a stage that the reference confirms.</string>
+    <string name="compare_col_stage">Stage</string>
+    <string name="compare_col_recall">Accuracy</string>
+    <string name="compare_col_precision">Precision</string>
+    <string name="compare_col_f1">F1</string>
+    <string name="compare_matrix_title">Confusion matrix</string>
+    <string name="compare_matrix_hint">Rows: reference stage. Columns: estimate. Each cell: number of 30-second chunks and share of the row.</string>
+    <string name="compare_matrix_corner">Ref. / est.</string>
+    <string name="compare_model_title">Model</string>
+    <string name="compare_model_kappa">Kappa on held-out nights: %1$s → %2$s</string>
+    <string name="compare_model_hint">Calibration fits a personal model on these reference nights (the latest ones are held out to measure it) and uses it for every later estimate. Nights estimated before become stale.</string>
+    <string name="compare_personalization_off">Personalization is switched off (Settings → Personalization). Turn it on to calibrate.</string>
+    <string name="compare_action_calibrate">Calibrate</string>
+    <string name="compare_action_reset">Reset to global model</string>
+    <string name="compare_calibrating">Calibrating the personal model…</string>
+    <string name="compare_resetting">Switching back to the global model…</string>
+    <string name="compare_rescoring">Estimating the reference nights again…</string>
+    <string name="compare_calibrated">%1$s. Kappa on %4$s: %2$s → %3$s.</string>
+    <string name="compare_calibrated_unmeasured">%1$s. No night was left over to measure the effect.</string>
+    <string name="compare_not_calibrated">Calibration was not possible: the reference nights have no labelled epochs with heart rate.</string>
+    <string name="compare_reset_confirm_title">Use the global model again?</string>
+    <string name="compare_reset_confirm_body">The personal model is switched off and estimates use the global models again. Nights estimated with the personal model become stale.</string>
+    <string name="compare_reset_done">Back to the global model.</string>
+    <string name="compare_nights_title">Reference nights</string>
+    <string name="compare_night_scores">Kappa %1$s · accuracy %2$s · %3$s</string>
+    <string name="compare_night_not_estimated">Not estimated: too little heart rate</string>
+
+    <plurals name="result_estimated">
+        <item quantity="one">%1$d night estimated</item>
+        <item quantity="other">%1$d nights estimated</item>
+    </plurals>
+    <plurals name="result_failed_nights">
+        <item quantity="one">%1$d night failed, see the log.</item>
+        <item quantity="other">%1$d nights failed, see the log.</item>
+    </plurals>
+    <plurals name="home_delete_done">
+        <item quantity="one">Deleted %1$d session from Health Connect.</item>
+        <item quantity="other">Deleted %1$d sessions from Health Connect.</item>
+    </plurals>
+    <plurals name="home_recompute_stale_body">
+        <item quantity="one">%1$d night is stale: it was estimated with other settings or an older algorithm. Recompute it to update its session.</item>
+        <item quantity="other">%1$d nights are stale: they were estimated with other settings or an older algorithm. Recompute them to update their sessions.</item>
+    </plurals>
+    <plurals name="compare_scoring">
+        <item quantity="one">Estimating %1$d reference night…</item>
+        <item quantity="other">Estimating %1$d reference nights…</item>
+    </plurals>
+    <plurals name="compare_scored_nights">
+        <item quantity="one">%1$d night scored</item>
+        <item quantity="other">%1$d nights scored</item>
+    </plurals>
+    <plurals name="compare_skipped_no_hr">
+        <item quantity="one">%1$d session with stages was skipped: no heart rate was found for it.</item>
+        <item quantity="other">%1$d sessions with stages were skipped: no heart rate was found for them.</item>
+    </plurals>
+    <plurals name="compare_skipped_no_stages">
+        <item quantity="one">%1$d session of another app has only awake / asleep stages and cannot be scored.</item>
+        <item quantity="other">%1$d sessions of other apps have only awake / asleep stages and cannot be scored.</item>
+    </plurals>
+    <plurals name="compare_calibrated_nights">
+        <item quantity="one">Calibrated on %1$d night</item>
+        <item quantity="other">Calibrated on %1$d nights</item>
+    </plurals>
+    <plurals name="compare_held_out">
+        <item quantity="one">%1$d held-out night</item>
+        <item quantity="other">%1$d held-out nights</item>
+    </plurals>
+    <plurals name="compare_model_detail">
+        <item quantity="one">Made on %1$s from %2$d night.</item>
+        <item quantity="other">Made on %1$s from %2$d nights.</item>
+    </plurals>
+</resources>

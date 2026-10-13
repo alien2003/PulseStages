@@ -9,6 +9,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 
 private val LightColors: ColorScheme =
@@ -45,7 +46,10 @@ private val DarkColors: ColorScheme =
         onSurface = Neutral90,
     )
 
-/** App theme: Material You dynamic colour on Android 12+ (API 31), the PulseStages palette otherwise. */
+/**
+ * App theme: Material You dynamic colour from the wallpaper on Android 12+ (API 31), the PulseStages palette otherwise;
+ * light or dark following the system; Material 3 default typography and the app's [Spacing] scale.
+ */
 @Composable
 fun PulseStagesTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -67,5 +71,7 @@ fun PulseStagesTheme(
                 LightColors
             }
         }
-    MaterialTheme(colorScheme = colorScheme, content = content)
+    CompositionLocalProvider(LocalSpacing provides Spacing()) {
+        MaterialTheme(colorScheme = colorScheme, content = content)
+    }
 }

@@ -1,18 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon foreground: a heart-rate pulse line with a crescent moon. 108dp canvas, 66dp safe zone. -->
+<!--
+    Adaptive icon foreground (108 dp canvas, artwork inside the 66 dp safe zone): a heart-rate pulse wave (coral) that
+    turns into the steps of a hypnogram (light blue). Same artwork as docs/icon.svg.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FFADC6FF"
-        android:pathData="M62,30a16,16 0,1 0,16 22a13,13 0,1 1,-16 -22z" />
-    <path
-        android:strokeColor="#FFFFB4AA"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
         android:fillColor="#00000000"
-        android:pathData="M28,62h12l5,-10l7,20l6,-14l4,4h18" />
+        android:pathData="M51,56 V47 H57 V64 H63 V52 H69 V41 H75 V56 H84"
+        android:strokeWidth="5"
+        android:strokeColor="#FFADC6FF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M24,56 H33 L37,46 L42,68 L46,56 H51"
+        android:strokeWidth="5"
+        android:strokeColor="#FFFFB4AA"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
 </vector>

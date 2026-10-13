@@ -7,6 +7,7 @@ import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import dagger.hilt.components.SingletonComponent
+import io.github.alien2003.pulsestages.data.hc.BackgroundRuleHealthRepository
 import io.github.alien2003.pulsestages.data.hc.HealthConnectAvailabilityChecker
 import io.github.alien2003.pulsestages.data.hc.HealthConnectRepository
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
@@ -59,6 +60,10 @@ class DataHcModuleTest {
 
     @Inject lateinit var repository: HealthRepository
 
+    @Inject
+    @field:PlatformHealthRepository
+    lateinit var platformRepository: HealthRepository
+
     @Inject lateinit var availabilityChecker: HealthConnectAvailabilityChecker
 
     @Inject lateinit var pipeline: NightPipeline
@@ -102,7 +107,8 @@ class DataHcModuleTest {
 
     @Test
     fun graphProvidesTheHealthConnectLayer() {
-        assertTrue(repository is HealthConnectRepository)
+        assertTrue("the app reads behind the background rule", repository is BackgroundRuleHealthRepository)
+        assertTrue(platformRepository is HealthConnectRepository)
         assertSame("the backfill state machine is a singleton", backfill, otherBackfill)
         assertTrue(ownPackage, ownPackage.startsWith("io.github.alien2003.pulsestages.data.hc"))
         assertTrue(titles.defaultTitleTemplate().isNotBlank())

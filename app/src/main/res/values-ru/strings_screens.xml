@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Главная, Ночи, детали ночи и Сравнение (UI, часть 2). Английские строки — в values/strings_screens.xml. -->
+    <string name="action_delete">Удалить</string>
+    <string name="value_not_available">—</string>
+    <string name="demo_banner">Демо-режим: синтетические ночи. Ничего не читается из Health Connect и не записывается туда.</string>
+
+    <string name="error_hc_permission">Health Connect отказал: не хватает разрешения. Выдайте его на вкладке «Главная».</string>
+    <string name="error_hc_unavailable">Health Connect недоступен.</string>
+    <string name="error_hc_quota">Достигнут лимит запросов Health Connect. Попробуйте позже.</string>
+    <string name="error_hc_transient">Health Connect не ответил. Попробуйте ещё раз.</string>
+    <string name="error_hc_invalid">Health Connect отклонил данные (см. лог).</string>
+
+    <string name="result_cancelled">Отменено.</string>
+    <string name="result_done">Готово.</string>
+    <string name="result_failed">Запуск завершился ошибкой, подробности — в логе.</string>
+    <string name="result_busy">Health Connect оставался занят, запуск прекращён. Попробуйте позже.</string>
+    <string name="result_already_running">Другой запуск уже выполнялся.</string>
+    <string name="result_blocked_permission">Ничего не прочитано: не хватает обязательного разрешения.</string>
+    <string name="result_blocked_background">В фоне ничего не прочитано: разрешите фоновый доступ на вкладке «Главная».</string>
+    <string name="result_night_recomputed">Ночь пересчитана.</string>
+    <string name="result_night_not_recomputed">Ночь не перезаписана: её нельзя оценить или политика перезаписи — «никогда».</string>
+    <string name="result_summary_estimate">Оценка новых: %1$s (найдено: %2$d, пропущено: %3$d).</string>
+    <string name="result_summary_backfill">Бэкфилл завершён: %1$s (найдено: %2$d, пропущено: %3$d).</string>
+    <string name="result_summary_recompute">Пересчёт завершён: %1$s (пропущено: %3$d).</string>
+    <string name="result_with_failures">%1$s %2$s</string>
+
+    <string name="model_global">Глобальная модель</string>
+    <string name="model_personal_calibrated">Личная модель (откалибрована по эталонным ночам)</string>
+    <string name="model_personal_em">Личная модель (адаптирована к вашим ночам)</string>
+
+    <string name="sync_outcome_success">успешно</string>
+    <string name="sync_outcome_partial">выполнено, часть ночей с ошибкой</string>
+    <string name="sync_outcome_quota">лимит запросов, будет повтор</string>
+    <string name="sync_outcome_permission">не хватает разрешения</string>
+    <string name="sync_outcome_unavailable">Health Connect недоступен</string>
+    <string name="sync_outcome_background">нет фонового доступа</string>
+    <string name="sync_outcome_failed">ошибка</string>
+    <string name="sync_outcome_cancelled">отменено</string>
+
+    <string name="home_status_failed_title">Статус недоступен</string>
+    <string name="home_status_failed">Не удалось прочитать записи приложения.</string>
+    <string name="home_hc_update_detail">На Android 9–13 Health Connect — отдельное приложение из Google Play; установите или обновите его там.</string>
+    <string name="home_hc_unavailable_detail">Health Connect требует Android 9 или новее и не работает в рабочем профиле. Без него PulseStages работать не может.</string>
+    <string name="home_permissions_title">Разрешения</string>
+    <string name="home_permissions_unknown">Не удалось прочитать разрешения</string>
+    <string name="home_permissions_unknown_detail">Health Connect не ответил. Попробуйте ещё раз.</string>
+    <string name="home_permissions_blocked">Health Connect больше не показывает окно разрешений. Откройте его настройки, чтобы выдать разрешения.</string>
+    <string name="home_permissions_blocked_detail">Запрос разрешений дважды отменён, поэтому Health Connect больше его не покажет. Выдайте разрешения в настройках Health Connect.</string>
+    <string name="home_notifications_title">Уведомления (прогресс бэкфилла)</string>
+    <string name="home_notifications_missing">Не разрешены: бэкфилл идёт без уведомления о прогрессе.</string>
+    <string name="home_notifications_denied">Уведомления выключены; бэкфилл всё равно работает, но без уведомления о прогрессе.</string>
+    <string name="home_action_open_hc_settings">Открыть настройки Health Connect</string>
+    <string name="home_action_allow_notifications">Разрешить уведомления</string>
+    <string name="home_action_notification_settings">Настройки уведомлений</string>
+
+    <string name="home_schedule_title">Источники и расписание</string>
+    <string name="home_sources_label">Источники сна</string>
+    <string name="home_hr_sources_label">Пульс и шаги</string>
+    <string name="home_last_run_label">Последний запуск</string>
+    <string name="home_last_run_never">Ещё не было</string>
+    <string name="home_last_run_running">Выполняется с %1$s</string>
+    <string name="home_last_run_value">%1$s · %2$s</string>
+    <string name="home_next_run_label">Следующий автоматический запуск</string>
+    <string name="home_next_run_none">Пока не запланирован</string>
+    <string name="home_model_label">Модель</string>
+
+    <string name="home_counters_title">Исходные сессии</string>
+    <string name="home_counters_hint">Сессии сна включённых источников в записях приложения. Устаревшие ночи оценены с другими настройками.</string>
+    <string name="home_counter_found">найдено</string>
+    <string name="home_counter_estimated">оценено</string>
+    <string name="home_counter_skipped">пропущено</string>
+    <string name="home_counter_stale">устарело</string>
+    <string name="home_counter_failed">с ошибкой</string>
+
+    <string name="home_jobs_title">Действия</string>
+    <string name="home_jobs_not_ready">Для этих действий нужны Health Connect и обязательные разрешения.</string>
+    <string name="home_job_pending">Ожидает запуска…</string>
+    <string name="home_job_retrying">Ожидает повтора: Health Connect был занят.</string>
+    <string name="home_estimate_title">Новые ночи</string>
+    <string name="home_estimate_body">Ищет в Health Connect новые сессии сна и сразу их оценивает. Это же происходит автоматически каждый час и раз в день.</string>
+    <string name="home_estimate_running">Оценка новых ночей…</string>
+    <string name="home_action_estimate">Оценить новые</string>
+    <string name="home_backfill_title">Бэкфилл истории</string>
+    <string name="home_backfill_body">Оценивает все прошлые ночи в фоне, окнами по 7 дней. Продолжается после перезапуска, его можно отменить.</string>
+    <string name="home_backfill_body_limited">Оценивает все прошлые ночи в фоне, окнами по 7 дней. Без доступа к истории Health Connect отдаёт только последние 30 дней.</string>
+    <string name="home_backfill_running">Бэкфилл выполняется…</string>
+    <string name="home_backfill_progress">Окно %1$d из %2$d · найдено ночей: %3$d, оценено: %4$d</string>
+    <string name="home_backfill_started">Бэкфилл запущен.</string>
+    <string name="home_backfill_cancelling">Бэкфилл отменяется…</string>
+    <string name="home_backfill_done">Последний бэкфилл завершён %1$s: %2$s.</string>
+    <string name="home_backfill_cancelled">Последний бэкфилл отменён после окна %1$d из %2$d.</string>
+    <string name="home_backfill_failed">Последний бэкфилл остановлен ошибкой после окна %1$d из %2$d (см. лог).</string>
+    <string name="home_backfill_interrupted">Бэкфилл прерван после окна %1$d из %2$d; продолжите его.</string>
+    <string name="home_backfill_was_limited">История была ограничена последними 30 днями (нет доступа к истории).</string>
+    <string name="home_action_backfill">Бэкфилл истории</string>
+    <string name="home_action_backfill_resume">Продолжить бэкфилл</string>
+    <string name="home_recompute_title">Пересчёт</string>
+    <string name="home_recompute_body">Заново оценивает все ночи с текущими настройками и перезаписывает их сессии в Health Connect.</string>
+    <string name="home_recompute_never">В настройках для «Существующие сеансы» выбрано «Никогда не перезаписывать»: пересчёт не перезаписывает ночи, у которых уже есть сессия, а только оценивает ночи без неё.</string>
+    <string name="home_recompute_running">Пересчёт…</string>
+    <string name="home_recompute_progress">Пересчёт ночей: %1$d из %2$d</string>
+    <string name="home_recompute_all_started">Пересчёт всех ночей запущен.</string>
+    <string name="home_recompute_stale_started">Пересчёт устаревших ночей запущен.</string>
+    <string name="home_recompute_confirm_title">Пересчитать все ночи?</string>
+    <string name="home_recompute_confirm_body">Каждая ночь будет заново оценена с текущими настройками, её сессия в Health Connect — перезаписана. Это может занять время.</string>
+    <string name="home_action_recompute_all">Пересчитать всё</string>
+    <string name="home_action_recompute_stale">Пересчитать устаревшие</string>
+    <string name="home_delete_title">Ваши сессии в Health Connect</string>
+    <string name="home_delete_body">Удаляет все сессии сна, которые PulseStages записал в Health Connect. Данные других приложений не затрагиваются.</string>
+    <string name="home_delete_running">Удаление…</string>
+    <string name="home_delete_none">В Health Connect не было сессий PulseStages.</string>
+    <string name="home_delete_confirm_title">Удалить все мои сессии?</string>
+    <string name="home_delete_confirm_body">Все сессии сна, записанные PulseStages, будут удалены из Health Connect. Данные часов останутся. Автоматические запуски не запишут эти ночи снова; бэкфилл или пересчёт — запишут.</string>
+    <string name="home_action_delete_all">Удалить мои сессии из Health Connect</string>
+
+    <string name="nights_marker_stale">Устарело</string>
+    <string name="nights_marker_elevated_hr">Повышенный пульс</string>
+    <string name="nights_marker_low_confidence">Низкая уверенность</string>
+
+    <string name="not_estimated_no_hr">Для этой ночи нет данных пульса.</string>
+    <string name="not_estimated_low_coverage">Слишком малая часть ночи покрыта данными пульса.</string>
+    <string name="not_estimated_too_short">Сессия слишком короткая.</string>
+
+    <string name="night_detail_stale">Устарело: оценено с другими настройками или старым алгоритмом. Пересчитайте, чтобы обновить сессию.</string>
+    <string name="night_detail_no_stages">Для этой ночи стадии не записаны.</string>
+    <string name="night_detail_actions">Действия</string>
+    <string name="night_chart_gap">Нет данных</string>
+    <string name="night_chart_hr_label">уд/мин</string>
+    <string name="night_chart_hr_raw">Пульс</string>
+    <string name="night_chart_hr_smooth">Сглаженный</string>
+    <string name="night_epoch_inspect">Показать детали эпохи</string>
+    <string name="cd_hr_chart">Пульс от %1$d до %2$d уд/мин</string>
+    <string name="cd_previous_epoch">Предыдущая эпоха</string>
+    <string name="cd_next_epoch">Следующая эпоха</string>
+    <string name="night_inspection_loading">Чтение пульса из Health Connect…</string>
+    <string name="night_inspection_hint">Нажмите или проведите по графикам, чтобы увидеть вероятности эпохи.</string>
+    <string name="night_inspection_differs">Кривая пульса и вероятности получены новой оценкой с текущими настройками; она может отличаться от записанной.</string>
+    <string name="night_inspection_not_estimated">С текущими настройками эта ночь не оценивается. %1$s</string>
+    <string name="night_inspection_failed">Не удалось заново оценить ночь.</string>
+    <string name="night_epoch_title">Эпоха %1$s–%2$s</string>
+    <string name="night_epoch_stage">Оценка сейчас: %1$s · записано: %2$s</string>
+    <string name="night_epoch_posteriors">Вероятности</string>
+    <string name="night_epoch_hr">Пульс %1$s уд/мин, сглаженный %2$s уд/мин</string>
+    <string name="night_epoch_no_hr">В этой эпохе нет данных пульса.</string>
+    <string name="night_epoch_features">Признаки</string>
+    <string name="night_action_recompute">Пересчитать</string>
+    <string name="night_action_compare_rules">Сравнить с RULES</string>
+    <string name="night_action_export">Экспорт CSV</string>
+    <string name="night_action_delete">Удалить мою сессию</string>
+    <string name="night_recompute_started">Пересчёт запущен.</string>
+    <string name="night_recompute_running">Ночь пересчитывается…</string>
+    <string name="night_recompute_blocked_never">В настройках для «Существующие сеансы» выбрано «Никогда не перезаписывать», поэтому сессия этой ночи не перезаписывается. Чтобы пересчитать её, измените эту настройку.</string>
+    <string name="night_compare_title">Сравнение с RULES</string>
+    <string name="night_compare_agreement">Согласие с RULES: каппа %1$s · точность %2$s</string>
+    <string name="night_compare_primary">Текущая оценка (%1$s)</string>
+    <string name="night_compare_rules">Оценка по правилам</string>
+    <string name="night_compare_hint">Обе оценки построены по одному и тому же пульсу. RULES — простая пороговая оценка; разница показывает, что добавляет модель.</string>
+    <string name="night_export_done">CSV сохранён: %1$s</string>
+    <string name="night_export_failed">Не удалось записать файл CSV.</string>
+    <string name="night_delete_confirm_title">Удалить эту сессию?</string>
+    <string name="night_delete_confirm_body">Сессия PulseStages для этой ночи будет удалена из Health Connect. Данные часов останутся. Автоматические запуски не запишут её снова; «Пересчитать» — запишет.</string>
+    <string name="night_delete_done">Сессия удалена из Health Connect.</string>
+    <string name="night_delete_no_output">Для этой ночи в Health Connect нет сессии PulseStages.</string>
+
+    <string name="stage_short_awake">Бодр.</string>
+    <string name="stage_short_light">Лёгк.</string>
+    <string name="stage_short_deep">Глуб.</string>
+    <string name="stage_short_rem">REM</string>
+
+    <string name="compare_searching">Поиск эталонных ночей в Health Connect…</string>
+    <string name="compare_error_generic">Не удалось прочитать эталонные ночи.</string>
+    <string name="compare_empty_explanation">Эталонная ночь — это сессия сна, которую другое приложение (другие часы, кольцо, приложение сомнологической лаборатории) записало в Health Connect с настоящими стадиями: лёгкий, глубокий, REM. PulseStages оценивает ту же ночь по пульсу и сравнивает результаты. Сессии без стадий, как у OHealth, эталоном быть не могут.</string>
+    <string name="compare_kappa">Каппа</string>
+    <string name="compare_accuracy">Точность</string>
+    <string name="compare_macro_f1">Macro F1</string>
+    <string name="compare_minutes_error">Средняя ошибка за ночь: глубокий %1$s, REM %2$s, бодрствование %3$s.</string>
+    <string name="compare_stages_title">По стадиям</string>
+    <string name="compare_stages_hint">Точность: доля времени стадии в эталоне, угаданная оценкой (полнота). Прецизионность: доля времени стадии в оценке, подтверждённая эталоном.</string>
+    <string name="compare_col_stage">Стадия</string>
+    <string name="compare_col_recall">Точность</string>
+    <string name="compare_col_precision">Прециз.</string>
+    <string name="compare_col_f1">F1</string>
+    <string name="compare_matrix_title">Матрица ошибок</string>
+    <string name="compare_matrix_hint">Строки — стадия эталона, столбцы — оценка. В ячейке — число 30-секундных отрезков и доля от строки.</string>
+    <string name="compare_matrix_corner">Эт. / оц.</string>
+    <string name="compare_model_title">Модель</string>
+    <string name="compare_model_kappa">Каппа на отложенных ночах: %1$s → %2$s</string>
+    <string name="compare_model_hint">Калибровка подгоняет личную модель по этим эталонным ночам (последние откладываются для проверки) и применяет её ко всем следующим оценкам. Ночи, оценённые раньше, становятся устаревшими.</string>
+    <string name="compare_personalization_off">Персонализация выключена (Настройки → Персонализация). Включите её, чтобы калибровать.</string>
+    <string name="compare_action_calibrate">Калибровать</string>
+    <string name="compare_action_reset">Сбросить к глобальной модели</string>
+    <string name="compare_calibrating">Калибровка личной модели…</string>
+    <string name="compare_resetting">Возврат к глобальной модели…</string>
+    <string name="compare_rescoring">Повторная оценка эталонных ночей…</string>
+    <string name="compare_calibrated">%1$s. Каппа на %4$s: %2$s → %3$s.</string>
+    <string name="compare_calibrated_unmeasured">%1$s. Не осталось ночи, чтобы измерить эффект.</string>
+    <string name="compare_not_calibrated">Калибровка невозможна: в эталонных ночах нет размеченных эпох с пульсом.</string>
+    <string name="compare_reset_confirm_title">Вернуться к глобальной модели?</string>
+    <string name="compare_reset_confirm_body">Личная модель отключается, оценки снова строятся глобальными моделями. Ночи, оценённые с личной моделью, станут устаревшими.</string>
+    <string name="compare_reset_done">Используется глобальная модель.</string>
+    <string name="compare_nights_title">Эталонные ночи</string>
+    <string name="compare_night_scores">Каппа %1$s · точность %2$s · %3$s</string>
+    <string name="compare_night_not_estimated">Не оценена: слишком мало пульса</string>
+
+    <plurals name="result_estimated">
+        <item quantity="one">оценена %1$d ночь</item>
+        <item quantity="few">оценено %1$d ночи</item>
+        <item quantity="many">оценено %1$d ночей</item>
+        <item quantity="other">оценено %1$d ночи</item>
+    </plurals>
+    <plurals name="result_failed_nights">
+        <item quantity="one">%1$d ночь с ошибкой, см. лог.</item>
+        <item quantity="few">%1$d ночи с ошибкой, см. лог.</item>
+        <item quantity="many">%1$d ночей с ошибкой, см. лог.</item>
+        <item quantity="other">%1$d ночи с ошибкой, см. лог.</item>
+    </plurals>
+    <plurals name="home_delete_done">
+        <item quantity="one">Удалена %1$d сессия из Health Connect.</item>
+        <item quantity="few">Удалено %1$d сессии из Health Connect.</item>
+        <item quantity="many">Удалено %1$d сессий из Health Connect.</item>
+        <item quantity="other">Удалено %1$d сессии из Health Connect.</item>
+    </plurals>
+    <plurals name="home_recompute_stale_body">
+        <item quantity="one">%1$d ночь устарела: она оценена с другими настройками или старым алгоритмом. Пересчитайте её, чтобы обновить сессию.</item>
+        <item quantity="few">%1$d ночи устарели: они оценены с другими настройками или старым алгоритмом. Пересчитайте их, чтобы обновить сессии.</item>
+        <item quantity="many">%1$d ночей устарели: они оценены с другими настройками или старым алгоритмом. Пересчитайте их, чтобы обновить сессии.</item>
+        <item quantity="other">%1$d ночи устарели: они оценены с другими настройками или старым алгоритмом. Пересчитайте их, чтобы обновить сессии.</item>
+    </plurals>
+    <plurals name="compare_scoring">
+        <item quantity="one">Оценка %1$d эталонной ночи…</item>
+        <item quantity="few">Оценка %1$d эталонных ночей…</item>
+        <item quantity="many">Оценка %1$d эталонных ночей…</item>
+        <item quantity="other">Оценка %1$d эталонной ночи…</item>
+    </plurals>
+    <plurals name="compare_scored_nights">
+        <item quantity="one">Оценена %1$d ночь</item>
+        <item quantity="few">Оценено %1$d ночи</item>
+        <item quantity="many">Оценено %1$d ночей</item>
+        <item quantity="other">Оценено %1$d ночи</item>
+    </plurals>
+    <plurals name="compare_skipped_no_hr">
+        <item quantity="one">%1$d сессия со стадиями пропущена: для неё не нашлось пульса.</item>
+        <item quantity="few">%1$d сессии со стадиями пропущены: для них не нашлось пульса.</item>
+        <item quantity="many">%1$d сессий со стадиями пропущены: для них не нашлось пульса.</item>
+        <item quantity="other">%1$d сессии со стадиями пропущены: для них не нашлось пульса.</item>
+    </plurals>
+    <plurals name="compare_skipped_no_stages">
+        <item quantity="one">%1$d сессия другого приложения содержит только «бодрствование / сон» и не может быть оценена.</item>
+        <item quantity="few">%1$d сессии других приложений содержат только «бодрствование / сон» и не могут быть оценены.</item>
+        <item quantity="many">%1$d сессий других приложений содержат только «бодрствование / сон» и не могут быть оценены.</item>
+        <item quantity="other">%1$d сессии других приложений содержат только «бодрствование / сон» и не могут быть оценены.</item>
+    </plurals>
+    <plurals name="compare_calibrated_nights">
+        <item quantity="one">Откалибровано по %1$d ночи</item>
+        <item quantity="few">Откалибровано по %1$d ночам</item>
+        <item quantity="many">Откалибровано по %1$d ночам</item>
+        <item quantity="other">Откалибровано по %1$d ночи</item>
+    </plurals>
+    <plurals name="compare_held_out">
+        <item quantity="one">%1$d отложенной ночи</item>
+        <item quantity="few">%1$d отложенных ночах</item>
+        <item quantity="many">%1$d отложенных ночах</item>
+        <item quantity="other">%1$d отложенной ночи</item>
+    </plurals>
+    <plurals name="compare_model_detail">
+        <item quantity="one">Создана %1$s по %2$d ночи.</item>
+        <item quantity="few">Создана %1$s по %2$d ночам.</item>
+        <item quantity="many">Создана %1$s по %2$d ночам.</item>
+        <item quantity="other">Создана %1$s по %2$d ночи.</item>
+    </plurals>
+</resources>
