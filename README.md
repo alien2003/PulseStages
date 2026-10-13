@@ -267,7 +267,8 @@ Android 14+ it uses an `activity-alias` with `android.intent.action.VIEW_PERMISS
   estimated too, so the priority decides between the two like for any other night.
 - **A piece of a night is not the night.** A session that lies mostly inside a longer session of another app but covers
   at most half of it (say 40 minutes one watch recorded of a night another app recorded completely) never replaces
-  that night, whatever the priority. It is skipped as a duplicate of it.
+  that night, whatever the priority. It is skipped as a duplicate of it. This applies only when that longer session
+  is used itself: if it lost to a night of a higher-priority app, the piece is weighed by priority like any night.
 - **Manual package.** "Add an app by package name" adds a watch app that has not written sleep yet.
 - **Heart rate and steps.** "Heart rate and steps from any app" is the setting `hrSources`. The default `SAME_AS_SLEEP`
   reads heart rate and steps only from the app that wrote the sleep session. `ANY` reads them from every app.

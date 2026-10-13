@@ -36,8 +36,8 @@ enum class SourceOutcome {
     OWN,
 
     /**
-     * Overlaps a session of a higher-priority source, or lies inside a longer session of another source while covering at
-     * most half of it (a piece of that sleep, whatever the priority).
+     * Overlaps a session of a higher-priority source, or lies inside a longer session of another source that is used
+     * itself while covering at most half of it (a piece of that sleep, whatever the priority).
      */
     LOWER_PRIORITY_DUPLICATE,
 

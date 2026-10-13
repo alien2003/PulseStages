@@ -189,7 +189,9 @@ object NightKeys {
  *    the others): a night that a higher-priority source recorded with its own stages makes the overlapping nights of
  *    lower-priority sources duplicates too, although it is not estimated itself (it stays HAS_STAGES). Exception: a
  *    night lying mostly inside a session of another package but covering at most half of it is a piece of that sleep,
- *    not a second record of it: it is a duplicate of that session whatever the priority, and blocks nothing.
+ *    not a second record of it: when that session is kept (estimated, or recorded with stages and not outranked), the
+ *    piece is its duplicate whatever the priority and blocks nothing; when that session lost to another night, the
+ *    piece is decided by priority like any other night.
  */
 class NightCandidateBuilder
     @Inject
@@ -262,6 +264,12 @@ class NightCandidateBuilder
          * night another source recorded completely) is a duplicate of that session whatever the priority, and a
          * staged piece blocks nothing. Without this, a short higher-priority fragment (estimated since
          * `minSessionMin` may be as low as 10 min) would replace the whole night.
+         *
+         * This holds only for a container that is kept itself. Nights are decided container first: the nights that are
+         * no piece go first, in priority order, then the pieces, each after every session it is a piece of (a piece of a
+         * piece after its container), in priority order within a level. A piece whose containers all lost (to a night
+         * of the piece's own package, for example) is decided by priority against the nights kept so far, so sleep
+         * that only it covers is still estimated.
          */
         private fun removeDuplicates(
             nights: List<NightCandidate>,
@@ -271,25 +279,45 @@ class NightCandidateBuilder
             val stagedIds = stagedNights.mapTo(HashSet()) { it.clientRecordId }
             val ordered = (nights + stagedNights).sortedWith(priorityOrder(priority))
             val containers = ordered.associate { night -> night.clientRecordId to ordered.filter { isPieceOf(night, it) } }
-            val (pieces, whole) = ordered.partition { containers.getValue(it.clientRecordId).isNotEmpty() }
             val kept = mutableListOf<NightCandidate>()
+            val keptIds = HashSet<String>()
             val duplicates = mutableListOf<SkippedNight>()
-            whole.forEach { night ->
-                val winner = kept.firstOrNull { it.packageName != night.packageName && overlapsMostly(it, night) }
+            val depth = containerDepths(ordered, containers)
+            ordered.sortedBy { depth.getValue(it.clientRecordId) }.forEach { night ->
+                val container = containers.getValue(night.clientRecordId).firstOrNull { it.clientRecordId in keptIds }
+                val winner = container ?: kept.firstOrNull { it.packageName != night.packageName && overlapsMostly(it, night) }
+                val winnerHasStages = winner?.clientRecordId in stagedIds
                 if (winner == null) {
                     kept += night
+                    keptIds += night.clientRecordId
                 } else if (night.clientRecordId !in stagedIds) {
-                    duplicates += duplicateOf(night, winner, winnerHasStages = winner.clientRecordId in stagedIds)
+                    duplicates +=
+                        if (container != null) {
+                            pieceOf(night, container, containerHasStages = winnerHasStages)
+                        } else {
+                            duplicateOf(night, winner, winnerHasStages = winnerHasStages)
+                        }
                 }
-                // A staged night that a higher-priority night outranks stays HAS_STAGES and blocks nothing.
-            }
-            val keptIds = kept.mapTo(HashSet()) { it.clientRecordId }
-            pieces.filter { it.clientRecordId !in stagedIds }.forEach { piece ->
-                val candidates = containers.getValue(piece.clientRecordId)
-                val container = candidates.firstOrNull { it.clientRecordId in keptIds } ?: candidates.first()
-                duplicates += pieceOf(piece, container, containerHasStages = container.clientRecordId in stagedIds)
+                // A staged night that is outranked, or a piece of a kept night, stays HAS_STAGES and blocks nothing.
             }
             return kept.filter { it.clientRecordId !in stagedIds } to duplicates
+        }
+
+        /**
+         * How many levels of containers each of [nights] has in [containers]: 0 for a night that is no piece, otherwise
+         * one more than its deepest container. A container is always longer than its piece, so the longer nights are
+         * done first.
+         */
+        private fun containerDepths(
+            nights: List<NightCandidate>,
+            containers: Map<String, List<NightCandidate>>,
+        ): Map<String, Int> {
+            val depth = HashMap<String, Int>()
+            nights.sortedByDescending { it.durationMs }.forEach { night ->
+                depth[night.clientRecordId] =
+                    containers.getValue(night.clientRecordId).maxOfOrNull { depth.getValue(it.clientRecordId) + 1 } ?: 0
+            }
+            return depth
         }
 
         private fun duplicateOf(

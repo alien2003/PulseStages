@@ -346,7 +346,9 @@ than 180 min, and what deliberately does not:
   first fragment of the night (the gap is AWAKE) — unchanged, because it cannot be told apart from a night that the
   watch split at an awakening, and the merged session's nadir is the night's; for two sources, a session lying mostly
   inside a session of another source but covering at most half of it is a piece of that sleep and never replaces it,
-  whatever the priority (otherwise a 40-min fragment of a higher-priority watch would replace a whole night).
+  whatever the priority (otherwise a 40-min fragment of a higher-priority watch would replace a whole night); this
+  holds only while that session is kept itself, and a piece of a session that lost to another night is decided by
+  priority like any night, so sleep only the piece covers is still estimated.
 
 ## 10. Personalization (`personal/`)
 

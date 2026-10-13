@@ -34,7 +34,8 @@ workflow derives versionName and versionCode from the tag (see README, "GitHub: 
   least `proportionsMinSessionMin` (new, Settings → Post-processing, 180 min; 0 = as before); naps no longer get
   `SANITY_DEEP_LOW` and a low-confidence flag for having no deep sleep.
 - **Source priority**: a session lying mostly inside a longer session of another app while covering at most half of
-  it (e.g. a 40-min fragment) is a piece of that night and no longer replaces it, whatever the priority.
+  it (e.g. a 40-min fragment) is a piece of that night and no longer replaces it, whatever the priority — as long as
+  that longer session is used itself; a piece of a session that lost to another night is weighed by priority as before.
 - Both new parameters are part of the params hash: nights estimated before are offered for recomputation.
 
 ### Added

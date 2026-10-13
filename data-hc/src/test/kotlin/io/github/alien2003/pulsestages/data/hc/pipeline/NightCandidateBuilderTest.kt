@@ -278,6 +278,50 @@ class NightCandidateBuilderTest {
     }
 
     @Test
+    fun `a piece of a night that lost to another night of the piece's own app is still estimated`() {
+        // Default minSessionMin (90): the other app recorded 0-6 h and 7-9 h (gap of 1 h, not merged), OHealth 0-10 h.
+        val otherFirst = SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OTHER_APP, OHEALTH))
+        val x = session(OHEALTH, startMs = start, endMs = start + 10 * HOUR_MS, uuid = "x")
+        val y = session(OTHER_APP, startMs = start, endMs = start + 6 * HOUR_MS, uuid = "y")
+        val p = session(OTHER_APP, startMs = start + 7 * HOUR_MS, endMs = start + 9 * HOUR_MS, uuid = "p")
+
+        val result = build(x, y, p, sources = otherFirst)
+
+        assertEquals(listOf("y", "p"), result.candidates.flatMap { it.sourceUuids }, "7-9 h is covered by no estimated night")
+        val duplicate = result.skipped.single()
+        assertEquals(listOf("x"), duplicate.sessions.map { it.uuid })
+        assertTrue(duplicate.reason.contains("higher-priority source $OTHER_APP"), duplicate.reason)
+
+        // With OHealth first its night wins, and both nights of the other app are its duplicates (y overlaps it, p is a piece).
+        val ohFirst = otherFirst.copy(sourcePriority = listOf(OHEALTH, OTHER_APP))
+        val reversed = build(x, y, p, sources = ohFirst)
+        assertEquals(listOf("x"), reversed.candidates.flatMap { it.sourceUuids })
+        assertEquals(listOf("y", "p"), reversed.skipped.flatMap { night -> night.sessions.map { it.uuid } })
+        assertTrue(reversed.skipped.all { it.outcome == SourceOutcome.LOWER_PRIORITY_DUPLICATE })
+    }
+
+    @Test
+    fun `a piece of a piece is decided after its container`() {
+        // x (OHealth) loses to y; a (third app, 3 h) is a piece of x; b (other app, 1 h) is a piece of both a and x.
+        val sources =
+            SourceSettings(
+                sourcePackages = listOf(OHEALTH, OTHER_APP, THIRD_APP),
+                sourcePriority = listOf(OTHER_APP, THIRD_APP, OHEALTH),
+                minSessionMin = 30,
+            )
+        val x = session(OHEALTH, startMs = start, endMs = start + 10 * HOUR_MS, uuid = "x")
+        val y = session(OTHER_APP, startMs = start, endMs = start + 6 * HOUR_MS, uuid = "y")
+        val a = session(THIRD_APP, startMs = start + 6 * HOUR_MS + 30 * MINUTE_MS, endMs = start + 9 * HOUR_MS + 30 * MINUTE_MS, uuid = "a")
+        val b = session(OTHER_APP, startMs = start + 7 * HOUR_MS, endMs = start + 8 * HOUR_MS, uuid = "b")
+
+        val result = build(x, y, a, b, sources = sources)
+
+        assertEquals(listOf("y", "a"), result.candidates.flatMap { it.sourceUuids })
+        val piece = result.skipped.single { night -> night.sessions.any { it.uuid == "b" } }
+        assertTrue(piece.reason.contains("inside the longer night of $THIRD_APP"), piece.reason)
+    }
+
+    @Test
     fun `staged pieces block nothing and a piece inside a staged night needs no estimate`() {
         val stages = { from: Long, to: Long -> listOf(HcStage(from, to, 5)) }
         val otherFirst =

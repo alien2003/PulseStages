@@ -103,6 +103,9 @@ from memory.
   at most half of it: that session is a piece of the other's sleep and becomes its duplicate whatever the priority (a
   staged piece blocks nothing). With naps estimated, a 40-min fragment of a higher-priority watch would otherwise
   replace the whole night of another source (with `minSessionMin` = 90 such fragments used to be dropped as naps).
+  Only a container that is kept counts (estimated, or staged and not outranked): containers are decided first, and a
+  piece whose containers all lost — e.g. to another night of the piece's own app — is decided by priority like any
+  night, so the stretch only it covers is still estimated. A piece of a piece is decided after its container.
   The outcome stays `LOWER_PRIORITY_DUPLICATE` (persisted enum), with its own reason text.
 - **Naps: deliberately unchanged.** Fragments closer than `mergeGapMin` are merged before the nap filter, so a nap
   ending < 30 min before bedtime becomes the first fragment of the night (it cannot be told from a night split at an
