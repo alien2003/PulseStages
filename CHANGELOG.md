@@ -11,10 +11,10 @@ workflow derives versionName and versionCode from the tag (see README, "GitHub: 
 ### Changed
 
 - **Demo mode** (debug builds only) is a switch in Settings → "Debug build" instead of a second launcher icon
-  ("PulseStages demo"). The Nights list, the night detail and Compare follow it at once, without a restart; every
-  build has a single launcher icon. The switch is a per-device debug convenience in its own preferences file, not a
-  setting (not exported, not part of the params hash). `ReleaseApkTest` checks that the minified release APK has no
-  demo class, resource or text.
+  ("PulseStages demo"). The Nights list, the night detail and Compare follow it at once, without a restart
+  (background estimation and the Home actions keep working with the real data); every build has a single launcher
+  icon. The switch is a per-device debug convenience in its own preferences file, not a setting (not exported, not
+  part of the params hash). `ReleaseApkTest` checks that the minified release APK has no demo class, resource or text.
 
 ### Fixed
 

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -162,6 +163,46 @@ class NightsViewModelTest {
             val back = vm.awaitLoaded { !it.synthetic }
             assertEquals(listOf(nightStart(1)), back.nights.map { it.summary.sessionStartMs })
             assertEquals("ps:selected", vm.selectedId.value, "the selection is kept for the data it belongs to")
+            clear(vm)
+        }
+
+    @Test
+    fun `a night selected in the pane before a source switch is not opened when the window becomes compact`() =
+        harnessTest(main, dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(1))
+            h.sync.run(inBackground = false)
+            val real = source(h)
+            val demo =
+                object : NightsSource by real {
+                    override val synthetic: Boolean = true
+
+                    override fun nights(): Flow<List<NightSummary>> =
+                        real.nights().map { nights -> nights.map { it.copy(clientRecordId = "demo:" + it.clientRecordId) } }
+                }
+            val sources = TestScreenSources(demo)
+            val vm = NightsViewModel(sources, h.logger, SavedStateHandle())
+            val demoList = vm.awaitLoaded { it.synthetic }
+            val demoNight = demoList.nights.single().clientRecordId
+            vm.select(demoNight, inPane = true)
+
+            // Demo mode off in Settings, back to the Nights list (the newest real night in the pane), then folded.
+            sources.replace(real)
+            val realList = vm.awaitLoaded { !it.synthetic }
+            val realNight = realList.nights.single().clientRecordId
+            assertEquals(null, vm.takeNightToOpen(), "the demo night is not in the real data")
+
+            // Switched while the tab was hidden (the list still shows the old data): not opened either.
+            sources.replace(demo)
+            vm.select(demoNight, inPane = true)
+            sources.replace(real)
+            assertEquals(null, vm.takeNightToOpen())
+
+            // A night of the current data is opened; one missing from the current list is not.
+            vm.awaitLoaded { !it.synthetic }
+            vm.select(realNight, inPane = true)
+            assertEquals(realNight, vm.takeNightToOpen())
+            vm.select("ps:deleted", inPane = true)
+            assertEquals(null, vm.takeNightToOpen())
             clear(vm)
         }
 

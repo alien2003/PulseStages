@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -86,7 +87,9 @@ sealed interface NightsUiState {
  * The nights come from the current source of [ScreenSources]: when it is replaced (debug builds: demo mode switched),
  * the list shows the loading state until the new source's nights are read (when the tab only resumes with the same
  * data, it keeps showing its nights meanwhile). A selected night that the new list does not have is not shown: a wide
- * window then shows the newest night, and switching back selects it again.
+ * window then shows the newest night, and switching back selects it again. Nor is it opened when the window becomes
+ * compact ([takeNightToOpen]): the selection remembers the data it was made in, so this holds even when the source
+ * was replaced while the tab was hidden.
  *
  * The selection follows the window size: in a wide window the selected night is shown in the right pane; when the
  * window becomes compact while it is shown there, it is opened as its own destination ([takeNightToOpen]); when the
@@ -104,6 +107,9 @@ class NightsViewModel
         /** `synthetic` of the list shown last, or null before one was shown. */
         private var shownSynthetic: Boolean? = null
 
+        /** `synthetic` of the current source (followed even while the list is not shown), or null before it is known. */
+        private var currentSynthetic: Boolean? = null
+
         /** The current UI state. */
         val state: StateFlow<NightsUiState> =
             sources.nights
@@ -116,6 +122,11 @@ class NightsViewModel
         /** The night the user selected last, or null (a wide window then shows the newest night). */
         val selectedId: StateFlow<String?> = savedState.getStateFlow(KEY_SELECTED, null)
 
+        init {
+            // Only which source is current: reads neither the ledger nor Health Connect.
+            viewModelScope.launch { sources.nights.collect { currentSynthetic = it.synthetic } }
+        }
+
         /**
          * The user selected [clientRecordId]: in the right pane of a wide window ([inPane] true; it is opened as its
          * own destination when the window becomes compact) or as the detail destination of a compact window.
@@ -126,6 +137,7 @@ class NightsViewModel
         ) {
             savedState[KEY_SELECTED] = clientRecordId
             savedState[KEY_OPEN_WHEN_COMPACT] = inPane
+            savedState[KEY_SELECTED_SYNTHETIC] = currentSynthetic
         }
 
         /** The detail destination of [clientRecordId] became wide: the list shows it in its right pane. */
@@ -135,17 +147,32 @@ class NightsViewModel
 
         /**
          * The window became compact: the night that was shown in the right pane, to be opened as its own destination
-         * (at most once), or null when the user was not looking at a selected night.
+         * (at most once), or null when the user was not looking at a selected night, or when that night is not in the
+         * current data (selected before the source was replaced, or missing from the current list).
          */
         fun takeNightToOpen(): String? {
             val open = savedState.get<Boolean>(KEY_OPEN_WHEN_COMPACT) == true
             savedState[KEY_OPEN_WHEN_COMPACT] = false
-            return selectedId.value.takeIf { open }
+            val id = selectedId.value?.takeIf { open } ?: return null
+            return id.takeIf { inCurrentData(it) }
+        }
+
+        /**
+         * Whether the selected night [id] belongs to the current data: it was selected in the current source, and the
+         * list shown (when it is that source's) has it. What is not known yet does not count against it.
+         */
+        private fun inCurrentData(id: String): Boolean {
+            val current = currentSynthetic ?: return true
+            val selectedIn = savedState.get<Boolean>(KEY_SELECTED_SYNTHETIC)
+            val shown = state.value as? NightsUiState.Loaded
+            return (selectedIn == null || selectedIn == current) &&
+                (shown == null || shown.synthetic != current || shown.nights.any { it.clientRecordId == id })
         }
 
         private companion object {
             const val KEY_SELECTED = "nights.selected"
             const val KEY_OPEN_WHEN_COMPACT = "nights.open_when_compact"
+            const val KEY_SELECTED_SYNTHETIC = "nights.selected_synthetic"
         }
     }
 

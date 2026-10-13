@@ -297,7 +297,9 @@ data class CompareUiState(
  * calibrates or resets the personal model.
  *
  * The reference nights come from the current source of [ScreenSources]: when it is replaced (debug builds: demo mode
- * switched), a running action is cancelled and the tab starts over with the new source.
+ * switched), a running action is cancelled and the tab starts over with the new source. While no screen shows the tab
+ * ([onScreenStarted] / [onScreenStopped]; the switch is in Settings, so it is hidden then), the new search waits until
+ * the tab is shown again, so a hidden tab does not read Health Connect or score the reference nights.
  */
 @HiltViewModel
 class CompareViewModel
@@ -317,6 +319,8 @@ class CompareViewModel
         private var actionJob: Job? = null
         private var requestedRange = CompareRange.RECENT
         private val labels = mutableMapOf<String, String?>()
+        private var visibleScreens = 0
+        private var refreshDeferred = false
 
         /** The current UI state. */
         val state: StateFlow<CompareUiState> = mutableState.asStateFlow()
@@ -343,18 +347,33 @@ class CompareViewModel
             }
         }
 
-        /** [next] is the source now: the tab starts over with it (queued messages and the chosen range are kept). */
+        /**
+         * [next] is the source now: the tab starts over with it (queued messages and the chosen range are kept). The
+         * first source is searched at once (the tab is being opened); a replaced one only when a screen shows the tab.
+         */
         private fun onSource(next: ReferenceSource) {
             val replaced = source != null
             source = next
             if (replaced) {
                 actionJob?.cancel()
+                loadJob?.cancel()
                 references = emptyList()
                 mutableState.update { CompareUiState(range = it.range, synthetic = next.synthetic, messages = it.messages) }
             } else {
                 mutableState.update { it.copy(synthetic = next.synthetic) }
             }
-            refresh()
+            if (!replaced || visibleScreens > 0) refresh() else refreshDeferred = true
+        }
+
+        /** A screen showing the tab became visible; a search that waited for it (replaced source) runs now. */
+        fun onScreenStarted() {
+            visibleScreens++
+            if (refreshDeferred) refresh()
+        }
+
+        /** A screen showing the tab is no longer visible (stopped, or left the composition). */
+        fun onScreenStopped() {
+            visibleScreens = (visibleScreens - 1).coerceAtLeast(0)
         }
 
         /** Searches [range] instead (ignored while busy; a longer range needs READ_HEALTH_DATA_HISTORY). */
@@ -368,6 +387,7 @@ class CompareViewModel
         /** Searches Health Connect again and scores the reference nights. */
         fun refresh() {
             val source = source ?: return
+            refreshDeferred = false
             loadJob?.cancel()
             loadJob =
                 viewModelScope.launch {

@@ -96,6 +96,7 @@ class DemoScreenSourcesTest {
             val compare = CompareViewModel(sources.screens, FakeAppInfoResolver(), h.clock, h.logger)
             detail.show(real.clientRecordId)
             detail.onPaneStarted()
+            compare.onScreenStarted()
 
             val realList = nights.awaitLoaded { !it.synthetic }
             assertEquals(listOf(real.clientRecordId), realList.nights.map { it.clientRecordId })

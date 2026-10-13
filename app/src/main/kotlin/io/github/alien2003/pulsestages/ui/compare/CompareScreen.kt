@@ -48,6 +48,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.model.SleepStage
@@ -99,6 +100,10 @@ private const val STAGE_TABLE_COLUMNS = 4
 @Composable
 fun CompareRoute(viewModel: CompareViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LifecycleStartEffect(viewModel) {
+        viewModel.onScreenStarted()
+        onStopOrDispose { viewModel.onScreenStopped() }
+    }
     CompareScreen(
         state = state,
         actions =

@@ -17,6 +17,7 @@ import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import io.github.alien2003.pulsestages.data.hc.usecase.CalibrationOutcome
 import io.github.alien2003.pulsestages.data.hc.usecase.ReferenceSearch
+import io.github.alien2003.pulsestages.data.hc.usecase.SpecialAccess
 import io.github.alien2003.pulsestages.data.hc.usecase.UseCaseResult
 import io.github.alien2003.pulsestages.data.local.db.PersonalModelKind
 import io.github.alien2003.pulsestages.source.HealthConnectReferenceSource
@@ -28,7 +29,10 @@ import io.github.alien2003.pulsestages.testutil.clear
 import io.github.alien2003.pulsestages.testutil.harnessTest
 import io.github.alien2003.pulsestages.ui.common.UiText
 import io.github.alien2003.pulsestages.ui.common.formatDecimal
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -136,6 +140,7 @@ class CompareViewModelTest {
                 }
             val sources = TestScreenSources(references = real)
             val vm = CompareViewModel(sources, FakeAppInfoResolver(), h.clock, h.logger)
+            vm.onScreenStarted()
             val first = vm.awaitState { it.phase == ComparePhase.READY && it.metrics != null }
             assertEquals(3, first.referenceCount)
             assertFalse(first.synthetic)
@@ -150,6 +155,60 @@ class CompareViewModelTest {
             val back = vm.awaitState { !it.synthetic && it.metrics != null }
             assertEquals(3, back.referenceCount)
             assertEquals(3, back.nights.size)
+            clear(vm)
+        }
+
+    @Test
+    fun `a source replaced while the tab is hidden is searched only when the tab is shown again`() =
+        harnessTest(main, dir) { h ->
+            h.addReferenceNights(3)
+            val real = HealthConnectReferenceSource(h.referenceComparison, h.personalization, h.homeStatus, h.settings)
+            val reads = mutableListOf<String>()
+            // Answers at once (no Health Connect, no database). Its settings are read only after the ViewModel took it
+            // over, so once they are shown, a search started with the switch would already have asked it.
+            val demo =
+                object : ReferenceSource by real {
+                    override val synthetic: Boolean = true
+
+                    override fun personalizationEnabled(): Flow<Boolean> = flowOf(false)
+
+                    override suspend fun historyAccess(): SpecialAccess {
+                        reads += "historyAccess"
+                        return SpecialAccess.GRANTED
+                    }
+
+                    override suspend fun findReferenceNights(
+                        fromMs: Long,
+                        toMs: Long,
+                    ): UseCaseResult<ReferenceSearch> {
+                        reads += "findReferenceNights"
+                        return UseCaseResult.Success(ReferenceSearch(emptyList(), emptyList(), emptyList(), fromMs, toMs))
+                    }
+                }
+            val sources = TestScreenSources(references = real)
+            val vm = CompareViewModel(sources, FakeAppInfoResolver(), h.clock, h.logger)
+            vm.onScreenStarted()
+            assertEquals(3, vm.awaitState { it.phase == ComparePhase.READY && it.metrics != null }.referenceCount)
+
+            // Settings shows the switch: the tab is hidden while the source is replaced.
+            vm.onScreenStopped()
+            sources.replace(demo)
+            val waiting = vm.awaitState { it.synthetic && !it.personalizationEnabled }
+            advanceUntilIdle()
+            assertEquals(emptyList<String>(), reads, "a hidden tab does not search the new source")
+            assertEquals(ComparePhase.SEARCHING, vm.state.value.phase)
+            assertNull(waiting.metrics, "nothing of the previous source is shown")
+            assertEquals(0, waiting.referenceCount)
+
+            vm.onScreenStarted()
+            assertTrue(vm.awaitState { it.synthetic && it.phase == ComparePhase.READY }.empty)
+            assertEquals(listOf("historyAccess", "findReferenceNights"), reads)
+
+            // Hidden and shown again without a switch: no new search.
+            vm.onScreenStopped()
+            vm.onScreenStarted()
+            advanceUntilIdle()
+            assertEquals(listOf("historyAccess", "findReferenceNights"), reads)
             clear(vm)
         }
 

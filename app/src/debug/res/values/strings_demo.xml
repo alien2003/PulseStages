@@ -3,6 +3,6 @@
     <!-- Debug builds only: the demo-mode switch in Settings and the banner of the screens it switches (docs/SCREENSHOTS.md). -->
     <string name="demo_settings_title">Debug build</string>
     <string name="demo_mode_title">Demo mode</string>
-    <string name="demo_mode_hint">Synthetic nights instead of real ones in the Nights and Compare tabs. Nothing is read from or written to Health Connect.</string>
-    <string name="demo_banner">Demo mode: synthetic nights. Nothing is read from or written to Health Connect.</string>
+    <string name="demo_mode_hint">The Nights and Compare tabs show synthetic nights and read nothing from Health Connect. Background estimation, Home and Sources keep working with your real data.</string>
+    <string name="demo_banner">Demo mode: synthetic nights. This screen reads nothing from Health Connect and writes nothing to it.</string>
 </resources>

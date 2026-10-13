@@ -23,16 +23,18 @@ of the minified release APK, and `MergedManifestTest` checks that every build ha
 
 - Compare shows 8 synthetic reference nights whose "real" stages are the generator's true hypnograms; Calibrate runs
   core-algo's `PersonalCalibrator` and keeps the personal model **in memory only**.
-- **Nothing is read from or written to Health Connect**, and nothing is stored in the app's database: Delete my session,
-  Recompute and Calibrate only change the in-memory demo data. Home, Settings, Sources and Log keep showing the real
-  state.
+- **These three screens read nothing from Health Connect and write nothing to it**, and store nothing in the app's
+  database: Delete my session, Recompute and Calibrate only change the in-memory demo data.
+- **The rest of the app is not switched.** Background estimation (the hourly and daily runs) and the Home actions
+  (Estimate new, Backfill, Recompute all, Delete my sessions) keep reading Health Connect and writing your real nights
+  to it while demo mode is on; Home, Settings, Sources and Log keep showing the real state.
 
 ## Switching it on and off
 
 In a debug build, open **Settings** and scroll to the **Debug build** card near the end, just above "Versions and
-licences". Turn on **Demo mode** ("Synthetic nights instead of real ones in the Nights and Compare tabs. Nothing is read
-from or written to Health Connect."); turn it off to see the real data again. The app keeps a single launcher icon:
-there is no separate demo entry, and no adb command for it.
+licences". Turn on **Demo mode** ("The Nights and Compare tabs show synthetic nights and read nothing from Health
+Connect. Background estimation, Home and Sources keep working with your real data."); turn it off to see the real data
+again. The app keeps a single launcher icon: there is no separate demo entry, and no adb command for it.
 
 The switch is a per-device debug convenience, not a setting: it is kept in its own private preferences file
 (`pulsestages_demo_mode`), so it survives a restart until it is switched off again, and it is not part of the settings,
