@@ -91,7 +91,9 @@ graphics, light theme with the app's own palette, a 411 × 891 dp phone): the Ni
 show the debug build's demo data (synthetic nights from core-algo's generator, estimated by the real algorithm with
 the bundled model), and Home, Settings and Sources show fixed example states. To render them again after a change:
 `./gradlew :app:testDebugUnitTest --tests '*ScreenshotsTest' -PrecordScreenshots`.
-[docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) explains this and how to take screenshots on a phone.
+[docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) explains this and how to take screenshots on a phone: in a debug build,
+Settings → **Debug build** → **Demo mode** switches these screens to the demo data at once (the app has a single
+launcher icon in every build).
 
 | Home | Nights | Night detail |
 |---|---|---|
@@ -747,7 +749,10 @@ These checks enforce the rule:
   artifacts reach the runtime classpath of `:core-algo`.
 - **`NoAndroidImportsTest`** rejects Android imports in `:core-algo` sources.
 - **`MergedManifestTest`** (`:app`) checks the merged manifests: no `INTERNET`, the declared health permissions, the
-  rationale activity and the Android 14+ alias, and the debug-only demo entry.
+  rationale activity and the Android 14+ alias, and exactly one launcher icon (the main activity) in the debug and
+  the release build.
+- **`ReleaseApkTest`** (`:app`) checks the minified release APK: R8's mapping lists no demo class, and aapt2's dump of
+  the APK shows no demo resource or text. Its inputs make `./gradlew test` build the release APK.
 - **`ResourcesParityTest`** (`:app`) requires every string of every module (`:app`, `:work`, `:data-hc`, all source
   sets) in English and Russian, with the same format placeholders and the plural forms of each language.
 - **`RealAppGraphTest`** (`:app`, Robolectric) starts the production Hilt graph: the startup schedule, WorkManager's

@@ -20,15 +20,18 @@ import io.github.alien2003.pulsestages.data.local.db.PersonalModelKind
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.platform.AppInfoResolver
 import io.github.alien2003.pulsestages.source.ReferenceSource
+import io.github.alien2003.pulsestages.source.ScreenSources
 import io.github.alien2003.pulsestages.ui.common.UiMessage
 import io.github.alien2003.pulsestages.ui.common.UiText
 import io.github.alien2003.pulsestages.ui.common.WorkResultText
 import io.github.alien2003.pulsestages.ui.common.formatDecimal
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Clock
@@ -292,19 +295,26 @@ data class CompareUiState(
  * [CompareRange] (the last [SEARCH_DAYS] days by default; a year or the whole history with READ_HEALTH_DATA_HISTORY),
  * scores our estimator on them (pooled kappa, per-stage accuracy and F1, confusion matrix, per-night kappa) and
  * calibrates or resets the personal model.
+ *
+ * The reference nights come from the current source of [ScreenSources]: when it is replaced (debug builds: demo mode
+ * switched), a running action is cancelled and the tab starts over with the new source.
  */
 @HiltViewModel
 class CompareViewModel
     @Inject
     constructor(
-        private val source: ReferenceSource,
+        sources: ScreenSources,
         private val appInfo: AppInfoResolver,
         private val clock: Clock,
         private val logger: AppLogger,
     ) : ViewModel() {
-        private val mutableState = MutableStateFlow(CompareUiState(synthetic = source.synthetic))
+        private val mutableState = MutableStateFlow(CompareUiState())
+
+        /** The current source of [ScreenSources]; null until it is known. */
+        private var source: ReferenceSource? = null
         private var references: List<ReferenceNight> = emptyList()
         private var loadJob: Job? = null
+        private var actionJob: Job? = null
         private var requestedRange = CompareRange.RECENT
         private val labels = mutableMapOf<String, String?>()
 
@@ -313,16 +323,36 @@ class CompareViewModel
 
         init {
             viewModelScope.launch {
-                source
-                    .activeModel()
-                    .catch { failure -> logger.w(TAG, "cannot read the personal model", throwable = failure) }
-                    .collect { row -> mutableState.update { it.copy(model = row?.let(ModelInfo::of)) } }
+                sources.references.collectLatest { next ->
+                    onSource(next)
+                    coroutineScope {
+                        launch {
+                            next
+                                .activeModel()
+                                .catch { failure -> logger.w(TAG, "cannot read the personal model", throwable = failure) }
+                                .collect { row -> mutableState.update { it.copy(model = row?.let(ModelInfo::of)) } }
+                        }
+                        launch {
+                            next
+                                .personalizationEnabled()
+                                .catch { failure -> logger.w(TAG, "cannot read the settings", throwable = failure) }
+                                .collect { enabled -> mutableState.update { it.copy(personalizationEnabled = enabled) } }
+                        }
+                    }
+                }
             }
-            viewModelScope.launch {
-                source
-                    .personalizationEnabled()
-                    .catch { failure -> logger.w(TAG, "cannot read the settings", throwable = failure) }
-                    .collect { enabled -> mutableState.update { it.copy(personalizationEnabled = enabled) } }
+        }
+
+        /** [next] is the source now: the tab starts over with it (queued messages and the chosen range are kept). */
+        private fun onSource(next: ReferenceSource) {
+            val replaced = source != null
+            source = next
+            if (replaced) {
+                actionJob?.cancel()
+                references = emptyList()
+                mutableState.update { CompareUiState(range = it.range, synthetic = next.synthetic, messages = it.messages) }
+            } else {
+                mutableState.update { it.copy(synthetic = next.synthetic) }
             }
             refresh()
         }
@@ -337,6 +367,7 @@ class CompareViewModel
 
         /** Searches Health Connect again and scores the reference nights. */
         fun refresh() {
+            val source = source ?: return
             loadJob?.cancel()
             loadJob =
                 viewModelScope.launch {
@@ -361,7 +392,7 @@ class CompareViewModel
                                     nights = emptyList(),
                                 )
                             }
-                            if (search.nights.isNotEmpty()) score()
+                            if (search.nights.isNotEmpty()) score(source)
                         }
 
                         else -> {
@@ -374,14 +405,16 @@ class CompareViewModel
 
         /** "Calibrate": fits a personal model on the reference nights and shows kappa before / after. */
         fun calibrate() {
-            if (!mutableState.value.canCalibrate) return
+            val source = source
+            if (source == null || !mutableState.value.canCalibrate) return
             val nights = references
             mutableState.update { it.copy(busy = CompareBusy.CALIBRATING) }
-            viewModelScope.launch {
-                val outcome = source.calibrate(nights)
-                mutableState.update { it.copy(busy = null, messages = it.messages + UiMessage(calibrationText(outcome))) }
-                if (outcome is CalibrationOutcome.Calibrated) rescore()
-            }
+            actionJob =
+                viewModelScope.launch {
+                    val outcome = source.calibrate(nights)
+                    mutableState.update { it.copy(busy = null, messages = it.messages + UiMessage(calibrationText(outcome))) }
+                    if (outcome is CalibrationOutcome.Calibrated) rescore(source)
+                }
         }
 
         /** Opens the "Reset to global model" confirmation. */
@@ -396,12 +429,14 @@ class CompareViewModel
 
         /** Confirmed: deactivates the personal model. */
         fun confirmReset() {
+            val source = source ?: return
             mutableState.update { it.copy(confirmReset = false, busy = CompareBusy.RESETTING) }
-            viewModelScope.launch {
-                source.resetToGlobal()
-                mutableState.update { it.copy(busy = null, messages = it.messages + UiMessage(UiText.of(R.string.compare_reset_done))) }
-                rescore()
-            }
+            actionJob =
+                viewModelScope.launch {
+                    source.resetToGlobal()
+                    mutableState.update { it.copy(busy = null, messages = it.messages + UiMessage(UiText.of(R.string.compare_reset_done))) }
+                    rescore(source)
+                }
         }
 
         /** Removes a shown Snackbar message. */
@@ -409,14 +444,14 @@ class CompareViewModel
             mutableState.update { state -> state.copy(messages = state.messages.filterNot { it.id == id }) }
         }
 
-        private suspend fun rescore() {
+        private suspend fun rescore(source: ReferenceSource) {
             if (references.isEmpty()) return
             mutableState.update { it.copy(busy = CompareBusy.RESCORING) }
-            score()
+            score(source)
             mutableState.update { it.copy(busy = null) }
         }
 
-        private suspend fun score() {
+        private suspend fun score(source: ReferenceSource) {
             val report = source.compare(references)
             resolveLabels(report.nights.map { it.night.session.packageName }.distinct())
             mutableState.update {

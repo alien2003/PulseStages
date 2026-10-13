@@ -67,6 +67,7 @@ import io.github.alien2003.pulsestages.source.LedgerNightsSource
 import io.github.alien2003.pulsestages.source.LedgerStaleNightsSource
 import io.github.alien2003.pulsestages.source.NightsSource
 import io.github.alien2003.pulsestages.source.ReferenceSource
+import io.github.alien2003.pulsestages.source.ScreenSources
 import io.github.alien2003.pulsestages.source.StaleNightsSource
 import io.github.alien2003.pulsestages.ui.home.HomeViewModel
 import io.github.alien2003.pulsestages.ui.sources.SourcesViewModel
@@ -160,9 +161,7 @@ class EndToEndWiringTest {
 
     @Inject lateinit var logger: AppLogger
 
-    @Inject lateinit var nightsSource: NightsSource
-
-    @Inject lateinit var referenceSource: ReferenceSource
+    @Inject lateinit var screenSources: ScreenSources
 
     @Inject lateinit var staleSource: StaleNightsSource
 
@@ -185,6 +184,8 @@ class EndToEndWiringTest {
     lateinit var context: Context
 
     private lateinit var workManager: WorkManager
+    private lateinit var nightsSource: NightsSource
+    private lateinit var referenceSource: ReferenceSource
     private lateinit var home: HomeViewModel
     private lateinit var sources: SourcesViewModel
     private val now = System.currentTimeMillis()
@@ -205,6 +206,9 @@ class EndToEndWiringTest {
         WorkManagerTestInitHelper.initializeTestWorkManager(context, config)
         workManager = WorkManager.getInstance(context)
         home = HomeViewModel(homeStatus, scheduler, eraser, appInfo, logger, SavedStateHandle())
+        // The screens' sources as the ViewModels get them (demo mode, debug builds only, is off).
+        nightsSource = runBlocking { screenSources.nights.first() }
+        referenceSource = runBlocking { screenSources.references.first() }
     }
 
     @After

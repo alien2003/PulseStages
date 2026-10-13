@@ -10,12 +10,16 @@ import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.db.NightSummary
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.source.NightsSource
+import io.github.alien2003.pulsestages.source.ScreenSources
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -79,26 +83,35 @@ sealed interface NightsUiState {
  * Observes the nights for the Nights list, with the stale marker judged against the current settings, and keeps the
  * selected night (in the [SavedStateHandle], so it survives rotation, folding and process death).
  *
+ * The nights come from the current source of [ScreenSources]: when it is replaced (debug builds: demo mode switched),
+ * the list shows the loading state until the new source's nights are read (when the tab only resumes with the same
+ * data, it keeps showing its nights meanwhile). A selected night that the new list does not have is not shown: a wide
+ * window then shows the newest night, and switching back selects it again.
+ *
  * The selection follows the window size: in a wide window the selected night is shown in the right pane; when the
  * window becomes compact while it is shown there, it is opened as its own destination ([takeNightToOpen]); when the
  * detail destination becomes wide, it returns to the list with that night selected ([onDetailWidened]).
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class NightsViewModel
     @Inject
     constructor(
-        source: NightsSource,
+        sources: ScreenSources,
         logger: AppLogger,
         private val savedState: SavedStateHandle,
     ) : ViewModel() {
+        /** `synthetic` of the list shown last, or null before one was shown. */
+        private var shownSynthetic: Boolean? = null
+
         /** The current UI state. */
         val state: StateFlow<NightsUiState> =
-            combine(source.nights(), staleReference(source, logger)) { nights, hash ->
-                NightsUiState.Loaded(NightListItem.of(nights, hash), source.synthetic) as NightsUiState
-            }.catch { failure ->
-                logger.e(TAG, "cannot read the nights", throwable = failure)
-                emit(NightsUiState.Error)
-            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), NightsUiState.Loading)
+            sources.nights
+                .flatMapLatest { source ->
+                    val replaced = shownSynthetic.let { it != null && it != source.synthetic }
+                    nightsState(source, logger, loadingFirst = replaced)
+                }.onEach { state -> if (state is NightsUiState.Loaded) shownSynthetic = state.synthetic }
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), NightsUiState.Loading)
 
         /** The night the user selected last, or null (a wide window then shows the newest night). */
         val selectedId: StateFlow<String?> = savedState.getStateFlow(KEY_SELECTED, null)
@@ -131,11 +144,32 @@ class NightsViewModel
         }
 
         private companion object {
-            const val TAG = "NightsViewModel"
             const val KEY_SELECTED = "nights.selected"
             const val KEY_OPEN_WHEN_COMPACT = "nights.open_when_compact"
         }
     }
+
+/**
+ * The list of [source], an error when its nights cannot be read; [loadingFirst]: the loading state until they are
+ * (the source replaced the one of the list shown).
+ */
+private fun nightsState(
+    source: NightsSource,
+    logger: AppLogger,
+    loadingFirst: Boolean,
+): Flow<NightsUiState> {
+    val loaded =
+        combine(source.nights(), staleReference(source, logger)) { nights, hash ->
+            NightsUiState.Loaded(NightListItem.of(nights, hash), source.synthetic) as NightsUiState
+        }
+    return (if (loadingFirst) loaded.onStart { emit(NightsUiState.Loading) } else loaded)
+        .catch { failure ->
+            logger.e(NIGHTS_TAG, "cannot read the nights", throwable = failure)
+            emit(NightsUiState.Error)
+        }
+}
+
+private const val NIGHTS_TAG = "NightsViewModel"
 
 /**
  * The current params hash for the stale markers: null until it is known; a failure only loses the markers (logged),

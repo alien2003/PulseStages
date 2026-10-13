@@ -34,6 +34,7 @@ import io.github.alien2003.pulsestages.demo.DemoReferenceSource
 import io.github.alien2003.pulsestages.testutil.FakeAppInfoResolver
 import io.github.alien2003.pulsestages.testutil.FakeDocumentStore
 import io.github.alien2003.pulsestages.testutil.FakeStaleNightsSource
+import io.github.alien2003.pulsestages.testutil.TestScreenSources
 import io.github.alien2003.pulsestages.ui.TopLevelDestination
 import io.github.alien2003.pulsestages.ui.about.AboutViewModel
 import io.github.alien2003.pulsestages.ui.compare.ComparePhase
@@ -140,8 +141,8 @@ class ScreenshotsTest {
     @Test
     fun nights() {
         val source = demoNights()
-        val viewModel = NightsViewModel(source, logger, SavedStateHandle())
-        val detail = NightDetailViewModel(source, FakeDocumentStore(), logger, SavedStateHandle())
+        val viewModel = NightsViewModel(TestScreenSources(source), logger, SavedStateHandle())
+        val detail = NightDetailViewModel(TestScreenSources(source), FakeDocumentStore(), logger, SavedStateHandle())
         capture("nights", TopLevelDestination.NIGHTS, ready = {
             (viewModel.state.value as? NightsUiState.Loaded)?.nights?.isNotEmpty() ==
                 true
@@ -152,7 +153,7 @@ class ScreenshotsTest {
 
     @Test
     fun nightDetail() {
-        val viewModel = NightDetailViewModel(demoNights(), FakeDocumentStore(), logger, SavedStateHandle())
+        val viewModel = NightDetailViewModel(TestScreenSources(demoNights()), FakeDocumentStore(), logger, SavedStateHandle())
         var selected = false
         capture(
             "night-detail",
@@ -175,7 +176,7 @@ class ScreenshotsTest {
     @Test
     fun compare() {
         val source = DemoReferenceSource(settings, models, Dispatchers.Default, clock)
-        val viewModel = CompareViewModel(source, appInfo, clock, logger)
+        val viewModel = CompareViewModel(TestScreenSources(references = source), appInfo, clock, logger)
         capture("compare", TopLevelDestination.COMPARE, ready = {
             viewModel.state.value.let {
                 it.phase == ComparePhase.READY &&
@@ -191,7 +192,8 @@ class ScreenshotsTest {
         val viewModel = SettingsViewModel(settings, FakeDocumentStore(), logger, FakeStaleNightsSource(settings))
         val about = AboutViewModel({ "1.0.0" }, models, logger)
         capture("settings", TopLevelDestination.SETTINGS, ready = { !viewModel.state.value.loading }) {
-            SettingsRoute(onOpenSources = {}, onOpenLog = {}, viewModel = viewModel, aboutViewModel = about)
+            // The debug build's demo-mode card is far below the visible part: the screenshot shows what every build shows.
+            SettingsRoute(onOpenSources = {}, onOpenLog = {}, viewModel = viewModel, aboutViewModel = about, debugTools = null)
         }
     }
 

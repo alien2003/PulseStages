@@ -157,13 +157,28 @@ class MergedManifestTest {
     }
 
     @Test
-    fun `the demo-mode entry exists in debug builds only`() {
-        val activities =
-            mergedManifests.mapValues { (_, file) ->
-                parse(file).elements("activity").map { qualified(it.androidAttr("name")) }
-            }
-        assertTrue(DEMO_ACTIVITY in activities.getValue("debug"), "debug lacks $DEMO_ACTIVITY")
-        assertFalse(DEMO_ACTIVITY in activities.getValue("release"), "release must not contain $DEMO_ACTIVITY")
+    fun `every build type has exactly one launcher icon, the main activity`() {
+        assertTrue(mergedManifests.keys.containsAll(REQUIRED_VARIANTS), "expected $REQUIRED_VARIANTS, got ${mergedManifests.keys}")
+        forEachManifest { variant, manifest ->
+            val launchers =
+                (manifest.elements("activity") + manifest.elements("activity-alias"))
+                    .filter { it.isLauncherEntry() }
+                    .map { qualified(it.androidAttr("name")) }
+            assertEquals(listOf(MAIN_ACTIVITY), launchers, "$variant launcher entries")
+        }
+    }
+
+    @Test
+    fun `no build type declares a demo component (demo mode is a switch inside the debug app)`() {
+        forEachManifest { variant, manifest ->
+            val components =
+                COMPONENT_TAGS
+                    .flatMap { manifest.elements(it) }
+                    .map { qualified(it.androidAttr("name")) }
+            assertTrue(MAIN_ACTIVITY in components, "$variant: $components")
+            val demo = components.filter { it.startsWith("$APPLICATION_ID.demo.") || it.substringAfterLast('.').startsWith("Demo") }
+            assertEquals(emptyList<String>(), demo, "$variant declares demo components")
+        }
     }
 
     private fun forEachManifest(check: (String, Document) -> Unit) {
@@ -196,6 +211,13 @@ class MergedManifestTest {
     private fun Element.intentCategories(): Set<String> =
         children("intent-filter").flatMap { filter -> filter.children("category").map { it.androidAttr("name") } }.toSet()
 
+    /** A home-screen icon: one intent filter with both ACTION_MAIN and CATEGORY_LAUNCHER. */
+    private fun Element.isLauncherEntry(): Boolean =
+        children("intent-filter").any { filter ->
+            ACTION_MAIN in filter.children("action").map { it.androidAttr("name") } &&
+                CATEGORY_LAUNCHER in filter.children("category").map { it.androidAttr("name") }
+        }
+
     private fun Document.requestedPermissions(): Set<String> =
         (elements("uses-permission") + elements("uses-permission-sdk-23"))
             .map { it.androidAttr("name") }
@@ -217,7 +239,8 @@ class MergedManifestTest {
         const val QUERY_ALL_PACKAGES = "android.permission.QUERY_ALL_PACKAGES"
         const val MAIN_ACTIVITY = "$APPLICATION_ID.MainActivity"
         const val RATIONALE_ACTIVITY = "$APPLICATION_ID.PermissionsRationaleActivity"
-        const val DEMO_ACTIVITY = "$APPLICATION_ID.demo.DemoActivity"
+        const val ACTION_MAIN = "android.intent.action.MAIN"
+        const val CATEGORY_LAUNCHER = "android.intent.category.LAUNCHER"
         const val SHOW_RATIONALE = "androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE"
         const val VIEW_PERMISSION_USAGE = "android.intent.action.VIEW_PERMISSION_USAGE"
         const val HEALTH_PERMISSIONS_CATEGORY = "android.intent.category.HEALTH_PERMISSIONS"
@@ -226,5 +249,6 @@ class MergedManifestTest {
         const val FILE_PROVIDER = "androidx.core.content.FileProvider"
         const val FILE_PROVIDER_PATHS = "android.support.FILE_PROVIDER_PATHS"
         val REQUIRED_VARIANTS = setOf("debug", "release")
+        val COMPONENT_TAGS = listOf("activity", "activity-alias", "service", "receiver", "provider")
     }
 }

@@ -105,13 +105,17 @@ data class SettingsActions(
     val onMessageAction: (Long) -> Unit = {},
 )
 
-/** Settings tab: every setting, grouped, plus export / import / reset and the links to Sources and Log. */
+/**
+ * Settings tab: every setting, grouped, plus export / import / reset and the links to Sources and Log. Debug builds
+ * add their own card ([debugTools], by default [debugSettingsCard]: the demo-mode switch); release builds have none.
+ */
 @Composable
 fun SettingsRoute(
     onOpenSources: () -> Unit,
     onOpenLog: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
     aboutViewModel: AboutViewModel = hiltViewModel(),
+    debugTools: (@Composable () -> Unit)? = debugSettingsCard,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val about by aboutViewModel.about.collectAsStateWithLifecycle()
@@ -126,6 +130,7 @@ fun SettingsRoute(
     SettingsScreen(
         state = state,
         about = about,
+        debugTools = debugTools,
         actions =
             SettingsActions(
                 onEdit = viewModel::onEdit,
@@ -157,8 +162,8 @@ fun SettingsRoute(
 }
 
 /**
- * Stateless Settings screen: one column on compact windows, two columns on wide ones; versions and licences ([about])
- * at the end.
+ * Stateless Settings screen: one column on compact windows, two columns on wide ones; the tools of debug builds
+ * ([debugTools], none in release builds) and versions and licences ([about]) at the end.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -167,6 +172,7 @@ fun SettingsScreen(
     actions: SettingsActions,
     modifier: Modifier = Modifier,
     about: AboutInfo? = null,
+    debugTools: (@Composable () -> Unit)? = null,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     MessageSnackbarEffect(state.messages, snackbarHostState, actions.onMessageShown, actions.onMessageAction)
@@ -178,7 +184,7 @@ fun SettingsScreen(
         if (state.loading) {
             LoadingState(Modifier.padding(innerPadding).fillMaxSize())
         } else {
-            SettingsGrid(state, actions, about, Modifier.padding(innerPadding))
+            SettingsGrid(state, actions, about, debugTools, Modifier.padding(innerPadding))
         }
     }
     if (state.confirmReset) ResetDialog(actions)
@@ -190,6 +196,7 @@ private fun SettingsGrid(
     state: SettingsUiState,
     actions: SettingsActions,
     about: AboutInfo?,
+    debugTools: (@Composable () -> Unit)?,
     modifier: Modifier,
 ) {
     val spacing = MaterialTheme.spacing
@@ -215,6 +222,11 @@ private fun SettingsGrid(
                 state = state,
                 actions = actions,
             )
+        }
+        if (debugTools != null) {
+            item(key = "debug-tools", span = StaggeredGridItemSpan.FullLine) {
+                debugTools()
+            }
         }
         if (about != null) {
             item(key = "about", span = StaggeredGridItemSpan.FullLine) {

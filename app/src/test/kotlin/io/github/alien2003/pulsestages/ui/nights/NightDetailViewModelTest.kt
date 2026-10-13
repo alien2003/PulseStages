@@ -21,6 +21,7 @@ import io.github.alien2003.pulsestages.source.NightsSource
 import io.github.alien2003.pulsestages.testutil.FakeDocumentStore
 import io.github.alien2003.pulsestages.testutil.FakeWorkScheduler
 import io.github.alien2003.pulsestages.testutil.MainDispatcherExtension
+import io.github.alien2003.pulsestages.testutil.TestScreenSources
 import io.github.alien2003.pulsestages.testutil.clear
 import io.github.alien2003.pulsestages.testutil.harnessTest
 import io.github.alien2003.pulsestages.ui.common.JobPhase
@@ -30,7 +31,9 @@ import io.github.alien2003.pulsestages.work.run.RunReport
 import io.github.alien2003.pulsestages.work.run.RunSummary
 import io.github.alien2003.pulsestages.work.schedule.JobState
 import io.github.alien2003.pulsestages.work.schedule.WorkStatus
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -61,7 +64,7 @@ class NightDetailViewModelTest {
         h: PipelineHarness,
         clientRecordId: String,
         savedState: SavedStateHandle = SavedStateHandle(),
-    ) = NightDetailViewModel(source(h), documents, h.logger, savedState).apply {
+    ) = NightDetailViewModel(TestScreenSources(source(h)), documents, h.logger, savedState).apply {
         show(clientRecordId)
         onPaneStarted()
     }
@@ -260,7 +263,7 @@ class NightDetailViewModelTest {
             clear(before)
 
             // The process died while the picker was open: a new ViewModel with the saved state gets the result first.
-            val restored = NightDetailViewModel(source(h), documents, h.logger, savedState)
+            val restored = NightDetailViewModel(TestScreenSources(source(h)), documents, h.logger, savedState)
             restored.onExportDestination("content://documents/night.csv")
             val state = restored.awaitState { !it.exporting && it.messages.isNotEmpty() }
 
@@ -272,7 +275,7 @@ class NightDetailViewModelTest {
     @Test
     fun `a picked document is never dropped silently`() =
         harnessTest(main, dir) { h ->
-            val vm = NightDetailViewModel(source(h), documents, h.logger, SavedStateHandle())
+            val vm = NightDetailViewModel(TestScreenSources(source(h)), documents, h.logger, SavedStateHandle())
 
             vm.onExportDestination("content://documents/night.csv")
             val state = vm.awaitState { !it.exporting && it.messages.isNotEmpty() }
@@ -323,7 +326,7 @@ class NightDetailViewModelTest {
                         return h.inspector.inspect(clientRecordId)
                     }
                 }
-            val vm = NightDetailViewModel(counting, documents, h.logger, SavedStateHandle())
+            val vm = NightDetailViewModel(TestScreenSources(counting), documents, h.logger, SavedStateHandle())
             vm.show(night.clientRecordId)
             vm.onPaneStarted()
             vm.awaitReady()
@@ -337,6 +340,74 @@ class NightDetailViewModelTest {
             vm.onPaneStarted()
             vm.awaitReady()
             assertEquals(2, inspections, "re-estimated when the pane is visible again")
+            clear(vm)
+        }
+
+    @Test
+    fun `replaced data read the night again, and a night they do not have sends the detail back to the list`() =
+        harnessTest(main, dir) { h ->
+            val night = writtenNight(h)
+            val real = source(h)
+            var inspections = 0
+            val counting =
+                object : NightsSource by real {
+                    override suspend fun inspect(clientRecordId: String): UseCaseResult<NightInspection> {
+                        inspections++
+                        return h.inspector.inspect(clientRecordId)
+                    }
+                }
+            val synthetic =
+                object : NightsSource by real {
+                    override val synthetic: Boolean = true
+
+                    override fun night(clientRecordId: String): Flow<EstimatedNightEntity?> = flowOf(null)
+                }
+            val sources = TestScreenSources(counting)
+            val vm = NightDetailViewModel(sources, documents, h.logger, SavedStateHandle())
+            vm.show(night.clientRecordId)
+            vm.onPaneStarted()
+            vm.awaitReady()
+            assertFalse(vm.state.value.synthetic)
+            assertFalse(vm.state.value.goneWithReplacedData)
+            // The switch is in the Settings tab: the detail is hidden meanwhile.
+            vm.onPaneStopped()
+
+            sources.replace(synthetic)
+            val gone = vm.awaitState { it.load == DetailLoad.NOT_FOUND }
+            assertEquals(night.clientRecordId, gone.clientRecordId)
+            assertTrue(gone.synthetic)
+            assertTrue(gone.sourceReplaced)
+            assertTrue(gone.goneWithReplacedData, "the detail destination returns to the list")
+            assertNull(gone.night)
+
+            sources.replace(counting)
+            val back = vm.awaitState { it.load == DetailLoad.LOADED }
+            assertFalse(back.synthetic)
+            assertFalse(back.goneWithReplacedData)
+            assertEquals(InspectionState.Loading, back.inspection)
+            assertEquals(1, inspections, "the hidden pane does not read Health Connect")
+
+            vm.onPaneStarted()
+            vm.awaitReady()
+            assertEquals(2, inspections, "re-estimated from the new source when the pane is visible")
+            clear(vm)
+        }
+
+    @Test
+    fun `a night shown before its source is known is read once the source is there`() =
+        harnessTest(main, dir) { h ->
+            val night = writtenNight(h)
+            val sources = TestScreenSources()
+            val vm = NightDetailViewModel(sources, documents, h.logger, SavedStateHandle())
+            vm.show(night.clientRecordId)
+            vm.onPaneStarted()
+            assertEquals(DetailLoad.LOADING, vm.state.value.load)
+
+            sources.replace(source(h))
+            vm.awaitReady()
+            val shown = checkNotNull(vm.state.value.night)
+            assertEquals(night.clientRecordId, shown.clientRecordId)
+            assertFalse(vm.state.value.sourceReplaced, "the first source replaces nothing")
             clear(vm)
         }
 

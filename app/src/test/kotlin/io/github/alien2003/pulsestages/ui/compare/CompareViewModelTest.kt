@@ -16,10 +16,14 @@ import io.github.alien2003.pulsestages.data.hc.testutil.OTHER_APP
 import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import io.github.alien2003.pulsestages.data.hc.usecase.CalibrationOutcome
+import io.github.alien2003.pulsestages.data.hc.usecase.ReferenceSearch
+import io.github.alien2003.pulsestages.data.hc.usecase.UseCaseResult
 import io.github.alien2003.pulsestages.data.local.db.PersonalModelKind
 import io.github.alien2003.pulsestages.source.HealthConnectReferenceSource
+import io.github.alien2003.pulsestages.source.ReferenceSource
 import io.github.alien2003.pulsestages.testutil.FakeAppInfoResolver
 import io.github.alien2003.pulsestages.testutil.MainDispatcherExtension
+import io.github.alien2003.pulsestages.testutil.TestScreenSources
 import io.github.alien2003.pulsestages.testutil.clear
 import io.github.alien2003.pulsestages.testutil.harnessTest
 import io.github.alien2003.pulsestages.ui.common.UiText
@@ -52,7 +56,9 @@ class CompareViewModelTest {
 
     private fun viewModel(h: PipelineHarness) =
         CompareViewModel(
-            HealthConnectReferenceSource(h.referenceComparison, h.personalization, h.homeStatus, h.settings),
+            TestScreenSources(
+                references = HealthConnectReferenceSource(h.referenceComparison, h.personalization, h.homeStatus, h.settings),
+            ),
             FakeAppInfoResolver(mapOf(OTHER_APP to "Other tracker")),
             h.clock,
             h.logger,
@@ -110,6 +116,40 @@ class CompareViewModelTest {
             }
             assertTrue(state.canCalibrate)
             assertNull(state.model)
+            clear(vm)
+        }
+
+    @Test
+    fun `replaced data start the tab over with the new source`() =
+        harnessTest(main, dir) { h ->
+            h.addReferenceNights(3)
+            val real = HealthConnectReferenceSource(h.referenceComparison, h.personalization, h.homeStatus, h.settings)
+            val synthetic =
+                object : ReferenceSource by real {
+                    override val synthetic: Boolean = true
+
+                    override suspend fun findReferenceNights(
+                        fromMs: Long,
+                        toMs: Long,
+                    ): UseCaseResult<ReferenceSearch> =
+                        UseCaseResult.Success(ReferenceSearch(emptyList(), emptyList(), emptyList(), fromMs, toMs))
+                }
+            val sources = TestScreenSources(references = real)
+            val vm = CompareViewModel(sources, FakeAppInfoResolver(), h.clock, h.logger)
+            val first = vm.awaitState { it.phase == ComparePhase.READY && it.metrics != null }
+            assertEquals(3, first.referenceCount)
+            assertFalse(first.synthetic)
+
+            sources.replace(synthetic)
+            val demo = vm.awaitState { it.synthetic && it.phase == ComparePhase.READY }
+            assertTrue(demo.empty, "the reference nights of the new source")
+            assertNull(demo.metrics)
+            assertTrue(demo.nights.isEmpty())
+
+            sources.replace(real)
+            val back = vm.awaitState { !it.synthetic && it.metrics != null }
+            assertEquals(3, back.referenceCount)
+            assertEquals(3, back.nights.size)
             clear(vm)
         }
 

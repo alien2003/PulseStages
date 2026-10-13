@@ -20,6 +20,7 @@ import io.github.alien2003.pulsestages.data.hc.usecase.HybridModelProvider
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.demo.DemoNightsSource
 import io.github.alien2003.pulsestages.testutil.FakeDocumentStore
+import io.github.alien2003.pulsestages.testutil.TestScreenSources
 import io.github.alien2003.pulsestages.ui.TopLevelDestination
 import io.github.alien2003.pulsestages.ui.common.JobPhase
 import io.github.alien2003.pulsestages.ui.common.JobUi
@@ -88,8 +89,8 @@ class NightsRenderTest(
 
     @Test
     fun nightsListLoadingErrorEmptyDemoAndEveryStatus() {
-        val viewModel = NightsViewModel(source, logger, SavedStateHandle())
-        val detail = NightDetailViewModel(source, FakeDocumentStore(), logger, SavedStateHandle())
+        val viewModel = NightsViewModel(TestScreenSources(source), logger, SavedStateHandle())
+        val detail = NightDetailViewModel(TestScreenSources(source), FakeDocumentStore(), logger, SavedStateHandle())
         host.show(TopLevelDestination.NIGHTS) { NightsRoute(onOpenNight = {}, viewModel = viewModel, detailViewModel = detail) }
         host.waitUntil {
             val loaded = (viewModel.state.value as? NightsUiState.Loaded)?.nights?.isNotEmpty() == true
@@ -153,7 +154,7 @@ class NightsRenderTest(
 
     @Test
     fun nightDetailWithEpochDetailsRulesComparisonAndWarnings() {
-        val viewModel = NightDetailViewModel(source, FakeDocumentStore(), logger, SavedStateHandle())
+        val viewModel = NightDetailViewModel(TestScreenSources(source), FakeDocumentStore(), logger, SavedStateHandle())
         host.show(TopLevelDestination.NIGHTS) {
             NightDetailRoute(clientRecordId = DETAIL_NIGHT, viewModel = viewModel, onBack = {}, onWideLayout = {})
         }
@@ -185,7 +186,7 @@ class NightsRenderTest(
             NightDetailContent(state = state, actions = NightDetailActions())
         }
 
-        val missing = NightDetailViewModel(source, FakeDocumentStore(), logger, SavedStateHandle())
+        val missing = NightDetailViewModel(TestScreenSources(source), FakeDocumentStore(), logger, SavedStateHandle())
         host.show(
             TopLevelDestination.NIGHTS,
         ) { NightDetailRoute(clientRecordId = "ps:none", viewModel = missing, onBack = {}, onWideLayout = {}) }

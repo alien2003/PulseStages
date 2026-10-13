@@ -71,8 +71,9 @@ private const val CSV_MIME_TYPE = "text/csv"
 /**
  * Night detail as its own destination (compact windows): top app bar with a back button and the detail pane. When
  * the window becomes wide (unfolded, rotated), it hands the night to the list ([onWideLayout]), which shows it in its
- * right pane. [viewModel] is the Nights tab's shared detail ViewModel; the CSV file picker is registered here, outside
- * the pane.
+ * right pane. When the data were replaced and the new data do not have the night (debug builds: demo mode was
+ * switched), it returns to the list ([onBack]). [viewModel] is the Nights tab's shared detail ViewModel; the CSV file
+ * picker is registered here, outside the pane.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +89,12 @@ fun NightDetailRoute(
     val currentOnWideLayout by rememberUpdatedState(onWideLayout)
     LaunchedEffect(wide) {
         if (wide) currentOnWideLayout()
+    }
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val gone = state.clientRecordId == clientRecordId && state.goneWithReplacedData
+    val currentOnBack by rememberUpdatedState(onBack)
+    LaunchedEffect(gone) {
+        if (gone) currentOnBack()
     }
     Scaffold(
         modifier = modifier.fillMaxSize(),

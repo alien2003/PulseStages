@@ -24,8 +24,8 @@ import javax.inject.Inject
 
 /**
  * What the Nights tab and the night detail read and do. The production implementation is [LedgerNightsSource] (the
- * Room ledger, Health Connect through the data-hc use cases, WorkManager); debug builds can swap in synthetic demo
- * nights for screenshots (see docs/SCREENSHOTS.md). The ViewModels only talk to this interface.
+ * Room ledger, Health Connect through the data-hc use cases, WorkManager); debug builds can switch to synthetic demo
+ * nights at runtime (see [ScreenSources] and docs/SCREENSHOTS.md). The ViewModels only talk to this interface.
  */
 interface NightsSource {
     /** True when the nights are synthetic demo data (debug builds only); the screens say so. */

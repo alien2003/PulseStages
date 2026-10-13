@@ -29,6 +29,7 @@ import io.github.alien2003.pulsestages.data.local.settings.OverwritePolicy
 import io.github.alien2003.pulsestages.platform.DocumentAccessException
 import io.github.alien2003.pulsestages.platform.DocumentStore
 import io.github.alien2003.pulsestages.source.NightsSource
+import io.github.alien2003.pulsestages.source.ScreenSources
 import io.github.alien2003.pulsestages.ui.common.JobUi
 import io.github.alien2003.pulsestages.ui.common.JobWatch
 import io.github.alien2003.pulsestages.ui.common.RunSubject
@@ -42,7 +43,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -227,6 +230,9 @@ sealed interface ComparisonState {
  * @property night the ledger row (stages exactly as written), when loaded.
  * @property stale the night was written with other settings or another algorithm version.
  * @property synthetic the night is synthetic demo data (debug builds).
+ * @property sourceReplaced the data were replaced while this night was shown (debug builds: demo mode was switched),
+ *   and the night was read again from the new data; when they do not have it, the detail destination returns to the
+ *   list.
  * @property overwriteNever the overwrite policy is NEVER: a recompute does not rewrite a night that has a session.
  * @property inspection the re-estimate for the charts and the epoch details.
  * @property selection the selected epoch, or null.
@@ -246,6 +252,7 @@ data class NightDetailUiState(
     val night: EstimatedNightEntity? = null,
     val stale: Boolean = false,
     val synthetic: Boolean = false,
+    val sourceReplaced: Boolean = false,
     val overwriteNever: Boolean = false,
     val inspection: InspectionState = InspectionState.Loading,
     val selection: EpochSelection? = null,
@@ -263,6 +270,9 @@ data class NightDetailUiState(
 
     /** "Recompute" would rewrite nothing: the night has a session and the overwrite policy is NEVER. */
     val recomputeBlockedByPolicy: Boolean get() = overwriteNever && night?.status == NightStatus.WRITTEN
+
+    /** The night shown is not in the data that replaced the ones it was opened from: back to the list. */
+    val goneWithReplacedData: Boolean get() = sourceReplaced && load == DetailLoad.NOT_FOUND
 }
 
 /**
@@ -277,18 +287,25 @@ data class NightDetailUiState(
  * [onPaneStopped]), so a hidden tab does not read Health Connect. The night of a pending CSV export is kept in the
  * [SavedStateHandle]: when the process died while the file picker was open, the CSV is produced again for the picked
  * document instead of leaving it empty.
+ *
+ * The night comes from the current source of [ScreenSources]: when it is replaced (debug builds: demo mode switched),
+ * the night shown is read again from the new one ([NightDetailUiState.sourceReplaced]), and its re-estimate waits
+ * until a pane shows it.
  */
 @Suppress("TooManyFunctions") // One function per user action of the screen.
 @HiltViewModel
 class NightDetailViewModel
     @Inject
     constructor(
-        private val source: NightsSource,
+        private val sources: ScreenSources,
         private val documents: DocumentStore,
         private val logger: AppLogger,
         private val savedState: SavedStateHandle,
     ) : ViewModel() {
-        private val mutableState = MutableStateFlow(NightDetailUiState(synthetic = source.synthetic))
+        private val mutableState = MutableStateFlow(NightDetailUiState())
+
+        /** The current source of [ScreenSources]; null until it is known (see [currentSource]). */
+        private var source: NightsSource? = null
         private var recomputeWatch = JobWatch()
         private var inspectedVersion: Long? = null
         private var inspectJob: Job? = null
@@ -301,10 +318,13 @@ class NightDetailViewModel
 
         init {
             viewModelScope.launch {
-                source
-                    .overwritePolicy()
-                    .catch { failure -> logger.w(TAG, "cannot read the overwrite policy", throwable = failure) }
-                    .collect { policy -> mutableState.update { it.copy(overwriteNever = policy == OverwritePolicy.NEVER) } }
+                sources.nights.collectLatest { next ->
+                    onSource(next)
+                    next
+                        .overwritePolicy()
+                        .catch { failure -> logger.w(TAG, "cannot read the overwrite policy", throwable = failure) }
+                        .collect { policy -> mutableState.update { it.copy(overwriteNever = policy == OverwritePolicy.NEVER) } }
+                }
             }
         }
 
@@ -315,6 +335,30 @@ class NightDetailViewModel
          */
         fun show(clientRecordId: String) {
             if (mutableState.value.clientRecordId == clientRecordId) return
+            open(clientRecordId, source, replaced = false)
+        }
+
+        /** [next] is the source now: the night shown is read again from it when it replaces another one. */
+        private fun onSource(next: NightsSource) {
+            val replaced = source != null
+            source = next
+            val shown = mutableState.value.clientRecordId
+            if (shown == null) {
+                mutableState.update { it.copy(synthetic = next.synthetic) }
+            } else {
+                open(shown, next, replaced)
+            }
+        }
+
+        /**
+         * Reads the night [clientRecordId] from [source] (null: not known yet, the night is read when it is) with a
+         * fresh state; [replaced]: the source replaced the one the night was shown from.
+         */
+        private fun open(
+            clientRecordId: String,
+            source: NightsSource?,
+            replaced: Boolean,
+        ) {
             nightJob?.cancel()
             inspectJob?.cancel()
             inspectedVersion = null
@@ -323,7 +367,8 @@ class NightDetailViewModel
             mutableState.update { current ->
                 NightDetailUiState(
                     clientRecordId = clientRecordId,
-                    synthetic = source.synthetic,
+                    synthetic = source?.synthetic ?: current.synthetic,
+                    sourceReplaced = replaced,
                     overwriteNever = current.overwriteNever,
                     pendingExport = current.pendingExport,
                     exportPickerOpen = current.exportPickerOpen,
@@ -331,6 +376,7 @@ class NightDetailViewModel
                     messages = current.messages,
                 )
             }
+            if (source == null) return
             nightJob =
                 viewModelScope.launch {
                     launch {
@@ -393,7 +439,7 @@ class NightDetailViewModel
             mutableState.update { it.copy(comparison = ComparisonState.Running) }
             viewModelScope.launch {
                 val comparison =
-                    when (val result = source.compareWithRules(ready.inspection)) {
+                    when (val result = currentSource().compareWithRules(ready.inspection)) {
                         is UseCaseResult.Success -> {
                             val value = result.value
                             ComparisonState.Ready(
@@ -417,8 +463,10 @@ class NightDetailViewModel
         /** "Export CSV": prepares the CSV; the screen then asks the user where to save it. */
         fun exportCsv() {
             val current = mutableState.value
-            val ready = current.ready ?: return
-            val clientRecordId = current.clientRecordId ?: return
+            val ready = current.ready
+            val clientRecordId = current.clientRecordId
+            val source = source
+            if (ready == null || clientRecordId == null || source == null) return
             when (val result = source.exportCsv(ready.inspection)) {
                 is UseCaseResult.Success -> {
                     savedState[KEY_EXPORT_NIGHT] = clientRecordId
@@ -489,7 +537,7 @@ class NightDetailViewModel
             val clientRecordId = mutableState.value.clientRecordId ?: return
             recomputeWatch.request()
             message(UiText.of(R.string.night_recompute_started))
-            viewModelScope.launch { source.recomputeNight(clientRecordId) }
+            viewModelScope.launch { currentSource().recomputeNight(clientRecordId) }
         }
 
         /** Opens the "Delete my session" confirmation. */
@@ -509,7 +557,7 @@ class NightDetailViewModel
             viewModelScope.launch {
                 val text =
                     try {
-                        when (source.deleteNight(clientRecordId)) {
+                        when (currentSource().deleteNight(clientRecordId)) {
                             DeleteNightResult.DELETED -> UiText.of(R.string.night_delete_done)
                             DeleteNightResult.NO_OUTPUT -> UiText.of(R.string.night_delete_no_output)
                             DeleteNightResult.NOT_FOUND -> UiText.of(R.string.night_not_found_title)
@@ -539,9 +587,10 @@ class NightDetailViewModel
                 it.copy(load = DetailLoad.LOADED, night = night, stale = hash != null && night.isStale(ALGO_VERSION, hash))
             }
             // Re-estimate when the night is first shown and whenever its row changed (recomputed, deleted, ...); a
-            // change while no pane shows the night waits until one does.
+            // change while no pane shows the night waits until one does, and so does a night read again from data
+            // that replaced the shown ones.
             if (inspectedVersion != night.updatedAt) {
-                val first = inspectedVersion == null
+                val first = inspectedVersion == null && !mutableState.value.sourceReplaced
                 inspectedVersion = night.updatedAt
                 if (first || visiblePanes > 0) inspect() else inspectionDeferred = true
             }
@@ -562,7 +611,7 @@ class NightDetailViewModel
             mutableState.update { it.copy(inspection = InspectionState.Loading, selection = null, comparison = ComparisonState.None) }
             inspectJob =
                 viewModelScope.launch {
-                    val inspection = inspectionState(source.inspect(clientRecordId))
+                    val inspection = inspectionState(currentSource().inspect(clientRecordId))
                     mutableState.update { it.copy(inspection = inspection) }
                 }
         }
@@ -570,8 +619,12 @@ class NightDetailViewModel
         private suspend fun exportAgain(nightId: String?): UseCaseResult<CsvExport> {
             if (nightId == null) return UseCaseResult.NotFound
             logger.i(TAG, "the prepared CSV is gone (the app was restarted); exporting the night again", nightKey = nightId)
+            val source = currentSource()
             return source.inspect(nightId).andThen { source.exportCsv(it) }
         }
+
+        /** The current source; right after the ViewModel was created (a restored process), the first one is awaited. */
+        private suspend fun currentSource(): NightsSource = source ?: sources.nights.first()
 
         private suspend fun write(
             uri: String,

@@ -19,7 +19,8 @@ import javax.inject.Inject
 /**
  * What the Compare tab reads and does: reference nights (sessions of other apps with real stages), the validation
  * metrics of our estimator on them, and the personal model (calibrate / reset). The production implementation is
- * [HealthConnectReferenceSource]; debug builds can swap in synthetic demo references (see docs/SCREENSHOTS.md).
+ * [HealthConnectReferenceSource]; debug builds can switch to synthetic demo references at runtime (see [ScreenSources]
+ * and docs/SCREENSHOTS.md).
  */
 interface ReferenceSource {
     /** True when the reference nights are synthetic demo data (debug builds only); the screen says so. */

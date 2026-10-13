@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Только в отладочных сборках: значок демо-режима (docs/SCREENSHOTS.md). -->
-    <string name="demo_launcher_label">PulseStages демо</string>
-    <string name="demo_toast_on">Демо-режим включён: синтетические ночи</string>
-    <string name="demo_toast_off">Демо-режим выключен: настоящие данные</string>
+    <!-- Только в отладочных сборках: переключатель демо-режима в настройках и плашка экранов, которые он переключает (docs/SCREENSHOTS.md). -->
+    <string name="demo_settings_title">Отладочная сборка</string>
+    <string name="demo_mode_title">Демо-режим</string>
+    <string name="demo_mode_hint">Синтетические ночи вместо настоящих на вкладках «Ночи» и «Сравнение». Ничего не читается из Health Connect и не записывается туда.</string>
     <string name="demo_banner">Демо-режим: синтетические ночи. Ничего не читается из Health Connect и не записывается туда.</string>
 </resources>

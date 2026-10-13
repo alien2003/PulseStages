@@ -11,11 +11,13 @@ import io.github.alien2003.pulsestages.source.LedgerNightsSource
 import io.github.alien2003.pulsestages.source.NightsSource
 import io.github.alien2003.pulsestages.testutil.FakeWorkScheduler
 import io.github.alien2003.pulsestages.testutil.MainDispatcherExtension
+import io.github.alien2003.pulsestages.testutil.TestScreenSources
 import io.github.alien2003.pulsestages.testutil.clear
 import io.github.alien2003.pulsestages.testutil.harnessTest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -49,7 +51,7 @@ class NightsViewModelTest {
             h.sync.run(inBackground = false)
             val elevated = h.ledger.allNights().first { it.sessionStartMs == nightStart(3) }
             h.ledger.putNight(elevated.copy(elevatedHr = true, lowConfidence = true))
-            val vm = NightsViewModel(source(h), h.logger, SavedStateHandle())
+            val vm = NightsViewModel(TestScreenSources(source(h)), h.logger, SavedStateHandle())
 
             val nights = vm.awaitLoaded { it.nights.size == 3 }.nights
 
@@ -73,7 +75,7 @@ class NightsViewModelTest {
             h.repository.addNight(OHEALTH, nightStart(2), withHeartRate = false)
             h.repository.addNight(OHEALTH, nightStart(1))
             h.sync.run(inBackground = false)
-            val vm = NightsViewModel(source(h), h.logger, SavedStateHandle())
+            val vm = NightsViewModel(TestScreenSources(source(h)), h.logger, SavedStateHandle())
             vm.awaitLoaded { it.nights.size == 2 }
 
             h.settings.set { it.copy(write = it.write.copy(awakeAsLight = true)) }
@@ -91,7 +93,7 @@ class NightsViewModelTest {
             h.sync.run(inBackground = false)
             val replaced = h.ledger.allNights().first { it.sessionStartMs == nightStart(2) }
             h.ledger.putNight(replaced.copy(status = NightStatus.SUPERSEDED))
-            val vm = NightsViewModel(source(h), h.logger, SavedStateHandle())
+            val vm = NightsViewModel(TestScreenSources(source(h)), h.logger, SavedStateHandle())
 
             assertEquals(listOf(nightStart(1)), vm.awaitLoaded().nights.map { it.summary.sessionStartMs })
             clear(vm)
@@ -100,7 +102,7 @@ class NightsViewModelTest {
     @Test
     fun `an empty ledger is an empty list`() =
         harnessTest(main, dir) { h ->
-            val vm = NightsViewModel(source(h), h.logger, SavedStateHandle())
+            val vm = NightsViewModel(TestScreenSources(source(h)), h.logger, SavedStateHandle())
             val loaded = vm.awaitLoaded()
             assertTrue(loaded.nights.isEmpty())
             assertFalse(loaded.synthetic)
@@ -111,7 +113,7 @@ class NightsViewModelTest {
     fun `a night selected in the wide pane is opened as its own destination once the window becomes compact`() =
         harnessTest(main, dir) { h ->
             val savedState = SavedStateHandle()
-            val vm = NightsViewModel(source(h), h.logger, savedState)
+            val vm = NightsViewModel(TestScreenSources(source(h)), h.logger, savedState)
             assertEquals(null, vm.selectedId.value)
             assertEquals(null, vm.takeNightToOpen(), "nothing was selected")
 
@@ -120,7 +122,7 @@ class NightsViewModelTest {
             clear(vm)
 
             // Rotated / folded (the ViewModel may even be recreated from the saved state).
-            val restored = NightsViewModel(source(h), h.logger, savedState)
+            val restored = NightsViewModel(TestScreenSources(source(h)), h.logger, savedState)
             assertEquals("ps:a", restored.selectedId.value)
             assertEquals("ps:a", restored.takeNightToOpen())
             assertEquals(null, restored.takeNightToOpen(), "opened once: back from the detail shows the list")
@@ -136,13 +138,53 @@ class NightsViewModelTest {
         }
 
     @Test
+    fun `replaced data are listed at once, and the list follows every switch`() =
+        harnessTest(main, dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(1))
+            h.sync.run(inBackground = false)
+            val real = source(h)
+            val synthetic =
+                object : NightsSource by real {
+                    override val synthetic: Boolean = true
+
+                    override fun nights(): Flow<List<NightSummary>> = flowOf(emptyList())
+                }
+            val sources = TestScreenSources(real)
+            val vm = NightsViewModel(sources, h.logger, SavedStateHandle())
+            vm.select("ps:selected", inPane = true)
+            assertEquals(1, vm.awaitLoaded { it.nights.isNotEmpty() }.nights.size)
+
+            sources.replace(synthetic)
+            val demo = vm.awaitLoaded { it.synthetic }
+            assertTrue(demo.nights.isEmpty(), "the nights of the new source")
+
+            sources.replace(real)
+            val back = vm.awaitLoaded { !it.synthetic }
+            assertEquals(listOf(nightStart(1)), back.nights.map { it.summary.sessionStartMs })
+            assertEquals("ps:selected", vm.selectedId.value, "the selection is kept for the data it belongs to")
+            clear(vm)
+        }
+
+    @Test
+    fun `the list waits for its source`() =
+        harnessTest(main, dir) { h ->
+            val sources = TestScreenSources()
+            val vm = NightsViewModel(sources, h.logger, SavedStateHandle())
+            assertEquals(NightsUiState.Loading, vm.state.value)
+
+            sources.replace(source(h))
+            assertFalse(vm.awaitLoaded().synthetic)
+            clear(vm)
+        }
+
+    @Test
     fun `an unreadable ledger is an error`() =
         harnessTest(main, dir) { h ->
             val failing =
                 object : NightsSource by source(h) {
                     override fun nights(): Flow<List<NightSummary>> = flow { throw IllegalStateException("database closed") }
                 }
-            val vm = NightsViewModel(failing, h.logger, SavedStateHandle())
+            val vm = NightsViewModel(TestScreenSources(failing), h.logger, SavedStateHandle())
 
             assertEquals(NightsUiState.Error, vm.state.first { it != NightsUiState.Loading })
             clear(vm)
@@ -157,7 +199,7 @@ class NightsViewModelTest {
                 object : NightsSource by source(h) {
                     override fun currentParamsHash(): Flow<String> = flow { throw IllegalStateException("no hash") }
                 }
-            val vm = NightsViewModel(failing, h.logger, SavedStateHandle())
+            val vm = NightsViewModel(TestScreenSources(failing), h.logger, SavedStateHandle())
 
             val nights = vm.awaitLoaded { it.nights.isNotEmpty() }.nights
             assertFalse(nights.single().stale)

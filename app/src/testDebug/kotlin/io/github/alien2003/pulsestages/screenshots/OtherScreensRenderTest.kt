@@ -27,6 +27,7 @@ import io.github.alien2003.pulsestages.data.local.settings.LogLevel
 import io.github.alien2003.pulsestages.data.local.settings.OHEALTH_PACKAGE
 import io.github.alien2003.pulsestages.demo.DemoReferenceSource
 import io.github.alien2003.pulsestages.testutil.FakeAppInfoResolver
+import io.github.alien2003.pulsestages.testutil.TestScreenSources
 import io.github.alien2003.pulsestages.ui.TopLevelDestination
 import io.github.alien2003.pulsestages.ui.common.UiMessage
 import io.github.alien2003.pulsestages.ui.common.UiText
@@ -100,7 +101,13 @@ class OtherScreensRenderTest(
 
     @Test
     fun compareWithDataCalibrationEmptyAndErrors() {
-        val viewModel = CompareViewModel(DemoReferenceSource(settings, models, Dispatchers.Default, clock), appInfo, clock, logger)
+        val viewModel =
+            CompareViewModel(
+                TestScreenSources(references = DemoReferenceSource(settings, models, Dispatchers.Default, clock)),
+                appInfo,
+                clock,
+                logger,
+            )
         host.show(TopLevelDestination.COMPARE) { CompareRoute(viewModel = viewModel) }
         host.waitUntil { viewModel.state.value.let { it.phase == ComparePhase.READY && it.metrics != null } }
         config.assertAppliedTo(host.resources)

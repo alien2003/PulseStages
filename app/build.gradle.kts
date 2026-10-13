@@ -111,6 +111,35 @@ abstract class MergedManifestsArgumentProvider : CommandLineArgumentProvider {
 
 val mergedManifests = objects.newInstance(MergedManifestsArgumentProvider::class.java)
 
+/**
+ * Hands the minified release build to the unit-test JVM (ReleaseApkTest; AGP creates unit tests for the debug build
+ * type only): the APK directory (SingleArtifact.APK), R8's mapping file (SingleArtifact.OBFUSCATION_MAPPING_FILE) and
+ * the SDK's aapt2, as `-Dpulsestages.release.*` properties. As inputs they make the test task build the release APK,
+ * so the test always checks what would ship.
+ */
+abstract class ReleaseArtifactsArgumentProvider : CommandLineArgumentProvider {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val apkDirectory: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val mappingFile: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val aapt2: RegularFileProperty
+
+    override fun asArguments(): Iterable<String> =
+        listOf(
+            "-Dpulsestages.release.apkDir=${apkDirectory.get().asFile.absolutePath}",
+            "-Dpulsestages.release.mapping=${mappingFile.get().asFile.absolutePath}",
+            "-Dpulsestages.release.aapt2=${aapt2.get().asFile.absolutePath}",
+        )
+}
+
+val releaseArtifacts = objects.newInstance(ReleaseArtifactsArgumentProvider::class.java)
+
 // Like :work, :data-local and :data-hc: Robolectric runs offline against the android-all jar resolved by Gradle.
 val robolectricAndroidAll = configurations.dependencyScope("robolectricAndroidAll")
 val robolectricAndroidAllClasspath =
@@ -164,11 +193,17 @@ androidComponents {
         val manifest = variant.artifacts.get(SingleArtifact.MERGED_MANIFEST)
         mergedManifests.manifestFiles.from(manifest)
         mergedManifests.manifestPathsByVariant.put(variant.name, manifest.map { it.asFile.absolutePath })
+        if (variant.buildType == "release") {
+            releaseArtifacts.apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+            releaseArtifacts.mappingFile.set(variant.artifacts.get(SingleArtifact.OBFUSCATION_MAPPING_FILE))
+        }
         variant.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.configureTestTask { testTask ->
             testTask.jvmArgumentProviders.add(mergedManifests)
+            testTask.jvmArgumentProviders.add(releaseArtifacts)
         }
     }
 }
+releaseArtifacts.aapt2.set(androidComponents.sdkComponents.aapt2.flatMap { it.executable })
 
 dependencies {
     implementation(project(":core-algo"))

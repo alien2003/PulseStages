@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Debug builds only: the demo-mode launcher entry (docs/SCREENSHOTS.md). -->
-    <string name="demo_launcher_label">PulseStages demo</string>
-    <string name="demo_toast_on">Demo mode on: synthetic nights</string>
-    <string name="demo_toast_off">Demo mode off: real data</string>
+    <!-- Debug builds only: the demo-mode switch in Settings and the banner of the screens it switches (docs/SCREENSHOTS.md). -->
+    <string name="demo_settings_title">Debug build</string>
+    <string name="demo_mode_title">Demo mode</string>
+    <string name="demo_mode_hint">Synthetic nights instead of real ones in the Nights and Compare tabs. Nothing is read from or written to Health Connect.</string>
     <string name="demo_banner">Demo mode: synthetic nights. Nothing is read from or written to Health Connect.</string>
 </resources>

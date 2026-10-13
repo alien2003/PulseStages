@@ -4,11 +4,14 @@
 package io.github.alien2003.pulsestages.screenshots
 
 import android.app.Application
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -16,6 +19,7 @@ import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isPopup
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
@@ -30,6 +34,7 @@ import io.github.alien2003.pulsestages.data.hc.usecase.HybridModelProvider
 import io.github.alien2003.pulsestages.data.local.settings.SettingsError
 import io.github.alien2003.pulsestages.data.local.settings.SettingsErrorCode
 import io.github.alien2003.pulsestages.data.local.settings.SettingsLimits
+import io.github.alien2003.pulsestages.demo.DemoModeCard
 import io.github.alien2003.pulsestages.testutil.FakeDocumentStore
 import io.github.alien2003.pulsestages.testutil.FakeStaleNightsSource
 import io.github.alien2003.pulsestages.ui.TopLevelDestination
@@ -59,6 +64,7 @@ import io.github.alien2003.pulsestages.ui.settings.TextSpec
 import io.github.alien2003.pulsestages.ui.settings.TimeSpec
 import io.github.alien2003.pulsestages.ui.settings.specs
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -72,9 +78,9 @@ import java.io.File
 /**
  * Renders the Settings screen with every group expanded, in English and Russian, at font scale 1 and 2, in a compact
  * and a wide window: every field (also with a validation problem below it), every option of every choice (the
- * dropdown menus are opened), the time picker, the HMM emission table and transition weights, the About card, the
- * dialogs and the Snackbar. Any exception while the screen is composed, measured or drawn fails the test, and so does
- * a text that still shows a format placeholder.
+ * dropdown menus are opened), the time picker, the HMM emission table and transition weights, the debug build's
+ * demo-mode card (switched on and off), the About card, the dialogs and the Snackbar. Any exception while the screen
+ * is composed, measured or drawn fails the test, and so does a text that still shows a format placeholder.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -90,6 +96,12 @@ class SettingsRenderTest(
     private val settings = FakeSettingsRepository()
     private val models = HybridModelProvider { HybridModel.parse(File(MODEL_FILE).readText()) }
     private val sections: List<SettingsSection> = SettingsCatalog.sections
+    private var demoMode by mutableStateOf(false)
+
+    /** The debug build's card, without its Hilt ViewModel. */
+    private val demoCard: @Composable () -> Unit = {
+        DemoModeCard(enabled = demoMode, onEnabledChange = { demoMode = it })
+    }
 
     @Before
     fun configure() {
@@ -107,7 +119,7 @@ class SettingsRenderTest(
         val viewModel = SettingsViewModel(settings, FakeDocumentStore(), logger, FakeStaleNightsSource(settings))
         val about = AboutViewModel({ "1.0.0" }, models, logger)
         host.show(TopLevelDestination.SETTINGS) {
-            SettingsRoute(onOpenSources = {}, onOpenLog = {}, viewModel = viewModel, aboutViewModel = about)
+            SettingsRoute(onOpenSources = {}, onOpenLog = {}, viewModel = viewModel, aboutViewModel = about, debugTools = demoCard)
         }
         host.waitUntil { !viewModel.state.value.loading && about.about.value.modelChecked }
         config.assertAppliedTo(host.resources)
@@ -118,6 +130,7 @@ class SettingsRenderTest(
             openEveryTimePicker(section)
         }
         scrollThroughEverything("stored settings")
+        switchDemoModeOnAndOff()
         scrollToAbout()
         compose
             .onNode(
@@ -138,6 +151,7 @@ class SettingsRenderTest(
                 onOpenLog = {},
                 viewModel = viewModel,
                 aboutViewModel = AboutViewModel({ "" }, models, logger),
+                debugTools = demoCard,
             )
         }
         host.waitUntil { !viewModel.state.value.loading }
@@ -163,7 +177,9 @@ class SettingsRenderTest(
     fun loadingFailedBusyDialogsAndMessages() {
         var state by mutableStateOf(SettingsUiState())
         val about = AboutInfo(appVersion = "", modelChecked = false)
-        host.show(TopLevelDestination.SETTINGS) { SettingsScreen(state = state, actions = SettingsActions(), about = about) }
+        host.show(TopLevelDestination.SETTINGS) {
+            SettingsScreen(state = state, actions = SettingsActions(), about = about, debugTools = demoCard)
+        }
         host.assertNoUnresolvedPlaceholders("loading")
         val loaded = SettingsUiState(loading = false)
         val errors =
@@ -207,16 +223,39 @@ class SettingsRenderTest(
 
     private fun grid(): SemanticsNodeInteraction = compose.onNode(hasScrollToIndexAction())
 
-    /** Grid items: the actions card, one card per group, the About card. */
+    /** Grid items: the actions card, one card per group, the debug build's card, the About card. */
     private fun scrollToGroup(index: Int) {
         grid().performScrollToIndex(index + 1)
         host.idle()
     }
 
-    private fun scrollToAbout() {
+    private fun scrollToDebugTools() {
         grid().performScrollToIndex(sections.size + 1)
         host.idle()
+        compose.onNode(hasText(host.resources.getString(R.string.demo_settings_title))).assertExists()
+    }
+
+    private fun scrollToAbout() {
+        grid().performScrollToIndex(sections.size + 2)
+        host.idle()
         compose.onNode(hasText(host.resources.getString(R.string.about_title))).assertExists()
+    }
+
+    /** The whole row of the demo-mode card toggles its switch (as TalkBack does, through the row's click action). */
+    private fun switchDemoModeOnAndOff() {
+        scrollToDebugTools()
+        val row = compose.onNode(isToggleable() and hasText(host.resources.getString(R.string.demo_mode_title), substring = true))
+        compose.onNode(hasText(host.resources.getString(R.string.demo_mode_hint))).assertExists()
+        row.assertIsOff()
+        row.performSemanticsAction(SemanticsActions.OnClick)
+        host.idle()
+        row.assertIsOn()
+        assertTrue("the card switched demo mode on", demoMode)
+        host.assertNoUnresolvedPlaceholders("demo mode on")
+        row.performSemanticsAction(SemanticsActions.OnClick)
+        host.idle()
+        row.assertIsOff()
+        assertFalse("the card switched demo mode off", demoMode)
     }
 
     /**
@@ -313,6 +352,8 @@ class SettingsRenderTest(
             host.assertNoUnresolvedPlaceholders("$what: ${section.id}")
             check(section)
         }
+        scrollToDebugTools()
+        host.assertNoUnresolvedPlaceholders("$what: debug build")
         scrollToAbout()
         host.assertNoUnresolvedPlaceholders("$what: about")
     }
