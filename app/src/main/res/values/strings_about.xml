@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Versions and licences: the last card of the Settings tab. Every string also exists in values-ru/strings_about.xml. -->
+    <string name="about_title">Versions and licences</string>
+    <string name="about_versions">Version %1$s · algorithm %2$d · model %3$s</string>
+    <string name="about_model_none">not available</string>
+    <string name="about_estimate">The sleep stages are estimated from heart rate and steps, not measured. Every session PulseStages writes says so and carries the algorithm version and a hash of its parameters.</string>
+    <string name="about_license">Code: WTFPL (you can do whatever you want with it).</string>
+    <string name="about_datasets_title">Training data</string>
+    <string name="about_attribution">Contains information from Motion and heart rate from a wrist-worn wearable and labeled sleep from polysomnography (https://physionet.org/content/sleep-accel/1.0.0/) and from BIDSleep: A Multi-Night Instantaneous Heart Rate and Accelerometry Dataset with EEG Sleep Stage Labels (https://physionet.org/content/bidsleep-dataset/1.0.1/), which are made available under the ODC Attribution License (https://opendatacommons.org/licenses/by/1-0/).</string>
+    <string name="about_citations">Walch O. et al., Sleep 42(12):zsz180 (2019), https://doi.org/10.1093/sleep/zsz180. Song T. et al., BIDSleep v1.0.1, PhysioNet (2026), https://doi.org/10.13026/rees-1092. The bundled model was trained on these PhysioNet datasets: it holds parameters derived from them, not the recordings.</string>
+</resources>

@@ -61,7 +61,7 @@ class FakeHealthRepository(
         /** [grantedPermissions]. */
         GRANTED_PERMISSIONS,
 
-        /** [readSleepSessions]. */
+        /** [readSleepSessions] and [oldestSleepSessionStartMs] (both read sleep sessions). */
         READ_SLEEP_SESSIONS,
 
         /** [readHeartRate]. */
@@ -165,6 +165,10 @@ class FakeHealthRepository(
 
     /** Every operation called so far, in order. */
     val calls: List<Operation> get() = synchronized(lock) { callLog.toList() }
+
+    /** Calls of [oldestSleepSessionStartMs] so far (each one is also a [Operation.READ_SLEEP_SESSIONS] call). */
+    var oldestSessionLookups: Int = 0
+        private set
 
     /** Number of calls of [operation]. */
     fun callCount(operation: Operation): Int = calls.count { it == operation }
@@ -388,6 +392,17 @@ class FakeHealthRepository(
         enter(Operation.READ_SLEEP_SESSIONS)
         if (packages != setOf(ownPackage) || HealthPermissions.WRITE_SLEEP !in granted) requirePermission(HealthPermissions.READ_SLEEP)
         return querySessions(startMs, endMs, readablePackages(packages))
+    }
+
+    override suspend fun oldestSleepSessionStartMs(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): Long? {
+        enter(Operation.READ_SLEEP_SESSIONS)
+        synchronized(lock) { oldestSessionLookups++ }
+        if (packages != setOf(ownPackage) || HealthPermissions.WRITE_SLEEP !in granted) requirePermission(HealthPermissions.READ_SLEEP)
+        return querySessions(startMs, endMs, readablePackages(packages)).firstOrNull()?.startMs
     }
 
     override suspend fun readHeartRate(

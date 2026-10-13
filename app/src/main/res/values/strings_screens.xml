@@ -3,7 +3,6 @@
     <!-- Home, Nights, night detail and Compare (UI part 2). Every string also exists in values-ru/strings_screens.xml. -->
     <string name="action_delete">Delete</string>
     <string name="value_not_available">—</string>
-    <string name="demo_banner">Demo mode: synthetic nights. Nothing is read from or written to Health Connect.</string>
 
     <string name="error_hc_permission">Health Connect refused: a permission is missing. Grant it on the Home tab.</string>
     <string name="error_hc_unavailable">Health Connect is not available.</string>
@@ -83,7 +82,7 @@
     <string name="home_action_estimate">Estimate new</string>
     <string name="home_backfill_title">History backfill</string>
     <string name="home_backfill_body">Estimates every past night in the background, one week at a time. It continues after a restart and can be cancelled.</string>
-    <string name="home_backfill_body_limited">Estimates every past night in the background, one week at a time. Without access to history Health Connect returns only the last 30 days.</string>
+    <string name="home_backfill_body_limited">Estimates every past night in the background, one week at a time. Without access to history Health Connect returns no data older than 30 days before PulseStages was first given access.</string>
     <string name="home_backfill_running">Backfill running…</string>
     <string name="home_backfill_progress">Week %1$d of %2$d · nights found: %3$d, estimated: %4$d</string>
     <string name="home_backfill_started">Backfill started.</string>
@@ -92,7 +91,7 @@
     <string name="home_backfill_cancelled">The last backfill was cancelled after week %1$d of %2$d.</string>
     <string name="home_backfill_failed">The last backfill stopped with an error after week %1$d of %2$d (see the log).</string>
     <string name="home_backfill_interrupted">A backfill was interrupted after week %1$d of %2$d; resume it to continue.</string>
-    <string name="home_backfill_was_limited">History was limited to the last 30 days (no access to history).</string>
+    <string name="home_backfill_was_limited">History was limited to 30 days before PulseStages was first given access (no access to history).</string>
     <string name="home_action_backfill">Backfill history</string>
     <string name="home_action_backfill_resume">Resume backfill</string>
     <string name="home_recompute_title">Recompute</string>

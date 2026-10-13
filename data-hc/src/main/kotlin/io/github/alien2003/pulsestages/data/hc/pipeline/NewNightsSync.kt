@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
+import io.github.alien2003.pulsestages.algo.model.TimeSpan
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.SleepChanges
@@ -323,13 +324,16 @@ class NewNightsSync
         ): PipelineReport {
             val outcome = pipeline.applyDeletions(deletedIds)
             var report = PipelineReport(superseded = outcome.removed)
-            // Partly deleted nights are rebuilt from their remaining sessions; the span of fully deleted ones is
-            // re-read too, so that a night of another source that was their lower-priority duplicate is written now.
-            val affected = outcome.toRebuild + outcome.removedNights
-            if (affected.isEmpty()) return report
+            // Partly deleted nights are rebuilt from their remaining sessions; the span of fully deleted ones (and of
+            // deleted sessions with their own stages) is re-read too, so that a night of another source that was their
+            // lower-priority duplicate is written now.
+            val spans =
+                (outcome.toRebuild + outcome.removedNights).map { TimeSpan(it.sessionStartMs, it.sessionEndMs) } +
+                    outcome.removedStagedSpans
+            if (spans.isEmpty()) return report
             var rebuild = CandidateSet.EMPTY
-            affected.forEach { night ->
-                rebuild = rebuild + windowReader.nightsAround(night.sessionStartMs, night.sessionEndMs, settings)
+            spans.distinct().forEach { span ->
+                rebuild = rebuild + windowReader.nightsAround(span.startMs, span.endMs, settings)
             }
             report += pipeline.process(rebuild, settings, PipelineTrigger.NEW_NIGHTS, granted)
             if (!report.stoppedEarly && outcome.toRebuild.isNotEmpty()) {

@@ -1,10 +1,13 @@
 package io.github.alien2003.pulsestages.ui.common
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -58,7 +61,10 @@ fun SecondaryAction(
     OutlinedButton(onClick = onClick, enabled = enabled, colors = colors) { Text(label) }
 }
 
-/** A confirmation dialog: title, explanation, a confirm and a cancel button. */
+/**
+ * A confirmation dialog: title, explanation, a confirm and a cancel button. The explanation scrolls when it does not
+ * fit (large font, landscape), so no part of a warning is ever cut off.
+ */
 @Composable
 fun ConfirmDialog(
     title: String,
@@ -70,7 +76,11 @@ fun ConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { Text(body) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(body)
+            }
+        },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )

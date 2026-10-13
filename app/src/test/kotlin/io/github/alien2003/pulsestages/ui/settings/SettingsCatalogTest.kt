@@ -88,7 +88,7 @@ class SettingsCatalogTest {
         }
     }
 
-    private fun encode(settings: AppSettings): JsonElement = SettingsJson.storage.encodeToJsonElement(AppSettings.serializer(), settings)
+    private fun encode(settings: AppSettings): JsonElement = SettingsJson.export.encodeToJsonElement(AppSettings.serializer(), settings)
 
     /** Every leaf (primitive, null or array) of [element] by its dotted path. */
     private fun leaves(

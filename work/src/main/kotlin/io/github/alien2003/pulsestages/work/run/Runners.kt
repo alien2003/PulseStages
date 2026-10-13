@@ -177,12 +177,15 @@ class BackfillRunner
 /** What RecomputeWorker recomputes. */
 sealed interface RecomputeRequest {
     /**
-     * The nights with [clientRecordIds] ("Recompute" on the night screen).
+     * The nights with [clientRecordIds] ("Recompute" on the night screen), as requested at [requestedAtMs]: a night
+     * the user deleted after that time is not written again, and "delete all my sessions" after it cancels the request.
      *
      * @property clientRecordIds the nights.
+     * @property requestedAtMs when the user asked (null: unknown, the run's start counts).
      */
     data class Nights(
         val clientRecordIds: List<String>,
+        val requestedAtMs: Long? = null,
     ) : RecomputeRequest
 
     /**
@@ -217,8 +220,13 @@ class RecomputeRunner
             guardedRun(logger, TAG, classifyDenial = { guard.reasonForDenial() }) {
                 val report =
                     when (request) {
-                        is RecomputeRequest.Nights -> recomputer.recompute(request.clientRecordIds, inBackground, onProgress)
-                        is RecomputeRequest.All -> recomputer.recomputeAll(request.scope, inBackground, request.requestedAtMs, onProgress)
+                        is RecomputeRequest.Nights -> {
+                            recomputer.recompute(request.clientRecordIds, inBackground, onProgress, request.requestedAtMs)
+                        }
+
+                        is RecomputeRequest.All -> {
+                            recomputer.recomputeAll(request.scope, inBackground, request.requestedAtMs, onProgress)
+                        }
                     }
                 outcomeOf(report)
             }

@@ -197,6 +197,16 @@ interface HealthRepository {
         packages: Set<String>?,
     ): List<HcSleepSession>
 
+    /**
+     * Start (epoch ms) of the oldest sleep session whose START lies in `[startMs, endMs)`, or null when there is none.
+     * One request for a single record (ascending by start time, page size 1): it never pages through the history.
+     */
+    suspend fun oldestSleepSessionStartMs(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): Long?
+
     /** Heart-rate samples with time in `[startMs, endMs)`, sorted by time. */
     suspend fun readHeartRate(
         startMs: Long,

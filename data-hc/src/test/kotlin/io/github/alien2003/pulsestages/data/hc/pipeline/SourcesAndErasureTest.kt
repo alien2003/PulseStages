@@ -193,6 +193,96 @@ class MyDataEraserTest {
         }
 
     @Test
+    fun `erasing stops a running recompute so that it cannot write the erased nights again`() =
+        harnessTest(dir) { h ->
+            // Three nights more than a week apart: three recompute groups.
+            listOf(30, 20, 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            h.backfill.run(inBackground = false)
+            assertEquals(3, h.repository.ownSessions().size)
+            val first = nightStart(30)
+            h.estimator.beforeEstimate = { if (it.sessionStartMs == first) delay(10_000) }
+
+            val recompute = async { h.recomputer.recomputeAll(RecomputeScope.ALL, inBackground = false) }
+            delay(1_000)
+            val erased = h.eraser.eraseAll()
+            val report = recompute.await()
+
+            assertEquals(3, erased.deleted, "the night the recompute was finishing is erased too")
+            assertTrue(report.cancelled)
+            assertTrue(h.repository.ownSessions().isEmpty(), "erased sessions were written again")
+            assertTrue(h.ledger.allNights().all { it.status == NightStatus.DELETED })
+
+            assertEquals(3, h.recomputer.recompute(h.ledger.allNights().map { it.clientRecordId }, inBackground = false).estimated)
+            assertEquals(3, h.repository.ownSessions().size, "a recompute requested after the erase writes them again")
+        }
+
+    @Test
+    fun `a recompute or backfill requested before an erase does not start`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(1))
+            h.processRecent()
+            val requestedAt = h.clock.millis()
+            h.clock.advanceBy(1_000)
+            h.eraser.eraseAll()
+            val night = h.ledger.allNights().single()
+
+            val recompute = h.recomputer.recompute(listOf(night.clientRecordId), inBackground = false, requestedAtMs = requestedAt)
+            assertTrue(recompute.cancelled)
+            assertTrue(h.recomputer.recomputeAll(RecomputeScope.ALL, inBackground = false, notUpdatedSinceMs = requestedAt).cancelled)
+            assertEquals(BackfillOutcome.CANCELLED, h.backfill.run(inBackground = false, requestedAtMs = requestedAt).outcome)
+            assertTrue(h.repository.ownSessions().isEmpty())
+        }
+
+    @Test
+    fun `a night deleted while a recompute or backfill runs is not written again by it, the other nights are`() =
+        harnessTest(dir) { h ->
+            listOf(30, 20, 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            h.backfill.run(inBackground = false)
+            val nights = h.ledger.allNights().sortedBy { it.sessionStartMs }
+            val newest = nights.last()
+            val oldest = nights.first().sessionStartMs
+            h.estimator.beforeEstimate = { if (it.sessionStartMs == oldest) delay(10_000) }
+
+            val recompute = async { h.recomputer.recomputeAll(RecomputeScope.ALL, inBackground = false) }
+            delay(1_000)
+            h.clock.advanceBy(1_000)
+            assertEquals(DeleteNightResult.DELETED, h.eraser.deleteNight(newest.clientRecordId))
+            val report = recompute.await()
+
+            assertEquals(2, report.estimated)
+            assertFalse(report.cancelled)
+            assertEquals(listOf(nights[0], nights[1]).map { it.clientRecordId }, h.repository.ownSessions().map { it.clientRecordId })
+            assertEquals(
+                NightStatus.DELETED,
+                h.ledger
+                    .allNights()
+                    .single { it.clientRecordId == newest.clientRecordId }
+                    .status,
+            )
+
+            // The same for a backfill: it restores a night deleted before it started, not one deleted during the run.
+            h.clock.advanceBy(1_000)
+            val backfill = async { h.backfill.run(inBackground = false) }
+            delay(1_000)
+            h.clock.advanceBy(1_000)
+            assertEquals(DeleteNightResult.DELETED, h.eraser.deleteNight(nights[1].clientRecordId))
+            assertEquals(BackfillOutcome.DONE, backfill.await().outcome)
+
+            assertEquals(
+                listOf(nights[0].clientRecordId, newest.clientRecordId),
+                h.repository.ownSessions().map { it.clientRecordId },
+                "the night deleted before the backfill is restored, the one deleted during it is not",
+            )
+            assertEquals(
+                NightStatus.DELETED,
+                h.ledger
+                    .allNights()
+                    .single { it.clientRecordId == nights[1].clientRecordId }
+                    .status,
+            )
+        }
+
+    @Test
     fun `erasing needs Health Connect`() =
         harnessTest(dir) { h ->
             h.repository.addNight(OHEALTH, nightStart(1))

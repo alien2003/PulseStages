@@ -12,22 +12,27 @@ import java.io.InputStream
 import java.io.OutputStream
 
 /**
- * JSON format of [AppSettings], shared by the DataStore file, export and import: defaults are always written
- * (an export is complete and self-describing), unknown keys are ignored and missing keys take their defaults (old
- * and new exports keep importing). Values of the wrong type and unknown enum names are errors, never silently
- * replaced.
+ * JSON format of [AppSettings], shared by the DataStore file, export and import: unknown keys are ignored and missing
+ * keys take their defaults (old and new files and exports keep loading). Values of the wrong type and unknown enum
+ * names are errors, never silently replaced.
+ *
+ * The DataStore file stores only the values that differ from the defaults ([storage]), so the defaults that come from
+ * the open-dataset training (`TrainedDefaults`: estimator, hybrid decoder settings, ...) follow app updates for every
+ * value the user never changed; a value the user changed (to anything but the default of the build that stored it)
+ * stays as chosen. An export always contains every value ([export]), so it is complete and self-describing.
  */
 object SettingsJson {
-    /** Compact configuration used for the DataStore file. */
+    /** Compact configuration used for the DataStore file: values equal to their default are not written. */
     val storage: Json =
         Json {
-            encodeDefaults = true
+            encodeDefaults = false
             ignoreUnknownKeys = true
         }
 
-    /** Pretty-printed configuration used for export. */
+    /** Pretty-printed configuration used for export: every value, defaults included. */
     val export: Json =
         Json(from = storage) {
+            encodeDefaults = true
             prettyPrint = true
         }
 

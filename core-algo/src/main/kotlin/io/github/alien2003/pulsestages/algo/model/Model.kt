@@ -7,17 +7,29 @@ package io.github.alien2003.pulsestages.algo.model
  * matrix of this module (AWAKE=0, LIGHT=1, DEEP=2, REM=3). [UNKNOWN] marks epochs without usable heart-rate
  * data when [io.github.alien2003.pulsestages.algo.params.GapPolicy.UNKNOWN] is selected; it never appears
  * in probability vectors.
+ *
+ * @property index position in probability vectors and tables; -1 for [UNKNOWN].
  */
 enum class SleepStage(
     val index: Int,
 ) {
+    /** Awake (Health Connect STAGE_TYPE_AWAKE). */
     AWAKE(0),
+
+    /** Light sleep, N1 + N2 (STAGE_TYPE_LIGHT). */
     LIGHT(1),
+
+    /** Deep sleep, N3 (STAGE_TYPE_DEEP). */
     DEEP(2),
+
+    /** REM sleep (STAGE_TYPE_REM). */
     REM(3),
+
+    /** No usable data (STAGE_TYPE_UNKNOWN); never part of a probability vector. */
     UNKNOWN(-1),
     ;
 
+    /** The scored stages and their index lookup. */
     companion object {
         /** The four scored stages in index order. */
         val SCORED: List<SleepStage> = listOf(AWAKE, LIGHT, DEEP, REM)
@@ -30,38 +42,69 @@ enum class SleepStage(
     }
 }
 
-/** A single heart-rate measurement at [timeMs] (epoch milliseconds, UTC). */
+/**
+ * A single heart-rate measurement.
+ *
+ * @property timeMs time of the measurement, epoch milliseconds (UTC).
+ * @property bpm heart rate in beats per minute.
+ */
 data class HrSample(
     val timeMs: Long,
     val bpm: Double,
 )
 
-/** A step count accumulated over `[startMs, endMs)`. Counts are spread uniformly over the interval. */
+/**
+ * A step count accumulated over `[startMs, endMs)`. Counts are spread uniformly over the interval.
+ *
+ * @property startMs start of the interval, epoch milliseconds.
+ * @property endMs end of the interval (exclusive), epoch milliseconds.
+ * @property count steps in the interval.
+ */
 data class StepsSample(
     val startMs: Long,
     val endMs: Long,
     val count: Long,
 )
 
-/** A blood-oxygen saturation measurement in percent. */
+/**
+ * A blood-oxygen saturation measurement.
+ *
+ * @property timeMs time of the measurement, epoch milliseconds.
+ * @property percent saturation in percent (0–100).
+ */
 data class Spo2Sample(
     val timeMs: Long,
     val percent: Double,
 )
 
-/** A respiratory-rate measurement in breaths per minute. */
+/**
+ * A respiratory-rate measurement.
+ *
+ * @property timeMs time of the measurement, epoch milliseconds.
+ * @property rate breaths per minute.
+ */
 data class RespiratoryRateSample(
     val timeMs: Long,
     val rate: Double,
 )
 
-/** A heart-rate-variability (RMSSD) measurement in milliseconds. */
+/**
+ * A heart-rate-variability (RMSSD) measurement.
+ *
+ * @property timeMs time of the measurement, epoch milliseconds.
+ * @property rmssdMs RMSSD in milliseconds.
+ */
 data class HrvSample(
     val timeMs: Long,
     val rmssdMs: Double,
 )
 
-/** A half-open time interval `[startMs, endMs)` in epoch milliseconds. */
+/**
+ * A half-open time interval `[startMs, endMs)` in epoch milliseconds.
+ *
+ * @property startMs start (inclusive).
+ * @property endMs end (exclusive); never before [startMs].
+ */
 data class TimeSpan(
     val startMs: Long,
     val endMs: Long,
@@ -81,6 +124,13 @@ data class TimeSpan(
  * [io.github.alien2003.pulsestages.algo.params.PreprocessParams.contextMarginMin] on both sides); stages are
  * only produced for `[sessionStartMs, sessionEndMs)`.
  *
+ * @property sessionStartMs start of the sleep session, epoch milliseconds.
+ * @property sessionEndMs end of the sleep session (exclusive), epoch milliseconds; after [sessionStartMs].
+ * @property heartRate heart-rate samples of the session and its context margins, in any order.
+ * @property steps step counts (the movement proxy); empty when none were recorded.
+ * @property spo2 optional SpO2 measurements; empty when not available or not granted.
+ * @property respiratoryRate optional respiratory-rate measurements; empty when not available or not granted.
+ * @property hrv optional HRV (RMSSD) measurements; empty when not available or not granted.
  * @property forcedAwake intervals inside the session that must be AWAKE (e.g. gaps between merged fragments).
  * @property baselineNadirBpm rolling median of the nadirs of the previous nights, or null if unknown.
  */
@@ -100,14 +150,27 @@ data class NightInput(
     }
 }
 
-/** A stage interval `[startMs, endMs)` of the output hypnogram. */
+/**
+ * A stage interval `[startMs, endMs)` of the output hypnogram.
+ *
+ * @property startMs start (inclusive), epoch milliseconds.
+ * @property endMs end (exclusive), epoch milliseconds.
+ * @property stage the stage of the whole interval.
+ */
 data class StageInterval(
     val startMs: Long,
     val endMs: Long,
     val stage: SleepStage,
 )
 
-/** Probability of each scored stage; always sums to 1 (within floating-point error). */
+/**
+ * Probability of each scored stage; always sums to 1 (within floating-point error).
+ *
+ * @property awake probability of AWAKE.
+ * @property light probability of LIGHT.
+ * @property deep probability of DEEP.
+ * @property rem probability of REM.
+ */
 data class StageProbabilities(
     val awake: Double,
     val light: Double,
@@ -130,6 +193,7 @@ data class StageProbabilities(
     /** Values in [SleepStage.index] order. */
     fun toList(): List<Double> = listOf(awake, light, deep, rem)
 
+    /** Factories and constants. */
     companion object {
         /** Builds from a vector in [SleepStage.index] order. */
         fun of(values: DoubleArray): StageProbabilities {
@@ -150,9 +214,14 @@ data class StageProbabilities(
 /**
  * Per-epoch diagnostics, used by the night-detail screen and the CSV export.
  *
+ * @property index position of the epoch in the session (0 = the epoch starting at the session start).
+ * @property startMs start of the epoch, epoch milliseconds.
+ * @property hasData the epoch has heart-rate data (measured or interpolated across a short gap).
  * @property hrRaw resampled heart rate before smoothing, null where there is no data.
  * @property hrSmooth smoothed heart rate, null where there is no data.
  * @property features named feature values in the order of [NightEstimate.featureNames].
+ * @property posterior posterior stage probabilities of the epoch.
+ * @property stage the stage written for the epoch (after post-processing).
  */
 data class EpochResult(
     val index: Int,
@@ -201,16 +270,37 @@ enum class WarningCode {
     DATA_GAPS,
 }
 
-/** A warning with an optional human-readable (English, for logs) detail. */
+/**
+ * A warning with an optional human-readable detail.
+ *
+ * @property code what happened.
+ * @property detail English detail for the log; empty when there is nothing to add.
+ */
 data class EstimationWarning(
     val code: WarningCode,
     val detail: String = "",
 )
 
 /** Which estimator produced the result. */
-enum class EstimatorType { RULES, HMM, HYBRID }
+enum class EstimatorType {
+    /** The threshold rules (section 6): for comparison and as the fallback for sparse data. */
+    RULES,
 
-/** Night-level flags. */
+    /** The HMM with physiological priors, decoded by Viterbi (section 3). */
+    HMM,
+
+    /** The trained classifier with the explicit-duration (HSMM) decoder (section 8). */
+    HYBRID,
+}
+
+/**
+ * Night-level flags.
+ *
+ * @property elevatedHr the night's nadir is above the long-term baseline by more than `elevatedNightPct`.
+ * @property lowConfidence the night is low-confidence (too small a heart-rate range, or failed sanity checks).
+ * @property calibrated stage proportions were calibrated towards the target ranges.
+ * @property rulesFallback the coverage was too low for the configured estimator and RULES was used instead.
+ */
 data class NightFlags(
     val elevatedHr: Boolean = false,
     val lowConfidence: Boolean = false,
@@ -225,9 +315,19 @@ data class NightFlags(
  * `[NightInput.sessionStartMs, NightInput.sessionEndMs)` and every interval is at least one epoch long
  * (unless the whole session is shorter than one epoch).
  *
- * @property estimator the estimator that actually produced the stages (may differ from the configured one).
- * @property paramsHash SHA-256 (hex) of the serialized parameters plus model fingerprints.
+ * @property stages the hypnogram: sorted, contiguous intervals covering the session.
+ * @property coverage share of the session's epochs with heart-rate data, in `[0, 1]`.
  * @property confidence night confidence in `[0, 1]`.
+ * @property perEpoch diagnostics of every epoch of the session, in order.
+ * @property params the parameters the night was estimated with.
+ * @property algoVersion [io.github.alien2003.pulsestages.algo.ALGO_VERSION] of the code that produced the estimate.
+ * @property paramsHash SHA-256 (hex) of the serialized parameters plus model fingerprints.
+ * @property estimator the estimator that actually produced the stages (may differ from the configured one).
+ * @property warnings everything noteworthy about the night (data gaps, sanity checks, fallbacks).
+ * @property flags night-level flags.
+ * @property featureNames names of the per-epoch feature values in [EpochResult.features].
+ * @property nadirBpm lowest smoothed heart rate inside the session, or null without data.
+ * @property hrSampleCount heart-rate samples used (in range, inside the analysis window, duplicates collapsed).
  */
 data class NightEstimate(
     val stages: List<StageInterval>,
@@ -246,16 +346,35 @@ data class NightEstimate(
 )
 
 /** Why a night was not estimated. */
-enum class NotEstimatedReason { NO_HR_DATA, LOW_COVERAGE, SESSION_TOO_SHORT }
+enum class NotEstimatedReason {
+    /** No usable heart-rate sample in the session and its context margins. */
+    NO_HR_DATA,
+
+    /** Too few epochs with data, even for the rules fallback. */
+    LOW_COVERAGE,
+
+    /** The session is shorter than `preprocess.minSessionMin`. */
+    SESSION_TOO_SHORT,
+}
 
 /** Outcome of [io.github.alien2003.pulsestages.algo.SleepStager.run]. */
 sealed interface EstimationOutcome {
-    /** Stages were estimated. */
+    /**
+     * Stages were estimated.
+     *
+     * @property estimate the result.
+     */
     data class Estimated(
         val estimate: NightEstimate,
     ) : EstimationOutcome
 
-    /** The night was skipped; [detail] is an English explanation for the log. */
+    /**
+     * The night was skipped.
+     *
+     * @property reason why.
+     * @property coverage share of the session's epochs with heart-rate data (0 when nothing could be computed).
+     * @property detail English explanation for the log.
+     */
     data class NotEstimated(
         val reason: NotEstimatedReason,
         val coverage: Double,

@@ -52,6 +52,8 @@ class BackfillEngineTest {
             assertEquals(0, state.nightsFailed)
             assertFalse(state.historyLimited)
             assertEquals(listOf(0, 1, 2, 3, 4, 4), progress.map { it.windowsDone })
+            assertEquals(1, h.repository.oldestSessionLookups, "the range start is one single-record lookup")
+            assertEquals(1 + 4, h.repository.callCount(Operation.READ_SLEEP_SESSIONS), "and the history is read window by window only")
 
             val starts = h.estimator.inputs.map { it.sessionStartMs }
             assertEquals(starts.sorted(), starts, "oldest first")

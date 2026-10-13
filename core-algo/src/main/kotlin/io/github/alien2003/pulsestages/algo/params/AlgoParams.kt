@@ -9,6 +9,15 @@ import kotlinx.serialization.Serializable
  * [io.github.alien2003.pulsestages.algo.model.NightEstimate.paramsHash].
  *
  * Serialization is part of the persisted settings format: only ADD fields with defaults, never rename.
+ *
+ * @property estimator the estimator to run.
+ * @property preprocess heart-rate cleaning, resampling and smoothing.
+ * @property features per-epoch features and night-level context.
+ * @property hmm the HMM estimator.
+ * @property rules the rules estimator.
+ * @property hybrid the hybrid estimator's decoder (the weights come from the model bundle).
+ * @property post post-processing of every estimator's output.
+ * @property personal personalization (calibration on reference nights, periodic EM).
  */
 @Serializable
 data class AlgoParams(
@@ -26,11 +35,13 @@ data class AlgoParams(
 /** Preprocessing (section 1 of the specification). */
 @Serializable
 data class PreprocessParams(
-    /** Heart-rate values outside `[minBpm, maxBpm]` are dropped. */
+    /** Heart-rate values below this (bpm) are dropped. */
     val minBpm: Double = 30.0,
+    /** Heart-rate values above this (bpm) are dropped. */
     val maxBpm: Double = 180.0,
-    /** Hampel filter window in samples (odd) and threshold in scaled MADs. */
+    /** Hampel filter window in samples (odd). */
     val hampelWindow: Int = 5,
+    /** Hampel filter threshold in scaled MADs. */
     val hampelThreshold: Double = 3.0,
     /** Epoch length in seconds. */
     val epochSec: Int = 60,
@@ -65,6 +76,7 @@ data class PreprocessParams(
 data class FeatureParams(
     /** hrNorm = (hr − P[normLowPercentile]) / (P[normHighPercentile] − P[normLowPercentile]). */
     val normLowPercentile: Double = 10.0,
+    /** Upper percentile of the hrNorm scale (≈ light sleep), see [normLowPercentile]. */
     val normHighPercentile: Double = 50.0,
     /** Minimum denominator for hrNorm (bpm); smaller ranges flag the night as low-confidence. */
     val minNormRangeBpm: Double = 2.0,
@@ -72,8 +84,9 @@ data class FeatureParams(
     val varHalfWindowEpochs: Int = 3,
     /** hrSlope: least-squares slope (bpm/min) in ±[slopeHalfWindowEpochs]. */
     val slopeHalfWindowEpochs: Int = 2,
-    /** Ultradian minima: minimum distance between minima and minimum prominence. */
+    /** Ultradian minima: minimum distance between minima, minutes. */
     val cycleMinDistanceMin: Double = 60.0,
+    /** Ultradian minima: minimum prominence, bpm. */
     val cycleMinProminenceBpm: Double = 2.0,
     /** Number of previous nights used for the baseline nadir (used by the caller that computes the baseline). */
     val baselineNights: Int = 14,
@@ -83,15 +96,17 @@ data class FeatureParams(
     val elevatedAwakeShift: Double = 0.3,
     /** Night confidence multiplier on elevated nights. */
     val elevatedConfidenceFactor: Double = 0.8,
-    /** Optional channels. Each is used only if data is present and the flag is on. */
+    /** Use SpO2 when present (each optional channel is used only if data is present and its flag is on). */
     val useSpo2: Boolean = true,
     /** SpO2 drop (percentage points below the rolling night median) considered a desaturation. */
     val spo2DropPct: Double = 3.0,
     /** Likelihood multiplier for AWAKE and LIGHT in epochs with a desaturation. */
     val spo2AwakeLightFactor: Double = 2.0,
+    /** Use HRV (RMSSD) when present: it replaces hrVar as the variability feature. */
     val useHrv: Boolean = true,
     /** Weight (σ divisor) of the RMSSD-based variability feature when it replaces hrVar. */
     val hrvWeight: Double = 1.5,
+    /** Use the respiratory rate when present (a variability term in the emissions). */
     val useRespiratoryRate: Boolean = true,
     /** Weight of the respiratory-rate variability term. */
     val respiratoryRateWeight: Double = 0.5,
@@ -103,14 +118,25 @@ data class FeatureParams(
     val respiratoryHalfWindowEpochs: Int = 5,
 )
 
-/** A univariate Gaussian. */
+/**
+ * A univariate Gaussian.
+ *
+ * @property mean the mean μ.
+ * @property sd the standard deviation σ (positive).
+ */
 @Serializable
 data class Gaussian(
     val mean: Double,
     val sd: Double,
 )
 
-/** Diagonal-Gaussian emission of one hidden state over (hrNorm, hrVar, hrSlope). */
+/**
+ * Diagonal-Gaussian emission of one hidden state over (hrNorm, hrVar, hrSlope).
+ *
+ * @property hrNorm distribution of the normalized heart rate.
+ * @property hrVar distribution of the heart-rate variability proxy.
+ * @property hrSlope distribution of the heart-rate slope (bpm/min).
+ */
 @Serializable
 data class StateEmission(
     val hrNorm: Gaussian,
@@ -118,7 +144,14 @@ data class StateEmission(
     val hrSlope: Gaussian,
 )
 
-/** Emission parameters of the four hidden states. */
+/**
+ * Emission parameters of the four hidden states.
+ *
+ * @property awake emission of AWAKE.
+ * @property light emission of LIGHT.
+ * @property deep emission of DEEP.
+ * @property rem emission of REM.
+ */
 @Serializable
 data class EmissionTable(
     val awake: StateEmission,
@@ -126,6 +159,7 @@ data class EmissionTable(
     val deep: StateEmission,
     val rem: StateEmission,
 ) {
+    /** Presets. */
     companion object {
         /** Starting values from physiology (the specification's table); used as fallback and for MAP shrinkage. */
         val PHYSIOLOGY: EmissionTable =
@@ -138,7 +172,14 @@ data class EmissionTable(
     }
 }
 
-/** Mean bout durations in minutes; self-transition per epoch = 1 − epochMin / meanBoutMin. */
+/**
+ * Mean bout durations in minutes; self-transition per epoch = 1 − epochMin / meanBoutMin.
+ *
+ * @property awakeMin mean AWAKE bout.
+ * @property lightMin mean LIGHT bout.
+ * @property deepMin mean DEEP bout.
+ * @property remMin mean REM bout.
+ */
 @Serializable
 data class MeanBouts(
     val awakeMin: Double = 5.0,
@@ -147,7 +188,22 @@ data class MeanBouts(
     val remMin: Double = 20.0,
 )
 
-/** Shares of the non-self transition mass. Rows are normalized at use; zeros are replaced by ε. */
+/**
+ * Shares of the non-self transition mass. Rows are normalized at use; zeros are replaced by ε.
+ *
+ * @property awakeToLight AWAKE → LIGHT.
+ * @property awakeToDeep AWAKE → DEEP.
+ * @property awakeToRem AWAKE → REM.
+ * @property lightToAwake LIGHT → AWAKE.
+ * @property lightToDeep LIGHT → DEEP (before the time prior).
+ * @property lightToRem LIGHT → REM (before the time prior).
+ * @property deepToAwake DEEP → AWAKE.
+ * @property deepToLight DEEP → LIGHT.
+ * @property deepToRem DEEP → REM.
+ * @property remToAwake REM → AWAKE.
+ * @property remToLight REM → LIGHT.
+ * @property remToDeep REM → DEEP.
+ */
 @Serializable
 data class TransitionWeights(
     val awakeToLight: Double = 0.9,
@@ -199,35 +255,47 @@ data class HmmTimePrior(
  */
 @Serializable
 data class HmmParams(
+    /** Gaussian emissions of the four states. */
     val emissions: EmissionTable = TrainedDefaults.HMM_EMISSIONS,
+    /** Mean bout lengths; they set the self-transitions. */
     val meanBouts: MeanBouts = TrainedDefaults.HMM_MEAN_BOUTS,
+    /** Shares of the remaining transition mass. */
     val transitions: TransitionWeights = TrainedDefaults.HMM_TRANSITIONS,
     /** Replacement for zero probabilities. */
     val epsilon: Double = 1e-4,
     /** LIGHT→DEEP multiplier = max(deepTimeFloor, deepTimeIntercept − deepTimeSlope·t). */
     val deepTimeIntercept: Double = TrainedDefaults.HMM_TIME_PRIOR.deepTimeIntercept,
+    /** Decrease of the LIGHT→DEEP multiplier over the night (t = elapsed fraction), see [deepTimeIntercept]. */
     val deepTimeSlope: Double = TrainedDefaults.HMM_TIME_PRIOR.deepTimeSlope,
+    /** Lower bound of the LIGHT→DEEP multiplier, see [deepTimeIntercept]. */
     val deepTimeFloor: Double = TrainedDefaults.HMM_TIME_PRIOR.deepTimeFloor,
     /** LIGHT→REM multiplier = remTimeIntercept + remTimeSlope·t. */
     val remTimeIntercept: Double = TrainedDefaults.HMM_TIME_PRIOR.remTimeIntercept,
+    /** Increase of the LIGHT→REM multiplier over the night, see [remTimeIntercept]. */
     val remTimeSlope: Double = TrainedDefaults.HMM_TIME_PRIOR.remTimeSlope,
     /** REM is suppressed (probability × remLockoutFactor) during the first remLockoutMin minutes. */
     val remLockoutMin: Double = TrainedDefaults.HMM_TIME_PRIOR.remLockoutMin,
+    /** REM probability multiplier during the lockout, see [remLockoutMin]. */
     val remLockoutFactor: Double = TrainedDefaults.HMM_TIME_PRIOR.remLockoutFactor,
-    /** Initial distribution (DEEP and REM get ε). */
+    /** Initial AWAKE weight (DEEP and REM get ε). */
     val initialAwake: Double = TrainedDefaults.HMM_TIME_PRIOR.initialAwake,
+    /** Initial LIGHT weight. */
     val initialLight: Double = TrainedDefaults.HMM_TIME_PRIOR.initialLight,
     /** Additive log-prior weight of the ultradian-cycle phase (0 disables). */
     val cyclePriorWeight: Double = 0.5,
-    /** Cycle phase (0..1 between minima) at which the DEEP and REM priors peak. */
+    /** Cycle phase (0..1 between minima) at which the DEEP prior peaks. */
     val cycleDeepPhase: Double = 0.0,
+    /** Cycle phase (0..1 between minima) at which the REM prior peaks. */
     val cycleRemPhase: Double = 0.7,
     /** Steps in an epoch at or above this force AWAKE; 1..threshold−1 multiply the AWAKE emission. */
     val awakeStepThreshold: Int = 5,
+    /** AWAKE emission multiplier for epochs with 1..awakeStepThreshold−1 steps. */
     val fewStepsAwakeFactor: Double = 3.0,
     /** Per-night Baum–Welch adaptation of μ/σ with MAP shrinkage. */
     val emAdapt: Boolean = true,
+    /** Baum–Welch iterations of the per-night adaptation. */
     val emIterations: Int = 3,
+    /** MAP shrinkage of the adapted μ/σ towards the starting values, in epoch-equivalents. */
     val emPriorStrength: Double = 20.0,
 ) {
     /** These parameters with the time-dependent priors and initial distribution of [prior]. */
@@ -259,7 +327,18 @@ data class HmmParams(
     }
 }
 
-/** Rules estimator thresholds (section 6). */
+/**
+ * Rules estimator thresholds (section 6): DEEP if hrNorm < [deepMaxHrNorm] and hrVar < [deepMaxHrVar]; AWAKE if
+ * hrNorm > [awakeMinHrNorm] or steps; REM if hrNorm > [remMinHrNorm] and hrVar > [remMinHrVar] and t > [remMinT];
+ * LIGHT otherwise.
+ *
+ * @property deepMaxHrNorm DEEP: hrNorm below this.
+ * @property deepMaxHrVar DEEP: hrVar below this.
+ * @property awakeMinHrNorm AWAKE: hrNorm above this.
+ * @property remMinHrNorm REM: hrNorm above this.
+ * @property remMinHrVar REM: hrVar above this.
+ * @property remMinT REM: elapsed fraction of the night above this.
+ */
 @Serializable
 data class RulesParams(
     val deepMaxHrNorm: Double = 0.45,
@@ -283,7 +362,13 @@ data class RulesParams(
 
 /** Explicit-duration (HSMM) or geometric (plain HMM) decoding for the hybrid estimator. */
 @Serializable
-enum class DurationModel { EXPLICIT, GEOMETRIC }
+enum class DurationModel {
+    /** Hidden semi-Markov decoding with the bundle's gamma bout-length distributions. */
+    EXPLICIT,
+
+    /** Plain HMM decoding: geometric bout lengths with the mean of each gamma distribution. */
+    GEOMETRIC,
+}
 
 /**
  * Hybrid estimator (section 8). Model weights are not parameters; they come from the model bundle. The decoder
@@ -312,13 +397,48 @@ data class HybridParams(
 
 /** What to write for epochs inside long data gaps. */
 @Serializable
-enum class GapPolicy { UNKNOWN, LIGHT, NEAREST }
+enum class GapPolicy {
+    /** UNKNOWN (no claim about the stage). */
+    UNKNOWN,
+
+    /** LIGHT sleep. */
+    LIGHT,
+
+    /** The stage of the nearest epoch with data. */
+    NEAREST,
+}
 
 /** What to do with epochs whose maximum posterior is below the threshold. */
 @Serializable
-enum class LowConfidencePolicy { KEEP, LIGHT }
+enum class LowConfidencePolicy {
+    /** Keep the decoder's stage. */
+    KEEP,
 
-/** Post-processing (section 4). */
+    /** Write LIGHT sleep. */
+    LIGHT,
+}
+
+/**
+ * Post-processing (section 4).
+ *
+ * @property minDeepMin shorter DEEP bouts (minutes) are absorbed by the neighbour with the higher posterior.
+ * @property minRemMin shorter REM bouts (minutes) are absorbed likewise.
+ * @property minAwakeMin shorter AWAKE bouts inside sleep (minutes) are absorbed likewise.
+ * @property gapPolicy what to write for epochs inside data gaps longer than `maxInterpGapMin`.
+ * @property sanityDeepMax a night with more DEEP than this share is low-confidence.
+ * @property sanityRemMax a night with more REM than this share is low-confidence.
+ * @property sanityDeepMin a night with less DEEP than this share is low-confidence.
+ * @property sanityConfidenceFactor night confidence multiplier when a sanity check fails.
+ * @property targetDeepMin lower end of the DEEP share corridor of the calibration.
+ * @property targetDeepMax upper end of the DEEP share corridor.
+ * @property targetRemMin lower end of the REM share corridor.
+ * @property targetRemMax upper end of the REM share corridor.
+ * @property targetAwakeMax upper end of the AWAKE share corridor.
+ * @property calibrationStep log-prior shift per calibration iteration.
+ * @property calibrationMaxIterations maximum number of calibration iterations.
+ * @property lowConfidenceThreshold epochs whose maximum posterior is below this follow [lowConfidencePolicy].
+ * @property lowConfidencePolicy what to write for such epochs.
+ */
 @Serializable
 data class PostprocessParams(
     val minDeepMin: Double = 5.0,
@@ -347,6 +467,7 @@ data class PostprocessParams(
 /** Personalization (section 10). */
 @Serializable
 data class PersonalParams(
+    /** Use the personal model (calibration on reference nights and the periodic EM). */
     val enabled: Boolean = true,
     /** Unsupervised EM over all nights every this many new nights. */
     val emEveryNights: Int = 30,

@@ -2,9 +2,9 @@
 <resources>
     <!-- Title and hint of every setting (SettingsCatalog). -->
     <string name="set_src_hr_sources_title">Пульс и шаги от</string>
-    <string name="set_src_hr_sources_hint">Приложение, записавшее сеанс сна, или любое приложение, пишущее пульс и шаги.</string>
-    <string name="set_src_min_session_title">Минимальная длина сеанса</string>
-    <string name="set_src_min_session_hint">Более короткие сеансы (после объединения фрагментов) считаются дрёмой и пропускаются.</string>
+    <string name="set_src_hr_sources_hint">Приложение, записавшее сессию сна, или любое приложение, пишущее пульс и шаги.</string>
+    <string name="set_src_min_session_title">Минимальная длина сессии</string>
+    <string name="set_src_min_session_hint">Более короткие сессии (после объединения фрагментов) считаются дрёмой и пропускаются.</string>
     <string name="set_src_merge_gap_title">Разрыв для объединения</string>
     <string name="set_src_merge_gap_hint">Фрагменты одной ночи от одного приложения с меньшим разрывом объединяются; разрыв записывается как бодрствование.</string>
     <string name="set_src_backfill_days_title">Глубина истории</string>
@@ -12,12 +12,12 @@
     <string name="set_sch_daily_time_title">Ежедневный запуск</string>
     <string name="set_sch_daily_time_hint">Время ежедневного запуска (примерно: Android может откладывать фоновые задачи).</string>
     <string name="set_sch_periodic_hours_title">Проверять новые ночи каждые</string>
-    <string name="set_sch_periodic_hours_hint">Как часто фоновая задача спрашивает у Health Connect новые сеансы сна.</string>
+    <string name="set_sch_periodic_hours_hint">Как часто фоновая задача спрашивает у Health Connect новые сессии сна.</string>
     <string name="set_sch_not_low_battery_title">Только при нормальном заряде</string>
     <string name="set_sch_not_low_battery_hint">Фоновые запуски ждут, пока заряд батареи не станет нормальным.</string>
-    <string name="set_wr_title_template_title">Заголовок сеанса</string>
+    <string name="set_wr_title_template_title">Заголовок сессии</string>
     <string name="set_wr_title_template_hint">Подстановки: {estimator}, {version}, {confidence}. Оставьте пустым для заголовка по умолчанию.</string>
-    <string name="set_wr_overwrite_title">Существующие сеансы</string>
+    <string name="set_wr_overwrite_title">Существующие сессии</string>
     <string name="set_wr_overwrite_hint">Пропускать актуальные ночи: ночи, уже оценённые с текущими параметрами, пропускаются; ночи, оценённые с другими параметрами, помечаются устаревшими и пересчитываются только по вашему запросу. Пересчитывать всё: каждый запуск заново оценивает прочитанные ночи и перезаписывает их сессии, в том числе для исходных сессий, у которых уже есть стадии сна. Никогда не перезаписывать: существующая сессия PulseStages не перезаписывается никогда, даже при пересчёте; оцениваются только ночи без сессии.</string>
     <string name="set_wr_awake_as_light_title">Писать бодрствование как лёгкий сон</string>
     <string name="set_wr_awake_as_light_hint">Для приложений, которые плохо показывают пробуждения. Меняет записываемые данные.</string>
@@ -42,13 +42,13 @@
     <string name="set_pre_smooth_window_title">Окно сглаживания</string>
     <string name="set_pre_smooth_window_hint">Длина скользящего среднего в эпохах (нечётная).</string>
     <string name="set_pre_context_margin_title">Контекстный запас</string>
-    <string name="set_pre_context_margin_hint">Пульс читается на столько раньше и позже сеанса; стадии пишутся только внутри него.</string>
+    <string name="set_pre_context_margin_hint">Пульс читается на столько раньше и позже сессии; стадии пишутся только внутри неё.</string>
     <string name="set_pre_min_coverage_title">Минимальное покрытие</string>
     <string name="set_pre_min_coverage_hint">Доля эпох с пульсом, нужная основному оценщику.</string>
     <string name="set_pre_rules_min_coverage_title">Покрытие для правил</string>
     <string name="set_pre_rules_min_coverage_hint">Между этим значением и минимальным покрытием используется оценщик по правилам; ниже — ночь пропускается.</string>
-    <string name="set_pre_min_session_title">Порог сеанса в оценщике</string>
-    <string name="set_pre_min_session_hint">Более короткие сеансы не оцениваются; 0 = выключено (дрёма отсекается настройкой источника).</string>
+    <string name="set_pre_min_session_title">Порог сессии в оценщике</string>
+    <string name="set_pre_min_session_hint">Более короткие сессии не оцениваются; 0 = выключено (дрёма отсекается настройкой источника).</string>
     <string name="set_fea_norm_low_title">Нижний перцентиль нормировки</string>
     <string name="set_fea_norm_low_hint">hrNorm = (hr − P_низ) / (P_верх − P_низ) за ночь.</string>
     <string name="set_fea_norm_high_title">Верхний перцентиль нормировки</string>
@@ -131,7 +131,7 @@
     <string name="set_hmm_rem_slope_title">Приор REM: наклон</string>
     <string name="set_hmm_rem_slope_hint">Как быстро REM становится более вероятным за ночь.</string>
     <string name="set_hmm_rem_lockout_title">Запрет REM</string>
-    <string name="set_hmm_rem_lockout_hint">REM подавляется столько минут после начала сеанса.</string>
+    <string name="set_hmm_rem_lockout_hint">REM подавляется столько минут после начала сессии.</string>
     <string name="set_hmm_rem_lockout_factor_title">Множитель запрета</string>
     <string name="set_hmm_rem_lockout_factor_hint">Множитель вероятности REM во время запрета.</string>
     <string name="set_hmm_cycle_weight_title">Вес приора цикла</string>

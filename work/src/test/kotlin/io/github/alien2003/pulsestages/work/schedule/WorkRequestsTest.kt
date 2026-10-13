@@ -34,7 +34,7 @@ class WorkRequestsTest {
             WorkRequests.estimateNow(),
             WorkRequests.backfill(now),
             WorkRequests.recomputeAll(RecomputeScope.ALL, now),
-            WorkRequests.recomputeNight("ps:abc"),
+            WorkRequests.recomputeNight("ps:abc", now),
         )
 
     @Test
@@ -106,9 +106,17 @@ class WorkRequestsTest {
         assertEquals(RecomputeWorker::class.java.name, all.workSpec.workerClassName)
         assertEquals(RecomputeRequest.All(RecomputeScope.STALE, now), WorkerInputs.recomputeRequestOf(all.workSpec.input))
 
-        val night = WorkRequests.recomputeNight("ps:abc")
+        val night = WorkRequests.recomputeNight("ps:abc", now)
         assertTrue(night.workSpec.expedited)
-        assertEquals(RecomputeRequest.Nights(listOf("ps:abc")), WorkerInputs.recomputeRequestOf(night.workSpec.input))
+        assertEquals(
+            RecomputeRequest.Nights(listOf("ps:abc"), now),
+            WorkerInputs.recomputeRequestOf(night.workSpec.input),
+            "the request time travels with the work: a deletion after it is not undone",
+        )
+        assertEquals(
+            RecomputeRequest.Nights(listOf("ps:abc")),
+            WorkerInputs.recomputeRequestOf(WorkerInputs.recompute(RecomputeRequest.Nights(listOf("ps:abc")))),
+        )
         assertEquals("recompute-night:ps:abc", WorkRequests.Names.recomputeNight("ps:abc"))
     }
 

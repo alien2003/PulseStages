@@ -154,30 +154,3 @@ fun ErrorBanner(
         }
     }
 }
-
-/**
- * A banner saying that the screen shows synthetic demo data (debug builds only): nothing shown is read from or
- * written to Health Connect.
- */
-@Composable
-fun SyntheticBanner(modifier: Modifier = Modifier) {
-    val spacing = MaterialTheme.spacing
-    Surface(modifier = modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.tertiaryContainer) {
-        Row(
-            modifier = Modifier.padding(horizontal = spacing.medium, vertical = spacing.small),
-            horizontalArrangement = Arrangement.spacedBy(spacing.small),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_info),
-                contentDescription = stringResource(R.string.cd_status_info),
-                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-            Text(
-                text = stringResource(R.string.demo_banner),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-        }
-    }
-}

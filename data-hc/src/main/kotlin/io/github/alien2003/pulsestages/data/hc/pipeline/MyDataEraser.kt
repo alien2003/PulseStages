@@ -42,12 +42,12 @@ enum class DeleteNightResult {
  * "Delete all my sessions from Health Connect": deletes every session this app wrote, by clientRecordId (Health
  * Connect only lets an app delete its own records, so nobody else's data can be touched). The ids come from the
  * ledger (nights with an output) plus, as a safety net, every one of our sessions found by reading our own data over
- * the full range. A running (or resumable) backfill is cancelled first, so that it cannot write the erased nights
- * again; it stops before its next night, and the night it may be finishing is erased as well because erasing waits
- * for the ledger lock. The affected nights are marked DELETED; automatic syncs do not write them again, not even when
- * a later fragment joins them (a backfill started afterwards or an explicit recompute does). Throws
- * [io.github.alien2003.pulsestages.data.hc.HealthDataException] on failure (nothing is marked then; the action can
- * simply be repeated).
+ * the full range. A running (or resumable) backfill and every recompute requested before the erase are cancelled
+ * first, so that they cannot write the erased nights again; they stop before their next night, and the night one of
+ * them may be finishing is erased as well because erasing waits for the ledger lock. The affected nights are marked
+ * DELETED; automatic syncs do not write them again, not even when a later fragment joins them (a backfill or an
+ * explicit recompute requested afterwards does). Throws [io.github.alien2003.pulsestages.data.hc.HealthDataException]
+ * on failure (nothing is marked then; the action can simply be repeated).
  */
 class MyDataEraser
     @Inject
@@ -55,12 +55,14 @@ class MyDataEraser
         private val repository: HealthRepository,
         private val nightDao: EstimatedNightDao,
         private val backfill: BackfillEngine,
+        private val recomputer: NightRecomputer,
         private val logger: AppLogger,
         private val clock: Clock,
     ) {
         /** Deletes all our sessions; see the class documentation. */
         suspend fun eraseAll(): EraseReport {
             backfill.cancel()
+            recomputer.cancel()
             return LedgerLock.withLock {
                 val now = clock.millis()
                 val fromLedger = nightDao.clientRecordIdsWithOutput()
@@ -84,8 +86,9 @@ class MyDataEraser
 
         /**
          * "Delete my session" of one night: deletes our session with [clientRecordId] from Health Connect (by
-         * clientRecordId, so nobody else's data can be touched) and marks the night DELETED, so automatic syncs do not
-         * write it again (an explicit recompute of the night or a backfill does). A night without an output is left as
+         * clientRecordId, so nobody else's data can be touched) and marks the night DELETED, so automatic syncs and a
+         * backfill or recompute that was requested before do not write it again (an explicit recompute of the night or
+         * a backfill requested afterwards does). A night without an output is left as
          * it is; the delete is still sent as a safety net (unknown ids are ignored). Throws
          * [io.github.alien2003.pulsestages.data.hc.HealthDataException] on failure (nothing is marked then).
          */

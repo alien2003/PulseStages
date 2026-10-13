@@ -153,6 +153,29 @@ class HealthConnectRepository internal constructor(
         packages: Set<String>?,
     ): List<HcSleepSession> = readSessions("readSleepSessions", startMs, endMs, packages)
 
+    override suspend fun oldestSleepSessionStartMs(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): Long? {
+        // An empty package set selects nothing (an empty origin filter would select every app).
+        if (startMs >= endMs || packages?.isEmpty() == true) return null
+        val request =
+            ReadRecordsRequest(
+                recordType = SleepSessionRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(Instant.ofEpochMilli(startMs), Instant.ofEpochMilli(endMs)),
+                dataOriginFilter = packages?.map(::DataOrigin)?.toSet() ?: emptySet(),
+                ascendingOrder = true,
+                pageSize = 1,
+            )
+        // One page of one record; the page token is deliberately not followed.
+        return call("oldestSleepSession") { client().readRecords(request) }
+            .records
+            .firstOrNull()
+            ?.startTime
+            ?.toEpochMilli()
+    }
+
     override suspend fun readHeartRate(
         startMs: Long,
         endMs: Long,

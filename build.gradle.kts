@@ -24,6 +24,7 @@ val detektVersion: String = libs.versions.detekt.get()
 val detektKotlinVersion: String = libs.versions.detektKotlin.get()
 val jvmTargetVersion: String = libs.versions.jvmTarget.get()
 val detektConfigFile = layout.projectDirectory.file("config/detekt/detekt.yml")
+val detektPublicApiConfigFile = layout.projectDirectory.file("config/detekt/public-api.yml")
 
 allprojects {
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
@@ -46,6 +47,10 @@ subprojects {
         config.setFrom(detektConfigFile)
         // Every source set (main, test, androidTest, ...); detekt skips build/ by default.
         source.setFrom(files("src"))
+        if (path == ":core-algo") {
+            // The public API of :core-algo must carry KDoc (Undocumented* rules on src/main).
+            config.setFrom(detektConfigFile, detektPublicApiConfigFile)
+        }
     }
     tasks.withType<Detekt>().configureEach {
         jvmTarget = jvmTargetVersion

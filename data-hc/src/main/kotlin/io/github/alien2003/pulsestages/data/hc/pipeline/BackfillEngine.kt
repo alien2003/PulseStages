@@ -79,7 +79,9 @@ data class BackfillReport(
  *   before the run began (while the worker was still starting) or the process died in between (the CANCELLED state
  *   is persisted then); only a backfill requested after the cancel starts over;
  * - progress is reported after every window through `onProgress`; `nightsEstimated` counts the nights that have an
- *   up-to-date estimate afterwards (written now or already current), so a resumed window is not under-counted.
+ *   up-to-date estimate afterwards (written now or already current), so a resumed window is not under-counted;
+ * - a backfill writes nights the user deleted earlier again, but not one deleted after the backfill was requested
+ *   (`requestedAtMs`, or the start of the backfill when not given).
  */
 @Singleton
 class BackfillEngine
@@ -107,7 +109,7 @@ class BackfillEngine
 
         /** Whether a cancel request applies to the current run; see [run]. */
         private class CancelScope(
-            private val requestedAtMs: Long?,
+            val requestedAtMs: Long?,
             private val atStart: CancelMark,
         ) {
             fun appliesTo(mark: CancelMark): Boolean =
@@ -236,7 +238,17 @@ class BackfillEngine
             if (isCancelled()) return WindowResult(state, cancelled(state))
             val windowEnd = minOf(state.cursorMs + state.windowDays * DAY_MS, state.rangeEndMs)
             val nights = windowReader.nightsInWindow(state.cursorMs, windowEnd, settings)
-            val report = pipeline.process(nights, settings, PipelineTrigger.BACKFILL, granted, shouldStop = ::cancelRequested)
+            // Nights the user deleted after asking for this backfill (after it started, when not known) stay deleted.
+            val requestedAt = scope.requestedAtMs ?: state.startedAt
+            val report =
+                pipeline.process(
+                    nights,
+                    settings,
+                    PipelineTrigger.BACKFILL,
+                    granted,
+                    shouldStop = ::cancelRequested,
+                    requestedAtMs = requestedAt,
+                )
             val interrupted = interruption(state, report)
             val after = if (interrupted == null) state.advancedBy(windowEnd, report, clock.millis()) else state
             val stop = interrupted ?: if (isCancelled()) cancelled(after) else null
@@ -309,17 +321,8 @@ class BackfillEngine
             val backfillDays = settings.sources.backfillDays
             val requestedStart = if (backfillDays == 0) HISTORY_START_MS else now - backfillDays * DAY_MS
             val packages = windowReader.enabledPackages(settings)
-            val oldest =
-                if (packages.isEmpty()) {
-                    null
-                } else {
-                    repository
-                        .readSleepSessions(
-                            requestedStart,
-                            now,
-                            packages,
-                        ).minOfOrNull { it.startMs }
-                }
+            // One single-record read finds the oldest session; the history itself is only read window by window.
+            val oldest = if (packages.isEmpty()) null else repository.oldestSleepSessionStartMs(requestedStart, now, packages)
             val rangeStart = oldest?.let { maxOf(requestedStart, it - Math.floorMod(it, DAY_MS)) } ?: now
             val windowMs = BackfillStateEntity.DEFAULT_WINDOW_DAYS * DAY_MS
             val windows = if (now > rangeStart) ((now - rangeStart + windowMs - 1) / windowMs).toInt() else 0

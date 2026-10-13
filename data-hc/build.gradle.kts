@@ -18,8 +18,8 @@ android {
         consumerProguardFiles("consumer-rules.pro")
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.toVersion(libs.versions.jvmTarget.get())
+        targetCompatibility = JavaVersion.toVersion(libs.versions.jvmTarget.get())
     }
     // FakeHealthRepository, the in-memory ledger and the other test doubles live in src/testFixtures so that the
     // tests of :work (and :app) can reuse them: testImplementation(testFixtures(project(":data-hc"))).

@@ -69,6 +69,12 @@ class BackgroundRuleHealthRepository
             packages: Set<String>?,
         ): List<HcSleepSession> = checked(packages) { delegate.readSleepSessions(startMs, endMs, packages) }
 
+        override suspend fun oldestSleepSessionStartMs(
+            startMs: Long,
+            endMs: Long,
+            packages: Set<String>?,
+        ): Long? = checked(packages) { delegate.oldestSleepSessionStartMs(startMs, endMs, packages) }
+
         override suspend fun readHeartRate(
             startMs: Long,
             endMs: Long,

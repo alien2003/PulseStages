@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -55,7 +56,8 @@ fun PulseStagesNavHost(modifier: Modifier = Modifier) {
                         selected = destination?.hierarchy?.any { it.hasRoute(tab.route::class) } == true,
                         onClick = { navController.navigateToTab(tab) },
                         icon = { Icon(painter = painterResource(tab.icon), contentDescription = label) },
-                        label = { Text(label) },
+                        // One line: at a large font scale a long label is shortened instead of split mid-word.
+                        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     )
                 }
             }

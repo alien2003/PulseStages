@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.data.local.settings
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStore
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -78,6 +79,30 @@ class SettingsRepositoryTest {
                         .schedule.periodicHours,
                 )
             }
+        }
+
+    @Test
+    fun `the file stores only changed values, so defaults that a new app version changes reach the user`() =
+        runTest {
+            withRepository { repository ->
+                repository.update { it.copy(sources = it.sources.copy(minSessionMin = 60)) }
+            }
+
+            val stored = Json.parseToJsonElement(file.readText()).jsonObject
+            assertEquals(Json.parseToJsonElement("""{"sources":{"minSessionMin":60}}"""), stored)
+            // A file written by an older version with other trained defaults holds no algorithm values: whatever
+            // TrainedDefaults says in this build applies. Simulated with an older file that has only user choices.
+            file.writeText("""{"sources":{"minSessionMin":60},"algo":{"hybrid":{"maxBoutMin":90}}}""")
+            withRepository { repository ->
+                val settings = repository.settings.first()
+                assertEquals(60, settings.sources.minSessionMin)
+                assertEquals(90, settings.algo.hybrid.maxBoutMin, "the user's own change is kept")
+                assertEquals(AlgoParams().copy(hybrid = AlgoParams().hybrid.copy(maxBoutMin = 90)), settings.algo)
+                assertEquals(AlgoParams().estimator, settings.algo.estimator)
+                assertEquals(AlgoParams().hybrid.durationModel, settings.algo.hybrid.durationModel)
+            }
+            val export = Json.parseToJsonElement(SettingsJson.encode(AppSettings())).jsonObject
+            assertTrue("estimator" in export.getValue("algo").jsonObject, "an export still lists every value")
         }
 
     @Test
@@ -203,9 +228,9 @@ class SettingsRepositoryTest {
             withRepository { repository -> assertEquals(AppSettings(), repository.settings.first()) }
 
             assertEquals(1, corruptions.size)
-            // The handler rewrote the file with valid default JSON.
+            // The handler rewrote the file with valid JSON of the defaults (which store nothing).
             val root = Json.parseToJsonElement(file.readText()).jsonObject
-            assertTrue(root.containsKey("algo"))
+            assertTrue(root.isEmpty(), root.toString())
             withRepository { repository -> assertEquals(AppSettings(), repository.settings.first()) }
             assertEquals(1, corruptions.size, "a repaired file is not corrupt any more")
         }

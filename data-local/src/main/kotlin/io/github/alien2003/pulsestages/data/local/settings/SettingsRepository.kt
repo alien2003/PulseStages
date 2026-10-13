@@ -27,7 +27,7 @@ sealed interface SettingsUpdateResult {
 
 /**
  * The user's settings. Every write is validated by [SettingsValidator]: invalid settings are never stored.
- * Export/import use the same JSON as storage ([SettingsJson]).
+ * Export/import use the same JSON format as storage ([SettingsJson]; the file leaves out values equal to their default).
  */
 interface SettingsRepository {
     /** Current settings; emits on every change. Emits defaults when nothing was stored yet. */

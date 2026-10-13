@@ -101,7 +101,10 @@ class WorkManagerWorkScheduler
         }
 
         override suspend fun recomputeNight(clientRecordId: String) {
-            enqueueUserRequest(WorkRequests.Names.recomputeNight(clientRecordId), WorkRequests.recomputeNight(clientRecordId))
+            enqueueUserRequest(
+                WorkRequests.Names.recomputeNight(clientRecordId),
+                WorkRequests.recomputeNight(clientRecordId, clock.millis()),
+            )
         }
 
         /**

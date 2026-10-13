@@ -1,0 +1,13 @@
+# Extra detekt rules for :core-algo only (applied on top of detekt.yml by the root build script): the specification
+# requires KDoc on its whole public API ("public API with KDoc"). Only production sources are checked.
+
+comments:
+  UndocumentedPublicClass:
+    active: true
+    excludes: ['**/test/**', '**/testFixtures/**']
+  UndocumentedPublicFunction:
+    active: true
+    excludes: ['**/test/**', '**/testFixtures/**']
+  UndocumentedPublicProperty:
+    active: true
+    excludes: ['**/test/**', '**/testFixtures/**']

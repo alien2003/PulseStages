@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- «Версии и лицензии»: последняя карточка вкладки «Настройки». -->
+    <string name="about_title">Версии и лицензии</string>
+    <string name="about_versions">Версия %1$s · алгоритм %2$d · модель %3$s</string>
+    <string name="about_model_none">недоступна</string>
+    <string name="about_estimate">Стадии сна оцениваются по пульсу и шагам, а не измеряются. Каждая сессия, которую записывает PulseStages, помечена как оценка, с версией алгоритма и хэшем его параметров.</string>
+    <string name="about_license">Код: WTFPL (с ним можно делать что угодно).</string>
+    <string name="about_datasets_title">Данные для обучения</string>
+    <string name="about_attribution">Contains information from Motion and heart rate from a wrist-worn wearable and labeled sleep from polysomnography (https://physionet.org/content/sleep-accel/1.0.0/) and from BIDSleep: A Multi-Night Instantaneous Heart Rate and Accelerometry Dataset with EEG Sleep Stage Labels (https://physionet.org/content/bidsleep-dataset/1.0.1/), which are made available under the ODC Attribution License (https://opendatacommons.org/licenses/by/1-0/). Модель обучена на этих открытых датасетах PhysioNet (лицензия ODC-By 1.0, указание авторства обязательно).</string>
+    <string name="about_citations">Walch O. et al., Sleep 42(12):zsz180 (2019), https://doi.org/10.1093/sleep/zsz180. Song T. et al., BIDSleep v1.0.1, PhysioNet (2026), https://doi.org/10.13026/rees-1092. Встроенная модель обучена на этих датасетах PhysioNet: в ней параметры, полученные из них, а не сами записи.</string>
+</resources>

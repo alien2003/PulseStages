@@ -42,7 +42,7 @@ class FakeHealthConnectClient(
     /** Available features (FEATURE_* constants). */
     val availableFeatures: MutableSet<Int> = mutableSetOf()
 
-    /** Records per page. */
+    /** Records per page (at most the request's page size). */
     var pageSize: Int = 2
 
     /** End pagination with `""` (APK path) instead of null (platform). */
@@ -118,10 +118,12 @@ class FakeHealthConnectClient(
                 }.map { it.second as T }
                 .sortedBy { startOf(it) }
         val offset = request.pageToken?.toInt() ?: 0
-        val page = matching.drop(offset).take(pageSize)
+        // The request's page size caps the fake's own one (tests use small pages to exercise pagination).
+        val size = minOf(pageSize, request.pageSize)
+        val page = matching.drop(offset).take(size)
         val next =
             when {
-                offset + pageSize < matching.size -> (offset + pageSize).toString()
+                offset + size < matching.size -> (offset + size).toString()
                 apkStyleLastPage -> ""
                 else -> null
             }

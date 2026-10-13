@@ -108,11 +108,11 @@ class PipelineHarness(
     /** Sources scan. */
     val scanner: SourceScanner = SourceScanner(health, settings, clock, ownPackage)
 
-    /** "Delete all my sessions". */
-    val eraser: MyDataEraser = MyDataEraser(health, ledger.nightDao, backfill, logger, clock)
-
     /** Explicit recompute. */
-    val recomputer: NightRecomputer = NightRecomputer(settings, ledger.nightDao, windowReader, pipeline, guard, logger)
+    val recomputer: NightRecomputer = NightRecomputer(settings, ledger.nightDao, windowReader, pipeline, guard, logger, clock)
+
+    /** "Delete all my sessions". */
+    val eraser: MyDataEraser = MyDataEraser(health, ledger.nightDao, backfill, recomputer, logger, clock)
 
     /** The hybrid model bundle handed to calibration (none by default). */
     var hybridModel: HybridModel? = null

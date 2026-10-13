@@ -3,7 +3,6 @@
     <!-- Главная, Ночи, детали ночи и Сравнение (UI, часть 2). Английские строки — в values/strings_screens.xml. -->
     <string name="action_delete">Удалить</string>
     <string name="value_not_available">—</string>
-    <string name="demo_banner">Демо-режим: синтетические ночи. Ничего не читается из Health Connect и не записывается туда.</string>
 
     <string name="error_hc_permission">Health Connect отказал: не хватает разрешения. Выдайте его на вкладке «Главная».</string>
     <string name="error_hc_unavailable">Health Connect недоступен.</string>
@@ -83,7 +82,7 @@
     <string name="home_action_estimate">Оценить новые</string>
     <string name="home_backfill_title">Бэкфилл истории</string>
     <string name="home_backfill_body">Оценивает все прошлые ночи в фоне, окнами по 7 дней. Продолжается после перезапуска, его можно отменить.</string>
-    <string name="home_backfill_body_limited">Оценивает все прошлые ночи в фоне, окнами по 7 дней. Без доступа к истории Health Connect отдаёт только последние 30 дней.</string>
+    <string name="home_backfill_body_limited">Оценивает все прошлые ночи в фоне, окнами по 7 дней. Без доступа к истории Health Connect не отдаёт данные старше 30 дней до первой выдачи доступа PulseStages.</string>
     <string name="home_backfill_running">Бэкфилл выполняется…</string>
     <string name="home_backfill_progress">Окно %1$d из %2$d · найдено ночей: %3$d, оценено: %4$d</string>
     <string name="home_backfill_started">Бэкфилл запущен.</string>
@@ -92,12 +91,12 @@
     <string name="home_backfill_cancelled">Последний бэкфилл отменён после окна %1$d из %2$d.</string>
     <string name="home_backfill_failed">Последний бэкфилл остановлен ошибкой после окна %1$d из %2$d (см. лог).</string>
     <string name="home_backfill_interrupted">Бэкфилл прерван после окна %1$d из %2$d; продолжите его.</string>
-    <string name="home_backfill_was_limited">История была ограничена последними 30 днями (нет доступа к истории).</string>
+    <string name="home_backfill_was_limited">История была ограничена 30 днями до первой выдачи доступа PulseStages (нет доступа к истории).</string>
     <string name="home_action_backfill">Бэкфилл истории</string>
     <string name="home_action_backfill_resume">Продолжить бэкфилл</string>
     <string name="home_recompute_title">Пересчёт</string>
     <string name="home_recompute_body">Заново оценивает все ночи с текущими настройками и перезаписывает их сессии в Health Connect.</string>
-    <string name="home_recompute_never">В настройках для «Существующие сеансы» выбрано «Никогда не перезаписывать»: пересчёт не перезаписывает ночи, у которых уже есть сессия, а только оценивает ночи без неё.</string>
+    <string name="home_recompute_never">В настройках для «Существующие сессии» выбрано «Никогда не перезаписывать»: пересчёт не перезаписывает ночи, у которых уже есть сессия, а только оценивает ночи без неё.</string>
     <string name="home_recompute_running">Пересчёт…</string>
     <string name="home_recompute_progress">Пересчёт ночей: %1$d из %2$d</string>
     <string name="home_recompute_all_started">Пересчёт всех ночей запущен.</string>
@@ -150,7 +149,7 @@
     <string name="night_action_delete">Удалить мою сессию</string>
     <string name="night_recompute_started">Пересчёт запущен.</string>
     <string name="night_recompute_running">Ночь пересчитывается…</string>
-    <string name="night_recompute_blocked_never">В настройках для «Существующие сеансы» выбрано «Никогда не перезаписывать», поэтому сессия этой ночи не перезаписывается. Чтобы пересчитать её, измените эту настройку.</string>
+    <string name="night_recompute_blocked_never">В настройках для «Существующие сессии» выбрано «Никогда не перезаписывать», поэтому сессия этой ночи не перезаписывается. Чтобы пересчитать её, измените эту настройку.</string>
     <string name="night_compare_title">Сравнение с RULES</string>
     <string name="night_compare_agreement">Согласие с RULES: каппа %1$s · точность %2$s</string>
     <string name="night_compare_primary">Текущая оценка (%1$s)</string>

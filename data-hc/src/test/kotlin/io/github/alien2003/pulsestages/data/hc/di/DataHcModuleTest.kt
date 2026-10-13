@@ -8,7 +8,6 @@ import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import dagger.hilt.components.SingletonComponent
 import io.github.alien2003.pulsestages.data.hc.BackgroundRuleHealthRepository
-import io.github.alien2003.pulsestages.data.hc.HealthConnectAvailabilityChecker
 import io.github.alien2003.pulsestages.data.hc.HealthConnectRepository
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.fake.FakeNightEstimator
@@ -64,8 +63,6 @@ class DataHcModuleTest {
     @field:PlatformHealthRepository
     lateinit var platformRepository: HealthRepository
 
-    @Inject lateinit var availabilityChecker: HealthConnectAvailabilityChecker
-
     @Inject lateinit var pipeline: NightPipeline
 
     @Inject lateinit var sync: NewNightsSync
@@ -75,6 +72,8 @@ class DataHcModuleTest {
     @Inject lateinit var otherBackfill: BackfillEngine
 
     @Inject lateinit var recomputer: NightRecomputer
+
+    @Inject lateinit var otherRecomputer: NightRecomputer
 
     @Inject lateinit var eraser: MyDataEraser
 
@@ -110,8 +109,9 @@ class DataHcModuleTest {
         assertTrue("the app reads behind the background rule", repository is BackgroundRuleHealthRepository)
         assertTrue(platformRepository is HealthConnectRepository)
         assertSame("the backfill state machine is a singleton", backfill, otherBackfill)
+        assertSame("one recomputer, so that erasing reaches the running recompute", recomputer, otherRecomputer)
         assertTrue(ownPackage, ownPackage.startsWith("io.github.alien2003.pulsestages.data.hc"))
         assertTrue(titles.defaultTitleTemplate().isNotBlank())
-        listOf(availabilityChecker, pipeline, sync, recomputer, eraser, scanner, guard).forEach { assertNotNull(it) }
+        listOf(pipeline, sync, recomputer, eraser, scanner, guard).forEach { assertNotNull(it) }
     }
 }

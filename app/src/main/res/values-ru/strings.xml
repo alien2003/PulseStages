@@ -78,7 +78,7 @@
     <string name="home_title">PulseStages</string>
     <string name="home_hc_title">Health Connect</string>
     <string name="home_about_title">Фазы сна по пульсу</string>
-    <string name="home_body">PulseStages оценивает бодрствование, лёгкий, глубокий и быстрый (REM) сон по пульсу и шагам, которые часы записывают в Health Connect, и сохраняет фазы обратно как собственные сеансы сна с пометкой «оценка».</string>
+    <string name="home_body">PulseStages оценивает бодрствование, лёгкий, глубокий и быстрый (REM) сон по пульсу и шагам, которые часы записывают в Health Connect, и сохраняет фазы обратно как собственные сессии сна с пометкой «оценка».</string>
     <string name="hc_status_checking">Проверка Health Connect…</string>
     <string name="hc_status_available">Health Connect доступен.</string>
     <string name="hc_status_update_required">Нужно установить или обновить Health Connect.</string>
@@ -91,7 +91,7 @@
     <string name="home_permission_optional">Необязательно: используется, если есть данные.</string>
     <string name="home_permission_granted">Выдано.</string>
     <string name="home_history_title">Доступ к истории</string>
-    <string name="home_history_limited">Не выдан: Health Connect отдаёт только последние 30 дней, поэтому бэкфилл истории ограничен.</string>
+    <string name="home_history_limited">Не выдан: Health Connect не отдаёт данные старше 30 дней до первой выдачи доступа PulseStages, поэтому бэкфилл истории ограничен.</string>
     <string name="home_background_title">Доступ в фоне</string>
     <string name="home_background_missing">Не выдан: новые ночи обрабатываются, только пока приложение открыто.</string>
     <string name="home_feature_unavailable">Эта версия Health Connect не может его выдать. %1$s</string>
@@ -105,7 +105,7 @@
     <string name="nights_title">Ночи</string>
     <string name="nights_error">Не удалось прочитать ночи.</string>
     <string name="nights_empty_title">Ночей пока нет</string>
-    <string name="nights_empty_body">Ночи появятся здесь, когда PulseStages прочитает сеансы сна из Health Connect и оценит их стадии.</string>
+    <string name="nights_empty_body">Ночи появятся здесь, когда PulseStages прочитает сессии сна из Health Connect и оценит их стадии.</string>
     <string name="nights_time_range">%1$s–%2$s · %3$s</string>
     <string name="nights_stage_share">%1$s %2$s</string>
     <string name="nights_quality">Уверенность %1$s · покрытие %2$s</string>
@@ -132,13 +132,13 @@
     <string name="night_detail_warnings">Предупреждения</string>
     <string name="night_detail_source">Источник</string>
     <string name="night_detail_source_package">Приложение</string>
-    <string name="night_detail_source_sessions">Исходных сеансов</string>
+    <string name="night_detail_source_sessions">Исходных сессий</string>
     <string name="night_detail_client_record_id">Ключ записи (clientRecordId)</string>
     <string name="night_detail_updated">Последнее изменение</string>
     <string name="compare_title">Сравнение</string>
     <string name="compare_explanation">У этих ночей есть настоящие стадии сна от другого приложения. С ними сравниваются оценки.</string>
     <string name="compare_empty_title">Нет эталонных ночей</string>
-    <string name="compare_empty_body_all">Ни одно другое приложение не записывало в Health Connect сеансы сна с настоящими стадиями за всю историю.</string>
+    <string name="compare_empty_body_all">Ни одно другое приложение не записывало в Health Connect сессии сна с настоящими стадиями за всю историю.</string>
     <string name="compare_range_label">Период поиска</string>
     <string name="compare_range_recent">90 дней</string>
     <string name="compare_range_year">1 год</string>
@@ -149,11 +149,11 @@
     <string name="sources_priority_hint">Включите приложения, ночи которых нужно оценивать. Если одну ночь записали два приложения, берётся то, что выше в списке.</string>
     <string name="sources_hr_any_title">Пульс и шаги — от любых приложений</string>
     <string name="sources_hr_any_on">Пульс и шаги читаются от всех приложений, которые их пишут.</string>
-    <string name="sources_hr_any_off">Пульс и шаги читаются от того же приложения, что и сеанс сна.</string>
+    <string name="sources_hr_any_off">Пульс и шаги читаются от того же приложения, что и сессия сна.</string>
     <string name="sources_empty">За просмотренный период ни одно приложение не записывало сон. Ниже можно добавить приложение по имени пакета.</string>
-    <string name="sources_no_sessions">Нет сеансов сна за просмотренный период</string>
+    <string name="sources_no_sessions">Нет сессий сна за просмотренный период</string>
     <string name="sources_sessions_unknown">Сеансы не просмотрены</string>
-    <string name="sources_not_scanned">Не удалось просмотреть Health Connect, поэтому настроенные источники показаны без сеансов. Их по-прежнему можно включать, переставлять и добавлять.</string>
+    <string name="sources_not_scanned">Не удалось просмотреть Health Connect, поэтому настроенные источники показаны без сессий. Их по-прежнему можно включать, переставлять и добавлять.</string>
     <string name="sources_own_label">PulseStages (это приложение)</string>
     <string name="sources_own_hint">Собственные оценки никогда не используются как источник.</string>
     <string name="sources_manual_title">Добавить приложение по имени пакета</string>
@@ -192,16 +192,16 @@
     <string name="rationale_read_heart_rate">Пульс во время каждой ночи и около неё — основной сигнал оценки.</string>
     <string name="rationale_read_steps">Шаги — как мера движения ночью.</string>
     <string name="rationale_read_optional">По желанию — кислород в крови (SpO2), частота дыхания и вариабельность пульса, если они есть и вы их разрешили.</string>
-    <string name="rationale_read_history">Доступ к истории старше 30 дней — чтобы оценить прошлые ночи, когда вы запускаете бэкфилл.</string>
+    <string name="rationale_read_history">Доступ к данным старше 30 дней до первой выдачи доступа PulseStages — чтобы оценить прошлые ночи, когда вы запускаете бэкфилл.</string>
     <string name="rationale_read_background">Доступ в фоне — чтобы новые ночи оценивались автоматически, пока приложение закрыто.</string>
     <string name="rationale_write_title">Что записывается</string>
-    <string name="rationale_write_sessions">Собственные сеансы сна с оценёнными стадиями (бодрствование, лёгкий, глубокий, REM), помеченные как оценка, с версией алгоритма.</string>
+    <string name="rationale_write_sessions">Собственные сессии сна с оценёнными стадиями (бодрствование, лёгкий, глубокий, REM), помеченные как оценка, с версией алгоритма.</string>
     <string name="rationale_write_never_others">Приложение никогда не изменяет и не удаляет данные других приложений — Health Connect этого не позволяет.</string>
     <string name="rationale_device_title">Ничего не покидает устройство</string>
     <string name="rationale_device_no_internet">У PulseStages нет разрешения на доступ в интернет — оно не может никуда отправить ваши данные.</string>
     <string name="rationale_device_local">Вся обработка происходит на телефоне. Собственные записи (настройки, лог, какие ночи оценены) хранятся в закрытом хранилище приложения.</string>
     <string name="rationale_delete_title">Как удалить данные приложения</string>
-    <string name="rationale_delete_in_app">В приложении: «Главная» → «Удалить мои сеансы из Health Connect» удаляет все сеансы, записанные PulseStages.</string>
+    <string name="rationale_delete_in_app">В приложении: «Главная» → «Удалить мои сессии из Health Connect» удаляет все сессии, записанные PulseStages.</string>
     <string name="rationale_delete_health_connect">В Health Connect: «Разрешения приложений» → PulseStages → «Удалить данные приложения»; там же можно отозвать все разрешения.</string>
     <string name="rationale_delete_uninstall">Удаление PulseStages стирает его закрытое хранилище и отзывает разрешения.</string>
     <string name="rationale_action_open_app">Открыть PulseStages</string>
@@ -271,7 +271,7 @@
     <string name="option_low_conf_keep">Оставить</string>
     <string name="option_low_conf_light">Лёгкий</string>
     <string name="settings_section_sources">Источники</string>
-    <string name="settings_section_sources_summary">Какие сеансы оцениваются</string>
+    <string name="settings_section_sources_summary">Какие сессии оцениваются</string>
     <string name="settings_section_schedule">Запуск</string>
     <string name="settings_section_schedule_summary">Когда обрабатываются новые ночи</string>
     <string name="settings_section_write">Запись</string>
@@ -327,10 +327,10 @@
         <item quantity="other">%1$d эталонной ночи за всю историю</item>
     </plurals>
     <plurals name="compare_empty_body">
-        <item quantity="one">За последний %1$d день ни одно другое приложение не записало в Health Connect сеансы сна с настоящими стадиями.</item>
-        <item quantity="few">За последние %1$d дня ни одно другое приложение не записало в Health Connect сеансы сна с настоящими стадиями.</item>
-        <item quantity="many">За последние %1$d дней ни одно другое приложение не записало в Health Connect сеансы сна с настоящими стадиями.</item>
-        <item quantity="other">За последние %1$d дня ни одно другое приложение не записало в Health Connect сеансы сна с настоящими стадиями.</item>
+        <item quantity="one">За последний %1$d день ни одно другое приложение не записало в Health Connect сессии сна с настоящими стадиями.</item>
+        <item quantity="few">За последние %1$d дня ни одно другое приложение не записало в Health Connect сессии сна с настоящими стадиями.</item>
+        <item quantity="many">За последние %1$d дней ни одно другое приложение не записало в Health Connect сессии сна с настоящими стадиями.</item>
+        <item quantity="other">За последние %1$d дня ни одно другое приложение не записало в Health Connect сессии сна с настоящими стадиями.</item>
     </plurals>
     <plurals name="sources_scanned_days">
         <item quantity="one">Приложения, записывавшие сон в Health Connect за последний %1$d день:</item>
@@ -339,10 +339,10 @@
         <item quantity="other">Приложения, записывавшие сон в Health Connect за последние %1$d дня:</item>
     </plurals>
     <plurals name="sources_sessions">
-        <item quantity="one">%1$d сеанс, последний %2$s</item>
-        <item quantity="few">%1$d сеанса, последний %2$s</item>
-        <item quantity="many">%1$d сеансов, последний %2$s</item>
-        <item quantity="other">%1$d сеанса, последний %2$s</item>
+        <item quantity="one">%1$d сессия, последняя %2$s</item>
+        <item quantity="few">%1$d сессии, последняя %2$s</item>
+        <item quantity="many">%1$d сессий, последняя %2$s</item>
+        <item quantity="other">%1$d сессии, последняя %2$s</item>
     </plurals>
     <plurals name="log_entries_shown">
         <item quantity="one">%1$d запись</item>

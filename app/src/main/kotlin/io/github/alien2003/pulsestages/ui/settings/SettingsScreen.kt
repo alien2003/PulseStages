@@ -60,6 +60,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.data.local.settings.OHEALTH_PACKAGE
 import io.github.alien2003.pulsestages.data.local.settings.SettingsError
+import io.github.alien2003.pulsestages.ui.about.AboutInfo
+import io.github.alien2003.pulsestages.ui.about.AboutViewModel
+import io.github.alien2003.pulsestages.ui.about.VersionsAndLicencesCard
+import io.github.alien2003.pulsestages.ui.common.ConfirmDialog
 import io.github.alien2003.pulsestages.ui.common.LoadingState
 import io.github.alien2003.pulsestages.ui.common.MessageSnackbarEffect
 import io.github.alien2003.pulsestages.ui.common.isWideLayout
@@ -107,8 +111,10 @@ fun SettingsRoute(
     onOpenSources: () -> Unit,
     onOpenLog: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
+    aboutViewModel: AboutViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val about by aboutViewModel.about.collectAsStateWithLifecycle()
     val exportLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(EXPORT_MIME_TYPE)) { uri ->
             uri?.let { viewModel.exportTo(it.toString()) }
@@ -119,6 +125,7 @@ fun SettingsRoute(
         }
     SettingsScreen(
         state = state,
+        about = about,
         actions =
             SettingsActions(
                 onEdit = viewModel::onEdit,
@@ -149,13 +156,17 @@ fun SettingsRoute(
     )
 }
 
-/** Stateless Settings screen: one column on compact windows, two columns on wide ones. */
+/**
+ * Stateless Settings screen: one column on compact windows, two columns on wide ones; versions and licences ([about])
+ * at the end.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
     actions: SettingsActions,
     modifier: Modifier = Modifier,
+    about: AboutInfo? = null,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     MessageSnackbarEffect(state.messages, snackbarHostState, actions.onMessageShown, actions.onMessageAction)
@@ -167,7 +178,7 @@ fun SettingsScreen(
         if (state.loading) {
             LoadingState(Modifier.padding(innerPadding).fillMaxSize())
         } else {
-            SettingsGrid(state, actions, Modifier.padding(innerPadding))
+            SettingsGrid(state, actions, about, Modifier.padding(innerPadding))
         }
     }
     if (state.confirmReset) ResetDialog(actions)
@@ -178,6 +189,7 @@ fun SettingsScreen(
 private fun SettingsGrid(
     state: SettingsUiState,
     actions: SettingsActions,
+    about: AboutInfo?,
     modifier: Modifier,
 ) {
     val spacing = MaterialTheme.spacing
@@ -203,6 +215,11 @@ private fun SettingsGrid(
                 state = state,
                 actions = actions,
             )
+        }
+        if (about != null) {
+            item(key = "about", span = StaggeredGridItemSpan.FullLine) {
+                VersionsAndLicencesCard(about)
+            }
         }
     }
 }
@@ -369,12 +386,12 @@ private fun LinkItem(
 
 @Composable
 private fun ResetDialog(actions: SettingsActions) {
-    AlertDialog(
-        onDismissRequest = actions.onDismissReset,
-        title = { Text(stringResource(R.string.settings_reset_confirm_title)) },
-        text = { Text(stringResource(R.string.settings_reset_confirm_body)) },
-        confirmButton = { TextButton(onClick = actions.onConfirmReset) { Text(stringResource(R.string.settings_action_reset)) } },
-        dismissButton = { TextButton(onClick = actions.onDismissReset) { Text(stringResource(R.string.action_cancel)) } },
+    ConfirmDialog(
+        title = stringResource(R.string.settings_reset_confirm_title),
+        body = stringResource(R.string.settings_reset_confirm_body),
+        confirm = stringResource(R.string.settings_action_reset),
+        onConfirm = actions.onConfirmReset,
+        onDismiss = actions.onDismissReset,
     )
 }
 

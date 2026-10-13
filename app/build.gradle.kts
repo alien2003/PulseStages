@@ -66,8 +66,15 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.toVersion(libs.versions.jvmTarget.get())
+        targetCompatibility = JavaVersion.toVersion(libs.versions.jvmTarget.get())
+    }
+
+    testOptions {
+        unitTests {
+            // The app-graph, wiring and screenshot tests run on Robolectric with the app's merged resources and assets.
+            isIncludeAndroidResources = true
+        }
     }
 
     buildFeatures {
@@ -88,7 +95,7 @@ kotlin {
 /**
  * Hands the merged manifest of every variant (obtained through the Variant API, SingleArtifact.MERGED_MANIFEST) to the
  * unit-test JVM as `-Dpulsestages.mergedManifest.<variant>=<path>`. Declaring the files as inputs makes the test task
- * depend on manifest merging, so NoInternetPermissionTest always checks the real merged output.
+ * depend on manifest merging, so MergedManifestTest always checks the real merged output.
  */
 abstract class MergedManifestsArgumentProvider : CommandLineArgumentProvider {
     @get:InputFiles
@@ -103,6 +110,54 @@ abstract class MergedManifestsArgumentProvider : CommandLineArgumentProvider {
 }
 
 val mergedManifests = objects.newInstance(MergedManifestsArgumentProvider::class.java)
+
+// Like :work, :data-local and :data-hc: Robolectric runs offline against the android-all jar resolved by Gradle.
+val robolectricAndroidAll = configurations.dependencyScope("robolectricAndroidAll")
+val robolectricAndroidAllClasspath =
+    configurations.resolvable("robolectricAndroidAllClasspath") {
+        extendsFrom(robolectricAndroidAll.get())
+        isTransitive = false
+    }
+val robolectricDependencyDir = layout.buildDirectory.dir("robolectric-deps")
+val prepareRobolectricDependencies =
+    tasks.register<Sync>("prepareRobolectricDependencies") {
+        description = "Copies the android-all jar resolved by Gradle into the directory used by offline Robolectric."
+        from(robolectricAndroidAllClasspath)
+        into(robolectricDependencyDir)
+    }
+
+// The screenshots of docs/screenshots are rendered from synthetic data on the JVM by ScreenshotsTest (Robolectric
+// native graphics). Every test run renders them into build/screenshots; with -PrecordScreenshots they are written to
+// docs/screenshots instead:  ./gradlew :app:testDebugUnitTest --tests '*ScreenshotsTest' -PrecordScreenshots
+val recordScreenshots = providers.gradleProperty("recordScreenshots").isPresent
+val screenshotDir: String =
+    if (recordScreenshots) {
+        rootProject.layout.projectDirectory
+            .dir("docs/screenshots")
+            .asFile.absolutePath
+    } else {
+        layout.buildDirectory
+            .dir("screenshots")
+            .get()
+            .asFile.absolutePath
+    }
+// ResourcesParityTest reads the strings of every module; their changes must re-run the app's tests.
+val moduleStrings =
+    files(
+        listOf("work", "data-hc", "data-local", "core-algo").map { module ->
+            fileTree(rootProject.layout.projectDirectory.dir(module)) { include("src/*/res/values*/*.xml") }
+        },
+    )
+
+tasks.withType<Test>().configureEach {
+    dependsOn(prepareRobolectricDependencies)
+    inputs.files(prepareRobolectricDependencies).withPropertyName("robolectricDependencies").withNormalizer(ClasspathNormalizer::class.java)
+    inputs.files(moduleStrings).withPropertyName("moduleStrings").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
+    systemProperty("pulsestages.screenshots.dir", screenshotDir)
+    if (recordScreenshots) outputs.upToDateWhen { false }
+}
 
 androidComponents {
     onVariants { variant ->
@@ -152,4 +207,16 @@ dependencies {
     // FakeHealthRepository, FakeSettingsRepository, TestClock and RecordingLogger for the ViewModel tests.
     testImplementation(testFixtures(project(":data-hc")))
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    // The production Hilt graph, the WorkManager wiring and the screenshots run on Robolectric (JUnit 4 through the
+    // Vintage engine), with Hilt's test components, work-testing's test WorkManager and Compose's test rule.
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    robolectricAndroidAll(libs.robolectric.android.all.instrumented)
+    testImplementation(libs.hilt.android.testing)
+    kspTest(libs.hilt.compiler)
+    testImplementation(libs.androidx.work.testing)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
 }

@@ -10,8 +10,9 @@ const val OHEALTH_PACKAGE: String = "com.heytap.health.international"
 const val DEFAULT_DAILY_TIME_MINUTES: Int = 540
 
 /**
- * All user settings. Persisted in DataStore as JSON, exported/imported as the same JSON.
- * Only ADD fields with defaults; never rename (old exports must keep importing).
+ * All user settings. Persisted in DataStore as JSON (only the values that differ from the defaults, see
+ * [SettingsJson]), exported/imported as the same JSON with every value. Only ADD fields with defaults; never rename
+ * (old files and exports must keep loading).
  *
  * @property sources sleep sources ("Sources" screen).
  * @property schedule background scheduling.

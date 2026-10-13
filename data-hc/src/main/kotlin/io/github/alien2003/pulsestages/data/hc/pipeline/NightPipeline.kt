@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
+import io.github.alien2003.pulsestages.algo.model.TimeSpan
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.di.EstimationDispatcher
@@ -31,11 +32,14 @@ class InvalidStagesException(
  *   sessions and then calls [NightPipeline.retireRemnants].
  * @property removedNights the [removed] nights (as they were before); the caller re-reads their time span so that a
  *   night of another source that was a lower-priority duplicate of them can take their place.
+ * @property removedStagedSpans time spans of deleted source sessions that had their own sleep stages (never
+ *   estimated); the caller re-reads them too, so that a night of a lower-priority source they outranked is estimated.
  */
 data class DeletionOutcome(
     val removed: Int,
     val toRebuild: List<EstimatedNightEntity>,
     val removedNights: List<EstimatedNightEntity> = emptyList(),
+    val removedStagedSpans: List<TimeSpan> = emptyList(),
 )
 
 /**
@@ -89,7 +93,10 @@ class NightPipeline
         /**
          * Processes [nights] with [settings]. [granted] are the granted Health Connect permissions (optional channels
          * are only read when granted). [shouldStop] is checked between nights (cooperative cancellation, e.g. a
-         * cancelled backfill); coroutine cancellation is honoured as well.
+         * cancelled backfill); coroutine cancellation is honoured as well. [requestedAtMs] is when the user asked for
+         * this run (backfill, recompute): a night the user deleted after that time is not written again, even by a
+         * trigger that [recreates deleted nights][PipelineTrigger.recreatesDeleted] (the user deleted it while the run
+         * was pending or running); null = no such limit.
          */
         suspend fun process(
             nights: CandidateSet,
@@ -97,9 +104,15 @@ class NightPipeline
             trigger: PipelineTrigger,
             granted: Set<String>,
             shouldStop: () -> Boolean = { false },
+            requestedAtMs: Long? = null,
         ): PipelineReport =
             LedgerLock.withLock {
-                val run = NightRun(deps, settings, trigger, granted, currentParamsHash(settings, granted), nights.candidates)
+                val run =
+                    NightRun(
+                        deps,
+                        RunSpec(settings, trigger, granted, currentParamsHash(settings, granted), requestedAtMs),
+                        nights.candidates,
+                    )
                 var report = PipelineReport(found = nights.nightCount, skipped = nights.skipped.size)
                 val remaining = nights.candidates.iterator()
                 var stopped = false
@@ -124,7 +137,12 @@ class NightPipeline
             granted: Set<String>,
         ): PipelineReport =
             LedgerLock.withLock {
-                val run = NightRun(deps, settings, PipelineTrigger.NEW_NIGHTS, granted, currentParamsHash(settings, granted), emptyList())
+                val run =
+                    NightRun(
+                        deps,
+                        RunSpec(settings, PipelineTrigger.NEW_NIGHTS, granted, currentParamsHash(settings, granted)),
+                        emptyList(),
+                    )
                 PipelineReport().add(run.supersedeLeftovers(), run.takeSuperseded())
             }
 
@@ -162,13 +180,19 @@ class NightPipeline
         /**
          * Applies deleted source sessions ([deletedUuids], DeletionChange ids): marks them DELETED in
          * `source_sessions`; nights whose every source is gone lose our record (deleted by clientRecordId) and become
-         * SOURCE_DELETED; nights with remaining sources are returned for rebuilding.
+         * SOURCE_DELETED; nights with remaining sources are returned for rebuilding; the spans of deleted sessions that
+         * had their own stages are returned for a re-read.
          */
         suspend fun applyDeletions(deletedUuids: Collection<String>): DeletionOutcome =
             LedgerLock.withLock {
                 val deleted = deletedUuids.toSet()
                 if (deleted.isEmpty()) return@withLock DeletionOutcome(0, emptyList())
                 val now = clock.millis()
+                val stagedSpans =
+                    ledger.sources
+                        .findByUuids(deleted.toList())
+                        .filter { it.outcome == SourceOutcome.HAS_STAGES }
+                        .map { TimeSpan(it.startMs, it.endMs) }
                 ledger.sources.markDeleted(deleted, "deleted from Health Connect", now)
                 val affected = ledger.nights.findBySourceUuids(deleted).filter { it.status in NightRun.REPLACEABLE }
                 val (gone, partial) = affected.partition { night -> night.sourceUuids.all { it in deleted } }
@@ -178,7 +202,7 @@ class NightPipeline
                     ledger.nights.markSourceDeleted(gone.map { it.clientRecordId }, now)
                     gone.forEach { logger.i(TAG, "all source sessions deleted; our session was removed", nightKey = it.clientRecordId) }
                 }
-                DeletionOutcome(gone.size, partial, removedNights = gone)
+                DeletionOutcome(gone.size, partial, removedNights = gone, removedStagedSpans = stagedSpans)
             }
 
         /**

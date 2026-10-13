@@ -111,6 +111,24 @@ class HealthConnectRepositoryTest {
         }
 
     @Test
+    fun `the oldest session is found with one single-record request and no pagination`() =
+        runTest {
+            (4 downTo 0).forEach { client.store(OHEALTH, sleepRecord(start + it * 24 * HOUR_MS)) }
+            client.store(OWN, sleepRecord(start - 24 * HOUR_MS))
+            val repo = repository()
+
+            assertEquals(start, repo.oldestSleepSessionStartMs(0L, start + 10 * 24 * HOUR_MS, setOf(OHEALTH)))
+
+            val request = client.readRequests.single()
+            assertEquals(1, request.pageSize)
+            assertNull(request.pageToken)
+            assertEquals(setOf(DataOrigin(OHEALTH)), request.dataOriginFilter)
+            assertNull(repo.oldestSleepSessionStartMs(start + 5 * 24 * HOUR_MS, start + 6 * 24 * HOUR_MS, setOf(OHEALTH)))
+            assertNull(repo.oldestSleepSessionStartMs(0L, start, emptySet()))
+            assertEquals(2, client.readRequests.size, "an empty package set reads nothing")
+        }
+
+    @Test
     fun `an empty last page token (APK path) ends the loop and is never sent back`() =
         runTest {
             client.apkStyleLastPage = true

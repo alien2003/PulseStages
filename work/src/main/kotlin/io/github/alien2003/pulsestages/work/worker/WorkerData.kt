@@ -63,6 +63,7 @@ object WorkerInputs {
                     .Builder()
                     .putString(KEY_RECOMPUTE_MODE, MODE_NIGHTS)
                     .putStringArray(KEY_NIGHT_IDS, request.clientRecordIds.toTypedArray())
+                    .apply { request.requestedAtMs?.let { putLong(KEY_REQUESTED_AT, it) } }
                     .build()
             }
 
@@ -80,9 +81,18 @@ object WorkerInputs {
         val mode = data.getString(KEY_RECOMPUTE_MODE)
         val scope = RecomputeScope.entries.firstOrNull { it.name == mode }
         return when {
-            mode == MODE_NIGHTS -> data.getNullableStringArray(KEY_NIGHT_IDS)?.filterNotNull()?.let { RecomputeRequest.Nights(it) }
-            scope != null -> RecomputeRequest.All(scope, data.getLong(KEY_REQUESTED_AT, Long.MAX_VALUE))
-            else -> null
+            mode == MODE_NIGHTS -> {
+                val requestedAt = if (data.keyValueMap.containsKey(KEY_REQUESTED_AT)) data.getLong(KEY_REQUESTED_AT, 0L) else null
+                data.getNullableStringArray(KEY_NIGHT_IDS)?.filterNotNull()?.let { RecomputeRequest.Nights(it, requestedAt) }
+            }
+
+            scope != null -> {
+                RecomputeRequest.All(scope, data.getLong(KEY_REQUESTED_AT, Long.MAX_VALUE))
+            }
+
+            else -> {
+                null
+            }
         }
     }
 }

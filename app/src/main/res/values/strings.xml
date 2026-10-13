@@ -92,7 +92,7 @@
     <string name="home_permission_optional">Optional: used when present.</string>
     <string name="home_permission_granted">Granted.</string>
     <string name="home_history_title">Access to history</string>
-    <string name="home_history_limited">Not granted: Health Connect returns only the last 30 days, so the history backfill is limited.</string>
+    <string name="home_history_limited">Not granted: Health Connect returns no data older than 30 days before PulseStages was first given access, so the history backfill is limited.</string>
     <string name="home_background_title">Background access</string>
     <string name="home_background_missing">Not granted: new nights are only processed while the app is open.</string>
     <string name="home_feature_unavailable">This Health Connect version cannot grant it. %1$s</string>
@@ -193,7 +193,7 @@
     <string name="rationale_read_heart_rate">Heart rate during and around each night — the main signal of the estimate.</string>
     <string name="rationale_read_steps">Steps, as a measure of movement during the night.</string>
     <string name="rationale_read_optional">Optionally blood oxygen (SpO2), respiratory rate and heart-rate variability, when they exist and you allow them.</string>
-    <string name="rationale_read_history">Access to history older than 30 days, to estimate past nights when you start a backfill.</string>
+    <string name="rationale_read_history">Access to data older than 30 days before PulseStages was first given access, to estimate past nights when you start a backfill.</string>
     <string name="rationale_read_background">Background access, so that new nights are estimated automatically while the app is closed.</string>
     <string name="rationale_write_title">What is written</string>
     <string name="rationale_write_sessions">Its own sleep sessions with the estimated stages (awake, light, deep, REM), marked as an estimate with the algorithm version.</string>

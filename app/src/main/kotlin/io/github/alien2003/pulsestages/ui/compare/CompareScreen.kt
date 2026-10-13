@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,7 +76,22 @@ import io.github.alien2003.pulsestages.ui.theme.PulseStagesTheme
 import io.github.alien2003.pulsestages.ui.theme.spacing
 import kotlin.math.roundToLong
 
-private val TABLE_CELL_WIDTH = 72.dp
+/**
+ * Width of a table / matrix cell in units of the body font size (about 72 dp at 100 %), so that it grows with the
+ * font scale exactly like the text inside it (Android 14+ scales large sp values less than small ones, so a fixed
+ * 72 sp would hardly grow): a header that fits at 100 % fits at every font size and the columns stay aligned; the
+ * tables scroll horizontally, so wider cells never break the layout.
+ */
+private const val TABLE_CELL_EMS = 5.2f
+
+/** [TABLE_CELL_EMS] at the current font scale. */
+@Composable
+private fun tableCellWidth(): Dp =
+    with(LocalDensity.current) {
+        MaterialTheme.typography.bodyMedium.fontSize
+            .toDp()
+    } * TABLE_CELL_EMS
+
 private const val HEAT_ALPHA = 0.55f
 private const val STAGE_TABLE_COLUMNS = 4
 
@@ -346,6 +363,7 @@ private fun Metric(
 private fun StagesCard(metrics: CompareMetrics) {
     CompareCard(title = stringResource(R.string.compare_stages_title)) {
         Text(stringResource(R.string.compare_stages_hint), style = MaterialTheme.typography.bodySmall)
+        val cellWidth = tableCellWidth()
         Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
             TableRow(
                 listOf(
@@ -357,7 +375,7 @@ private fun StagesCard(metrics: CompareMetrics) {
                 header = true,
             )
             metrics.stages.forEach { stage ->
-                HorizontalDivider(modifier = Modifier.width(TABLE_CELL_WIDTH * STAGE_TABLE_COLUMNS))
+                HorizontalDivider(modifier = Modifier.width(cellWidth * STAGE_TABLE_COLUMNS))
                 TableRow(
                     listOf(
                         stringResource(stage.stage.shortLabelRes()),
@@ -376,11 +394,12 @@ private fun TableRow(
     cells: List<String>,
     header: Boolean = false,
 ) {
+    val cellWidth = tableCellWidth()
     Row {
         cells.forEach { text ->
             Text(
                 text = text,
-                modifier = Modifier.width(TABLE_CELL_WIDTH).padding(vertical = MaterialTheme.spacing.extraSmall),
+                modifier = Modifier.width(cellWidth).padding(vertical = MaterialTheme.spacing.extraSmall),
                 style = if (header) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
             )
         }
@@ -408,7 +427,7 @@ private fun MatrixCard(metrics: CompareMetrics) {
 
 @Composable
 private fun MatrixHeader(text: String) {
-    Box(modifier = Modifier.width(TABLE_CELL_WIDTH).padding(MaterialTheme.spacing.extraSmall), contentAlignment = Alignment.CenterStart) {
+    Box(modifier = Modifier.width(tableCellWidth()).padding(MaterialTheme.spacing.extraSmall), contentAlignment = Alignment.CenterStart) {
         Text(text, style = MaterialTheme.typography.labelMedium)
     }
 }
@@ -422,14 +441,14 @@ private fun MatrixCell(
     Column(
         modifier =
             Modifier
-                .width(TABLE_CELL_WIDTH)
+                .width(tableCellWidth())
                 .background(if (count == 0L) Color.Transparent else tint)
                 .padding(MaterialTheme.spacing.extraSmall)
                 .semantics(mergeDescendants = true) {},
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(count.toString(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-        Text(formatPercent(share), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+        Text(count.toString(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 1)
+        Text(formatPercent(share), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
     }
 }
 

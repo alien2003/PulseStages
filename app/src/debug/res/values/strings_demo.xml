@@ -4,4 +4,5 @@
     <string name="demo_launcher_label">PulseStages demo</string>
     <string name="demo_toast_on">Demo mode on: synthetic nights</string>
     <string name="demo_toast_off">Demo mode off: real data</string>
+    <string name="demo_banner">Demo mode: synthetic nights. Nothing is read from or written to Health Connect.</string>
 </resources>

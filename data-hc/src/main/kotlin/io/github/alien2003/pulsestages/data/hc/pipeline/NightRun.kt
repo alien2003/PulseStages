@@ -116,18 +116,37 @@ internal fun HcSleepSession.toSourceRow(
     )
 
 /**
+ * What one [NightRun] works with.
+ *
+ * @property settings the settings of the run.
+ * @property trigger why the run was started.
+ * @property granted the granted Health Connect permissions.
+ * @property paramsHash the params hash of [settings] with [granted].
+ * @property requestedAtMs when the user asked for the run; nights deleted after it are not recreated (null = no limit).
+ */
+internal class RunSpec(
+    val settings: AppSettings,
+    val trigger: PipelineTrigger,
+    val granted: Set<String>,
+    val paramsHash: String,
+    val requestedAtMs: Long? = null,
+)
+
+/**
  * The state of one [NightPipeline.process] call (or of one ledger repair): decides, estimates and writes night by
  * night. Not thread-safe; always used under [LedgerLock].
  */
 @Suppress("TooManyFunctions") // One private function per decision / write step.
 internal class NightRun(
     deps: PipelineDeps,
-    private val settings: AppSettings,
-    private val trigger: PipelineTrigger,
-    private val granted: Set<String>,
-    private val paramsHash: String,
+    spec: RunSpec,
     private val candidates: List<NightCandidate>,
 ) {
+    private val settings = spec.settings
+    private val trigger = spec.trigger
+    private val granted = spec.granted
+    private val paramsHash = spec.paramsHash
+    private val requestedAtMs = spec.requestedAtMs
     private val repository = deps.repository
     private val estimator = deps.estimator
     private val ledger = deps.ledger
@@ -154,30 +173,50 @@ internal class NightRun(
         guarded(candidate.clientRecordId, onFailure = { recordFailure(candidate, it) }) { processNight(candidate) }
 
     /**
-     * Source sessions that got their own sleep stages after we estimated them (HAS_STAGES in [skipped], modified after
-     * our write) no longer need our estimate: such a WRITTEN night loses its record and becomes SUPERSEDED, so Health
-     * Connect does not hold two staged sessions for one night. Never under NEVER (outputs are not touched). Null when
-     * there is nothing to do.
+     * Retires the outputs that sessions with their own sleep stages made unnecessary, so Health Connect does not hold
+     * two staged sessions for one night (never under NEVER, which does not touch outputs):
+     * - source sessions that got their own stages after we estimated them (HAS_STAGES in [skipped], modified after our
+     *   write);
+     * - nights that are now lower-priority duplicates of a session with stages of a higher-priority source
+     *   ([SkippedNight.stagedWinnerUuids]: that session arrived, or its source was enabled or moved up, after we wrote
+     *   the night).
+     *
+     * Such a WRITTEN night loses its record and becomes SUPERSEDED. Null when there is nothing to do.
      */
     suspend fun retireStagedOutputs(skipped: List<SkippedNight>): Step? {
         val retiring = policy != OverwritePolicy.NEVER
         val staged = skipped.filter { retiring && it.outcome == SourceOutcome.HAS_STAGES }.flatMap { it.sessions }
-        if (staged.isEmpty()) return null
+        val duplicates =
+            skipped
+                .filter { retiring && it.outcome == SourceOutcome.LOWER_PRIORITY_DUPLICATE && it.stagedWinnerUuids.isNotEmpty() }
+                .flatMap { it.sessions }
+        if (staged.isEmpty() && duplicates.isEmpty()) return null
         return guarded(nightKey = null, onFailure = { logger.e(TAG, "could not retire outputs of sessions with stages", throwable = it) }) {
             val modifiedAt = staged.associate { it.uuid to it.lastModifiedMs }
             val outdated =
                 ledger.nights.findBySourceUuids(modifiedAt.keys).filter { night ->
                     night.status == NightStatus.WRITTEN && night.sourceUuids.any { (modifiedAt[it] ?: Long.MIN_VALUE) > night.updatedAt }
                 }
-            if (outdated.isNotEmpty()) {
-                val ids = outdated.map { it.clientRecordId }
-                deleteOutputs(ids)
-                ledger.nights.updateStatus(ids, NightStatus.SUPERSEDED, STAGED_REASON, clearOutput = true, now = clock.millis())
-                ids.forEach { logger.i(TAG, "$STAGED_REASON; our session was removed", nightKey = it) }
-                superseded += ids.size
-            }
+            retire(outdated.map { it.clientRecordId }, STAGED_REASON)
+            val outranked =
+                ledger.nights
+                    .findBySourceUuids(duplicates.map { it.uuid })
+                    .filter { it.status == NightStatus.WRITTEN }
+            retire(outranked.map { it.clientRecordId }, OUTRANKED_BY_STAGED_REASON)
             NightResult.REPAIRED
         }
+    }
+
+    /** Deletes the records of the WRITTEN nights [ids] and marks them SUPERSEDED for [reason]. */
+    private suspend fun retire(
+        ids: List<String>,
+        reason: String,
+    ) {
+        if (ids.isEmpty()) return
+        deleteOutputs(ids)
+        ledger.nights.updateStatus(ids, NightStatus.SUPERSEDED, reason, clearOutput = true, now = clock.millis())
+        ids.forEach { logger.i(TAG, "$reason; our session was removed", nightKey = it) }
+        superseded += ids.size
     }
 
     /**
@@ -286,7 +325,8 @@ internal class NightRun(
     /**
      * Why [candidate] is not (re)estimated, or null when it must be estimated. A night the user deleted ("delete all
      * my sessions") is not written again by automatic syncs, also when a later fragment gave it another
-     * clientRecordId ([linked] nights share a source uuid).
+     * clientRecordId ([linked] nights share a source uuid); a trigger that recreates deleted nights does not recreate
+     * one that was deleted after the run was requested ([requestedAtMs]).
      */
     private suspend fun skipReason(
         candidate: NightCandidate,
@@ -294,8 +334,13 @@ internal class NightRun(
         linked: List<EstimatedNightEntity>,
     ): NightResult? {
         if (existing != null && existing.status == NightStatus.WRITTEN) return writtenSkipReason(candidate, existing)
-        val deletedByUser = existing?.status == NightStatus.DELETED || linked.any { it.status == NightStatus.DELETED }
-        return if (deletedByUser && !trigger.recreatesDeleted) NightResult.DELETED_SKIPPED else null
+        val deleted = (listOfNotNull(existing) + linked).filter { it.status == NightStatus.DELETED }
+        val deletedAfterRequest = requestedAtMs?.let { requested -> deleted.any { it.updatedAt > requested } } ?: false
+        if (trigger.recreatesDeleted && deletedAfterRequest) {
+            logger.i(TAG, "deleted by the user after this run was requested; not written again", nightKey = candidate.clientRecordId)
+        }
+        val recreate = trigger.recreatesDeleted && !deletedAfterRequest
+        return if (deleted.isEmpty() || recreate) null else NightResult.DELETED_SKIPPED
     }
 
     private suspend fun writtenSkipReason(
@@ -665,6 +710,7 @@ internal class NightRun(
         private const val VERSION_FACTOR = 1_000L
         private const val MAX_REASON_LENGTH = 500
         private const val STAGED_REASON = "the source session now has its own sleep stages"
+        private const val OUTRANKED_BY_STAGED_REASON = "a higher-priority source recorded this night with its own sleep stages"
 
         /** Margin around the nights' starts in which our existing records are looked up. */
         private const val STORED_LOOKUP_MS = 24L * 60 * 60 * 1000

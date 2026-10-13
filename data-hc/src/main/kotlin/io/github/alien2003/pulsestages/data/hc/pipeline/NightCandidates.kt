@@ -51,12 +51,16 @@ data class NightCandidate(
  * @property sessions the sessions (one, or the fragments of a merged group).
  * @property outcome why ([SourceOutcome.HAS_STAGES], [SourceOutcome.NAP] or [SourceOutcome.LOWER_PRIORITY_DUPLICATE]).
  * @property reason English detail for the ledger and the log.
+ * @property stagedWinnerUuids for a [SourceOutcome.LOWER_PRIORITY_DUPLICATE] of a night that a higher-priority source
+ *   recorded with its own sleep stages: the uuids of those sessions (the night needs no estimate, and an output we wrote
+ *   for it earlier is retired); empty otherwise.
  */
 data class SkippedNight(
     val packageName: String,
     val sessions: List<HcSleepSession>,
     val outcome: SourceOutcome,
     val reason: String,
+    val stagedWinnerUuids: List<String> = emptyList(),
 ) {
     /** Earliest start of [sessions]. */
     val startMs: Long get() = sessions.minOf { it.startMs }
@@ -103,11 +107,14 @@ data class CandidateSet(
         )
     }
 
-    /** The nights containing at least one of [uuids]. */
+    /**
+     * The nights containing at least one of [uuids], plus the lower-priority duplicates of a staged session among
+     * [uuids] (a session with its own stages that arrives later decides about the night it duplicates).
+     */
     fun containingAny(uuids: Set<String>): CandidateSet =
         CandidateSet(
             candidates = candidates.filter { c -> c.sourceUuids.any { it in uuids } },
-            skipped = skipped.filter { s -> s.sessions.any { it.uuid in uuids } },
+            skipped = skipped.filter { s -> s.sessions.any { it.uuid in uuids } || s.stagedWinnerUuids.any { it in uuids } },
             own = own.filter { it.uuid in uuids },
         )
 
@@ -178,7 +185,9 @@ object NightKeys {
  * 4. merged nights shorter than `minSessionMin` are naps (NAP);
  * 5. nights of different packages that overlap by more than 50 % of the shorter one are duplicates: the night whose
  *    package comes first in `sourcePriority` (unlisted packages last, then by name) is kept, the others are
- *    LOWER_PRIORITY_DUPLICATE.
+ *    LOWER_PRIORITY_DUPLICATE. Sessions skipped in step 2 take part as well (merged and nap-filtered per package like
+ *    the others): a night that a higher-priority source recorded with its own stages makes the overlapping nights of
+ *    lower-priority sources duplicates too, although it is not estimated itself (it stays HAS_STAGES).
  */
 class NightCandidateBuilder
     @Inject
@@ -226,7 +235,14 @@ class NightCandidateBuilder
                     )
                 }
 
-            val (kept, duplicates) = removeDuplicates(nights, sources.sourcePriority)
+            // Sessions with stages are not estimated, but they still record the night for their source.
+            val stagedNights =
+                staged
+                    .groupBy { it.packageName }
+                    .flatMap { (packageName, list) -> merge(packageName, list.sortedWith(SESSION_ORDER), mergeGapMs) }
+                    .filter { it.durationMs >= minDurationMs }
+
+            val (kept, duplicates) = removeDuplicates(nights, stagedNights, sources.sourcePriority)
             return CandidateSet(
                 candidates = kept.sortedWith(CandidateSet.CANDIDATE_ORDER),
                 skipped = (withStages + napNights + duplicates).sortedWith(compareBy({ it.startMs }, { it.packageName })),
@@ -234,29 +250,49 @@ class NightCandidateBuilder
             )
         }
 
-        /** Keeps, among nights of different packages overlapping by more than half, the one of the higher-priority package. */
+        /**
+         * Keeps, among nights of different packages overlapping by more than half, the one of the higher-priority
+         * package. [stagedNights] (sessions with their own stages, not estimated) only block: a [nights] entry they
+         * outrank becomes a duplicate, and they are never returned.
+         */
         private fun removeDuplicates(
             nights: List<NightCandidate>,
+            stagedNights: List<NightCandidate>,
             priority: List<String>,
         ): Pair<List<NightCandidate>, List<SkippedNight>> {
+            val stagedIds = stagedNights.mapTo(HashSet()) { it.clientRecordId }
             val kept = mutableListOf<NightCandidate>()
             val duplicates = mutableListOf<SkippedNight>()
-            nights.sortedWith(priorityOrder(priority)).forEach { night ->
+            (nights + stagedNights).sortedWith(priorityOrder(priority)).forEach { night ->
                 val winner = kept.firstOrNull { it.packageName != night.packageName && overlapsMostly(it, night) }
                 if (winner == null) {
                     kept += night
-                } else {
-                    duplicates +=
-                        SkippedNight(
-                            packageName = night.packageName,
-                            sessions = night.fragments,
-                            outcome = SourceOutcome.LOWER_PRIORITY_DUPLICATE,
-                            reason = "overlaps the night of higher-priority source ${winner.packageName} (${winner.clientRecordId})",
-                        )
+                } else if (night.clientRecordId !in stagedIds) {
+                    duplicates += duplicateOf(night, winner, winnerHasStages = winner.clientRecordId in stagedIds)
                 }
+                // A staged night that a higher-priority night outranks stays HAS_STAGES and blocks nothing.
             }
-            return kept to duplicates
+            return kept.filter { it.clientRecordId !in stagedIds } to duplicates
         }
+
+        private fun duplicateOf(
+            night: NightCandidate,
+            winner: NightCandidate,
+            winnerHasStages: Boolean,
+        ): SkippedNight =
+            SkippedNight(
+                packageName = night.packageName,
+                sessions = night.fragments,
+                outcome = SourceOutcome.LOWER_PRIORITY_DUPLICATE,
+                reason =
+                    if (winnerHasStages) {
+                        "overlaps a session with sleep stages of higher-priority source ${winner.packageName} " +
+                            "(${winner.sourceUuids.joinToString(",")})"
+                    } else {
+                        "overlaps the night of higher-priority source ${winner.packageName} (${winner.clientRecordId})"
+                    },
+                stagedWinnerUuids = if (winnerHasStages) winner.sourceUuids else emptyList(),
+            )
 
         private fun merge(
             packageName: String,

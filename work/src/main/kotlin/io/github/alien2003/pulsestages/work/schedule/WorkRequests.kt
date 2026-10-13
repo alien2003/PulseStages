@@ -167,11 +167,17 @@ object WorkRequests {
             .withDefaults(Tags.RECOMPUTE)
             .build()
 
-    /** Recompute of the night [clientRecordId]: expedited, normal work when out of expedited quota. */
-    fun recomputeNight(clientRecordId: String): OneTimeWorkRequest =
+    /**
+     * Recompute of the night [clientRecordId] as requested at [requestedAtMs]: expedited, normal work when out of
+     * expedited quota.
+     */
+    fun recomputeNight(
+        clientRecordId: String,
+        requestedAtMs: Long,
+    ): OneTimeWorkRequest =
         OneTimeWorkRequestBuilder<RecomputeWorker>()
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .setInputData(WorkerInputs.recompute(RecomputeRequest.Nights(listOf(clientRecordId))))
+            .setInputData(WorkerInputs.recompute(RecomputeRequest.Nights(listOf(clientRecordId), requestedAtMs)))
             .withDefaults(Tags.RECOMPUTE)
             .build()
 

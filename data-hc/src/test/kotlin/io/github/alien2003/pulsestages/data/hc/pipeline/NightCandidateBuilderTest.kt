@@ -173,6 +173,77 @@ class NightCandidateBuilderTest {
     }
 
     @Test
+    fun `a staged night of a higher-priority source makes the overlapping night of a lower-priority source a duplicate`() {
+        val sources = SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OTHER_APP, OHEALTH))
+        val staged =
+            session(OTHER_APP, startMs = start + 15 * MINUTE_MS, endMs = start + 8 * HOUR_MS, uuid = "staged").let {
+                it.copy(stages = listOf(HcStage(it.startMs, it.endMs, 4)))
+            }
+        val oh = session(OHEALTH, startMs = start, endMs = start + 8 * HOUR_MS, uuid = "oh")
+
+        val result = build(oh, staged, sources = sources)
+
+        assertTrue(result.candidates.isEmpty(), "the night is taken from the higher-priority source, which needs no estimate")
+        val byOutcome = result.skipped.associateBy { it.outcome }
+        assertEquals(listOf("staged"), byOutcome.getValue(SourceOutcome.HAS_STAGES).sessions.map { it.uuid })
+        val duplicate = byOutcome.getValue(SourceOutcome.LOWER_PRIORITY_DUPLICATE)
+        assertEquals(listOf("oh"), duplicate.sessions.map { it.uuid })
+        assertEquals(listOf("staged"), duplicate.stagedWinnerUuids)
+        assertTrue(duplicate.reason.contains(OTHER_APP) && duplicate.reason.contains("sleep stages"), duplicate.reason)
+        assertEquals(result.skipped, result.containingAny(setOf("staged")).skipped, "a changed staged session brings its duplicate")
+
+        // RECOMPUTE_ALL estimates the staged session itself: the priority decides as for any two nights.
+        val all = build(oh, staged, sources = sources, policy = OverwritePolicy.RECOMPUTE_ALL)
+        assertEquals(listOf("staged"), all.candidates.flatMap { it.sourceUuids })
+        assertTrue(
+            all.skipped
+                .single()
+                .stagedWinnerUuids
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun `a staged night blocks only lower-priority nights it mostly overlaps and a staged nap blocks nothing`() {
+        val stages = { from: Long, to: Long -> listOf(HcStage(from, to, 5)) }
+        val lowerStaged =
+            session(OTHER_APP, startMs = start, endMs = start + 8 * HOUR_MS, uuid = "other-staged").let {
+                it.copy(stages = stages(it.startMs, it.endMs))
+            }
+        val oh = session(OHEALTH, startMs = start, endMs = start + 8 * HOUR_MS, uuid = "oh")
+        val ohFirst = SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OHEALTH, OTHER_APP))
+        assertEquals(listOf("oh"), build(oh, lowerStaged, sources = ohFirst).candidates.flatMap { it.sourceUuids })
+        assertEquals(listOf(SourceOutcome.HAS_STAGES), build(oh, lowerStaged, sources = ohFirst).skipped.map { it.outcome })
+
+        val otherFirst = SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OTHER_APP, OHEALTH))
+        val nap =
+            session(OTHER_APP, startMs = start + HOUR_MS, endMs = start + 2 * HOUR_MS, uuid = "staged-nap").let {
+                it.copy(stages = stages(it.startMs, it.endMs))
+            }
+        assertEquals(listOf("oh"), build(oh, nap, sources = otherFirst).candidates.flatMap { it.sourceUuids }, "a nap records no night")
+
+        // Staged fragments of one source merge like any other: together they cover the night.
+        val first =
+            session(
+                OTHER_APP,
+                startMs = start,
+                endMs = start + 4 * HOUR_MS,
+                uuid = "part-1",
+            ).let { it.copy(stages = stages(it.startMs, it.endMs)) }
+        val second =
+            session(OTHER_APP, startMs = start + 4 * HOUR_MS + 10 * MINUTE_MS, endMs = start + 8 * HOUR_MS, uuid = "part-2").let {
+                it.copy(stages = stages(it.startMs, it.endMs))
+            }
+        val merged = build(oh, first, second, sources = otherFirst)
+        assertTrue(merged.candidates.isEmpty())
+        assertEquals(
+            listOf("part-1", "part-2"),
+            merged.skipped.single { it.outcome == SourceOutcome.LOWER_PRIORITY_DUPLICATE }.stagedWinnerUuids,
+        )
+        assertEquals(2, merged.skipped.count { it.outcome == SourceOutcome.HAS_STAGES }, "each staged session stays HAS_STAGES")
+    }
+
+    @Test
     fun `an overlap of at most half of the shorter night is not a duplicate`() {
         val sources = SourceSettings(sourcePackages = listOf(OHEALTH, OTHER_APP), sourcePriority = listOf(OHEALTH, OTHER_APP))
         val oh = session(OHEALTH, startMs = start, endMs = start + 8 * HOUR_MS)

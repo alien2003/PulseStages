@@ -6,11 +6,13 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import io.github.alien2003.pulsestages.platform.AppInfoResolver
+import io.github.alien2003.pulsestages.platform.AppVersionSource
 import io.github.alien2003.pulsestages.platform.ContentResolverDocumentStore
 import io.github.alien2003.pulsestages.platform.DocumentStore
 import io.github.alien2003.pulsestages.platform.FileProviderShareableFileWriter
 import io.github.alien2003.pulsestages.platform.IoDispatcher
 import io.github.alien2003.pulsestages.platform.PackageManagerAppInfoResolver
+import io.github.alien2003.pulsestages.platform.PackageManagerAppVersionSource
 import io.github.alien2003.pulsestages.platform.ShareableFileWriter
 import io.github.alien2003.pulsestages.source.LedgerStaleNightsSource
 import io.github.alien2003.pulsestages.source.StaleNightsSource
@@ -52,4 +54,8 @@ abstract class AppBindingsModule {
     /** Stale nights from the ledger, recomputed through WorkManager. */
     @Binds
     abstract fun bindStaleNightsSource(implementation: LedgerStaleNightsSource): StaleNightsSource
+
+    /** The installed version name from PackageManager (About card). */
+    @Binds
+    abstract fun bindAppVersionSource(implementation: PackageManagerAppVersionSource): AppVersionSource
 }
