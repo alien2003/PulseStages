@@ -360,7 +360,7 @@ class PersonalizationService
 
             /**
              * Whether estimates with [params] use the HMM emission μ/σ that population EM adapts: the estimator of the
-             * nights or of the naps (`napMode.estimator`) is HMM, or HYBRID when [bundle] is missing or incompatible with
+             * nights or of the naps ([AlgoParams.napEstimator]) is HMM, or HYBRID when [bundle] is missing or incompatible with
              * this build (HYBRID then falls back to the HMM). RULES and HYBRID with a usable bundle never use them. EM
              * itself learns from nights only (naps are left out, see [PopulationEmAdapter]).
              */
@@ -368,7 +368,7 @@ class PersonalizationService
                 params: AlgoParams,
                 bundle: HybridModel?,
             ): Boolean =
-                listOf(params.estimator, params.napMode.estimator).distinct().any { estimator ->
+                listOf(params.estimator, params.napEstimator).distinct().any { estimator ->
                     when (estimator) {
                         EstimatorType.HMM -> true
                         EstimatorType.HYBRID -> bundle == null || bundle.compatibilityProblem() != null

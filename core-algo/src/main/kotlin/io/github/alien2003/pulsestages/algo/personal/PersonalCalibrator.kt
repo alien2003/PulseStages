@@ -113,7 +113,7 @@ class PersonalCalibrator(
         val candidate =
             PersonalModel(
                 biasDeltas = deltas?.toList(),
-                baseModelFingerprint = compatible?.fingerprint(),
+                baseModelFingerprint = compatible?.nightModelFingerprint(),
                 hmmMeans = means,
                 provenance = provenance,
             )

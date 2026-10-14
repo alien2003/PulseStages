@@ -11,6 +11,7 @@ import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.db.NightSummary
+import io.github.alien2003.pulsestages.data.local.db.SKIPPED_NAP_REASON_PREFIX
 import io.github.alien2003.pulsestages.source.LedgerNightsSource
 import io.github.alien2003.pulsestages.source.NightsSource
 import io.github.alien2003.pulsestages.testutil.FakeWorkScheduler
@@ -71,6 +72,10 @@ class NightsViewModelTest {
             assertTrue(oldest.summary.elevatedHr)
             assertTrue(oldest.summary.lowConfidence)
             assertTrue(nights.none { it.stale })
+            // A nap skipped by the nap policy ("Written for a nap": Nothing) is the chosen outcome, not a problem.
+            val skipped = unestimated.copy(summary = unestimated.summary.copy(statusReason = "$SKIPPED_NAP_REASON_PREFIX nap of 90 min"))
+            assertFalse(skipped.problem)
+            assertTrue(unestimated.copy(summary = unestimated.summary.copy(status = NightStatus.FAILED)).problem)
             clear(vm)
         }
 

@@ -122,8 +122,10 @@ data class PersonalProvenance(
  * `AlgoParams.personal.enabled`. Its [fingerprint] enters the params hash; it never changes the algorithm version.
  *
  * @property biasDeltas additive deltas of the hybrid classifier's output logits ([SleepStage.index] order), or null.
- * @property baseModelFingerprint fingerprint of the hybrid bundle the deltas were fitted for; the deltas are ignored
- *   with any other bundle (null = any bundle).
+ * @property baseModelFingerprint the night model the deltas were fitted for: its
+ *   [io.github.alien2003.pulsestages.algo.hybrid.HybridModel.nightModelFingerprint] (models stored before it existed
+ *   hold the whole bundle's fingerprint, which still matches that bundle); the deltas are ignored with any other model
+ *   (null = any model).
  * @property hmmMeans HMM emission μ replacing those of `AlgoParams.hmm.emissions`, or null.
  * @property hmmSds HMM emission σ replacing those of `AlgoParams.hmm.emissions`, or null.
  * @property schemaVersion JSON format version ([SCHEMA_VERSION]).
@@ -167,9 +169,12 @@ data class PersonalModel(
         }
     }
 
-    /** The bias deltas if they apply to the hybrid bundle with fingerprint [modelFingerprint], else null. */
-    internal fun biasDeltasFor(modelFingerprint: String): DoubleArray? =
-        biasDeltas?.takeIf { baseModelFingerprint == null || baseModelFingerprint == modelFingerprint }?.toDoubleArray()
+    /**
+     * The bias deltas if they apply to a hybrid bundle identified by any of [modelFingerprints] (its night-model
+     * fingerprint and its whole fingerprint), else null.
+     */
+    internal fun biasDeltasFor(vararg modelFingerprints: String): DoubleArray? =
+        biasDeltas?.takeIf { baseModelFingerprint == null || baseModelFingerprint in modelFingerprints }?.toDoubleArray()
 
     /** Serialization. */
     companion object {

@@ -44,8 +44,12 @@ data class NightListItem(
     /** The night has written stages to show (shares, confidence, coverage). */
     val estimated: Boolean get() = summary.status == NightStatus.WRITTEN
 
-    /** The night has no output because of a problem (its status and reason are shown). */
-    val problem: Boolean get() = summary.status == NightStatus.NOT_ESTIMATED || summary.status == NightStatus.FAILED
+    /**
+     * The night has no output because of a problem (its status and reason are shown). A nap skipped by the nap policy
+     * ("Written for a nap": Nothing) is the chosen outcome, not a problem.
+     */
+    val problem: Boolean
+        get() = (summary.status == NightStatus.NOT_ESTIMATED || summary.status == NightStatus.FAILED) && !summary.skippedNap
 
     /** The session was processed as a nap (the "Nap" badge). */
     val nap: Boolean get() = summary.mode == SessionMode.NAP

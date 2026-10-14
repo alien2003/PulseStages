@@ -55,7 +55,10 @@ private fun withSameAsNights(options: List<ChoiceOption>): List<ChoiceOption> =
 /** The key of a nullable enum override (null = [SAME_AS_NIGHTS_KEY]). */
 private fun <E : Enum<E>> keyOf(value: E?): String = value?.name ?: SAME_AS_NIGHTS_KEY
 
-/** Sessions shorter than the nap threshold: how they are estimated and written. */
+/**
+ * Sessions shorter than the nap threshold, the everyday choices: the threshold, what is written for a nap and its
+ * estimator. The algorithm values of naps are in the collapsed [napsAlgorithmSection].
+ */
 internal val napsSection =
     SettingsSection(
         id = "naps",
@@ -86,7 +89,8 @@ internal val napsSection =
                                     NapOutputPolicy.SKIP -> R.string.option_nap_output_skip
                                 }
                             },
-                        style = ChoiceStyle.SEGMENTED,
+                        // A dropdown: "Asleep / awake" (and its translation) does not fit a third of a phone's width.
+                        style = ChoiceStyle.DROPDOWN,
                         read = { it.algo.napMode.outputPolicy.name },
                         write = { s, v -> s.nap { it.copy(outputPolicy = NapOutputPolicy.valueOf(v)) } },
                     ),
@@ -97,18 +101,34 @@ internal val napsSection =
                         title = text(R.string.set_nap_estimator_title),
                         hint = text(R.string.set_nap_estimator_hint),
                         options =
-                            enumOptions<EstimatorType> {
-                                when (it) {
-                                    EstimatorType.RULES -> R.string.estimator_rules
-                                    EstimatorType.HMM -> R.string.estimator_hmm
-                                    EstimatorType.HYBRID -> R.string.estimator_hybrid
-                                }
-                            },
-                        style = ChoiceStyle.SEGMENTED,
-                        read = { it.algo.napMode.estimator.name },
-                        write = { s, v -> s.nap { it.copy(estimator = EstimatorType.valueOf(v)) } },
+                            withSameAsNights(
+                                enumOptions<EstimatorType> {
+                                    when (it) {
+                                        EstimatorType.RULES -> R.string.estimator_rules
+                                        EstimatorType.HMM -> R.string.estimator_hmm
+                                        EstimatorType.HYBRID -> R.string.estimator_hybrid
+                                    }
+                                },
+                            ),
+                        style = ChoiceStyle.DROPDOWN,
+                        read = { keyOf(it.algo.napMode.estimator) },
+                        write = { s, v ->
+                            s.nap { it.copy(estimator = v.takeIf { key -> key != SAME_AS_NIGHTS_KEY }?.let(EstimatorType::valueOf)) }
+                        },
                     ),
                 ),
+            ),
+    )
+
+/** The algorithm values of naps (collapsed, like the other algorithm groups): post-processing and decoder overrides. */
+internal val napsAlgorithmSection =
+    SettingsSection(
+        id = "naps_algorithm",
+        title = text(R.string.settings_section_naps_algorithm),
+        summary = text(R.string.settings_section_naps_algorithm_summary),
+        expandedByDefault = false,
+        items =
+            listOf(
                 subheader(R.string.settings_sub_nap_post),
                 switchSetting(
                     "$NAP.post.checkProportions",

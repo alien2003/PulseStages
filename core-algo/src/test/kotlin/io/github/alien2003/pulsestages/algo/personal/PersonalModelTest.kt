@@ -65,6 +65,8 @@ class PersonalModelTest {
         assertTrue(PersonalModel(provenance = model.provenance).isEmpty)
         assertEquals(listOf(0.2, -0.1, 0.0, -0.1), model.biasDeltasFor("a".repeat(64))?.toList())
         assertNull(model.biasDeltasFor("b".repeat(64)))
+        // A bundle is identified by its night-model fingerprint and by its whole fingerprint: either key matches.
+        assertEquals(4, model.biasDeltasFor("b".repeat(64), "a".repeat(64))?.size)
         assertEquals(4, model.copy(baseModelFingerprint = null).biasDeltasFor("b".repeat(64))?.size)
     }
 

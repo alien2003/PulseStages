@@ -547,12 +547,33 @@ def build_proxies(inp: Inputs) -> tuple[dict, dict, dict]:
     return proxies, meta, counts
 
 
+def _session_line(n: Mapping) -> str:
+    return json.dumps(n, separators=(",", ":")) + "\n"
+
+
 def write_sessions(path: Path, sessions: Sequence[Mapping]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for n in sessions:
-            f.write(json.dumps(n, separators=(",", ":")) + "\n")
+            f.write(_session_line(n))
     return path
+
+
+def check_sessions_file(path: Path, sessions: Sequence[Mapping]) -> None:
+    """Train / inference parity of the nap pipeline: the training rows are the algo-cli features of the session file
+    ``path`` (written by :func:`compute_features`), and every decode runs algo-cli on ``sessions`` (the proxies as they
+    are decoded). No transformation lies between the features and the training matrix, so parity holds exactly when
+    ``path`` holds byte for byte the serialization of ``sessions``; raises :class:`NapModelError` otherwise (features of
+    another cut, a stale or edited file)."""
+    want, got = hashlib.sha256(), hashlib.sha256()
+    for n in sessions:
+        want.update(_session_line(n).encode("utf-8"))
+    if path.is_file():
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                got.update(chunk)
+    if not path.is_file() or got.hexdigest() != want.hexdigest():
+        raise NapModelError(f"train / inference parity: {path} is not the session file of the decoded proxies")
 
 
 def _csv_rows_by_id(path: Path, keep: Callable[[str], bool]) -> tuple[str, dict[str, list[str]]]:
@@ -595,7 +616,8 @@ def compute_features(inp: Inputs, cli: AlgoCli, proxies: Mapping[str, list[dict]
 
 
 def load_data(inp: Inputs, cli: AlgoCli, proxies: Mapping, meta: Mapping, out: Path) -> Data:
-    """Feature tables of the proxies; feature set checked against ``algo-cli feature-names``; the training rows."""
+    """Feature tables of the proxies; feature set checked against ``algo-cli feature-names``, the session files against
+    the proxies that are decoded (:func:`check_sessions_file`); the training rows."""
     info = cli.feature_names()
     tables = {v: read_features(out / "features" / f"{v}.csv", int(info["featureSetVersion"]), variant=v)
               for v in inp.variants}
@@ -608,11 +630,15 @@ def load_data(inp: Inputs, cli: AlgoCli, proxies: Mapping, meta: Mapping, out: P
         got = dict(zip(t.night_id.tolist(), t.subject.tolist()))
         if any(got[k] != meta[v][k]["subject"] for k in meta[v]):
             raise NapModelError(f"features of {v}: subject column differs from the proxies")
+    for v in inp.variants:
+        check_sessions_file(out / "proxies" / f"{v}.jsonl", proxies[v])
     order = [v for v in TRAIN_VARIANT_ORDER if v in tables]
     t = concat([tables[v] for v in order])
     rows = t.training_rows()
+    # The training rows are the algo-cli features as they are (nothing masked or imputed), so checking the session
+    # file above is the train / inference parity check of this pipeline; loso.check_train_inference_parity guards a
+    # transformation that this pipeline does not have.
     X = t.X[rows].copy()
-    loso.check_train_inference_parity(X, t.X[rows])
     return Data(proxies=dict(proxies), meta=dict(meta), tables=tables, feature_names=list(names),
                 fsv=int(info["featureSetVersion"]), X=X, y=t.y[rows].astype(np.int64), subject=t.subject[rows],
                 variant=t.variant[rows])
@@ -630,9 +656,7 @@ def _fit_task(task: FitKey) -> tuple[FitKey, TrainedClassifier]:
         raise RuntimeError("nap-model data not initialised")
     subjects, kind, C = task
     m = np.isin(d.subject, np.array(subjects, dtype=object))
-    X = d.X[m]
-    loso.check_train_inference_parity(X, d.X[m])
-    tc = fit_classifier(X, d.y[m], _SPEC(kind, C))
+    tc = fit_classifier(d.X[m], d.y[m], _SPEC(kind, C))
     return task, replace(tc, model=None)
 
 
@@ -1505,7 +1529,8 @@ def render(s: Mapping) -> str:
 
 
 __all__ = ["CANDIDATES", "EW_CAP", "NAMES", "ONSET_LENGTHS", "PREREG_PATH", "PREREG_SHA256", "Inputs",
-           "NapModelError", "adopt_model", "all_light", "cell", "cells_of", "choose_policy", "collapse_sleep_wake",
+           "NapModelError", "adopt_model", "all_light", "cell", "cells_of", "check_sessions_file", "choose_policy",
+           "collapse_sleep_wake",
            "comparisons", "cut_window", "ew_candidates", "final_choice", "final_model", "night_key", "parts_of",
            "proxies_of", "rerender", "rule_scores", "run_experiment", "sample_windows", "summarize", "verify",
            "wake_bouts", "wake_scores"]

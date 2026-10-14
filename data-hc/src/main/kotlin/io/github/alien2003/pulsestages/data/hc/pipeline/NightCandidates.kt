@@ -4,6 +4,7 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.TimeSpan
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.di.OwnPackageName
 import io.github.alien2003.pulsestages.data.local.db.SourceOutcome
@@ -50,6 +51,9 @@ data class NightCandidate(
      * `napMode.maxSessionMin` of [params] ([AlgoParams.modeOf]).
      */
     fun mode(params: AlgoParams): SessionMode = params.modeOf(durationMs)
+
+    /** True when this is a nap and [params] write nothing for naps (`napMode.outputPolicy` SKIP). */
+    fun writesNothing(params: AlgoParams): Boolean = mode(params) == SessionMode.NAP && params.napMode.outputPolicy == NapOutputPolicy.SKIP
 }
 
 /**
@@ -200,7 +204,9 @@ object NightKeys {
  *    night lying mostly inside a session of another package but covering at most half of it is a piece of that sleep,
  *    not a second record of it: when that session is kept (estimated, or recorded with stages and not outranked), the
  *    piece is its duplicate whatever the priority and blocks nothing; when that session lost to another night, the
- *    piece is decided by priority like any other night.
+ *    piece is decided by priority like any other night. A nap under `napMode.outputPolicy` SKIP (given [AlgoParams])
+ *    writes nothing and therefore outranks nothing either: it stays a candidate (recorded as a skipped nap), and an
+ *    overlapping night of a lower-priority source is estimated instead of becoming its duplicate.
  */
 class NightCandidateBuilder
     @Inject
@@ -208,11 +214,15 @@ class NightCandidateBuilder
         @param:OwnPackageName private val ownPackage: String,
         private val zoneOffsets: ZoneOffsetProvider,
     ) {
-        /** Builds the nights of [sessions] with [sources] and [overwritePolicy]. */
+        /**
+         * Builds the nights of [sessions] with [sources] and [overwritePolicy]. With [algo], a nap that its
+         * `napMode.outputPolicy` SKIP leaves without output outranks no other night (step 5); null = every night may.
+         */
         fun build(
             sessions: List<HcSleepSession>,
             sources: SourceSettings,
             overwritePolicy: OverwritePolicy,
+            algo: AlgoParams? = null,
         ): CandidateSet {
             val distinct = sessions.filter { it.endMs > it.startMs }.distinctBy { it.uuid }
             val own = distinct.filter { it.packageName == ownPackage }.sortedBy { it.startMs }
@@ -255,7 +265,8 @@ class NightCandidateBuilder
                     .flatMap { (packageName, list) -> merge(packageName, list.sortedWith(SESSION_ORDER), mergeGapMs) }
                     .filter { it.durationMs >= minDurationMs }
 
-            val (kept, duplicates) = removeDuplicates(nights, stagedNights, sources.sourcePriority)
+            val writesNothing = { night: NightCandidate -> algo != null && night.writesNothing(algo) }
+            val (kept, duplicates) = removeDuplicates(nights, stagedNights, sources.sourcePriority, writesNothing)
             return CandidateSet(
                 candidates = kept.sortedWith(CandidateSet.CANDIDATE_ORDER),
                 skipped = (withStages + napNights + duplicates).sortedWith(compareBy({ it.startMs }, { it.packageName })),
@@ -279,11 +290,15 @@ class NightCandidateBuilder
          * piece after its container), in priority order within a level. A piece whose containers all lost (to a night
          * of the piece's own package, for example) is decided by priority against the nights kept so far, so sleep
          * that only it covers is still estimated.
+         *
+         * A night for which [writesNothing] holds (a nap under the SKIP output policy) is kept or made a duplicate like
+         * any other, but it never makes another night its duplicate or piece.
          */
         private fun removeDuplicates(
             nights: List<NightCandidate>,
             stagedNights: List<NightCandidate>,
             priority: List<String>,
+            writesNothing: (NightCandidate) -> Boolean,
         ): Pair<List<NightCandidate>, List<SkippedNight>> {
             val stagedIds = stagedNights.mapTo(HashSet()) { it.clientRecordId }
             val ordered = (nights + stagedNights).sortedWith(priorityOrder(priority))
@@ -292,9 +307,13 @@ class NightCandidateBuilder
             val keptIds = HashSet<String>()
             val duplicates = mutableListOf<SkippedNight>()
             val depth = containerDepths(ordered, containers)
+            // Kept nights that may make another night their duplicate: staged sessions and nights that get an output.
+            val outranks = { other: NightCandidate -> other.clientRecordId in stagedIds || !writesNothing(other) }
             ordered.sortedBy { depth.getValue(it.clientRecordId) }.forEach { night ->
-                val container = containers.getValue(night.clientRecordId).firstOrNull { it.clientRecordId in keptIds }
-                val winner = container ?: kept.firstOrNull { it.packageName != night.packageName && overlapsMostly(it, night) }
+                val container =
+                    containers.getValue(night.clientRecordId).firstOrNull { it.clientRecordId in keptIds && outranks(it) }
+                val winner =
+                    container ?: kept.firstOrNull { it.packageName != night.packageName && overlapsMostly(it, night) && outranks(it) }
                 val winnerHasStages = winner?.clientRecordId in stagedIds
                 if (winner == null) {
                     kept += night

@@ -15,8 +15,10 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.SavedStateHandle
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
+import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
 import io.github.alien2003.pulsestages.algo.model.SessionMode
+import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.data.hc.fake.FakeSettingsRepository
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
@@ -45,6 +47,7 @@ import io.github.alien2003.pulsestages.ui.nights.NightsRoute
 import io.github.alien2003.pulsestages.ui.nights.NightsScreen
 import io.github.alien2003.pulsestages.ui.nights.NightsUiState
 import io.github.alien2003.pulsestages.ui.nights.NightsViewModel
+import io.github.alien2003.pulsestages.ui.nights.labelRes
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -105,7 +108,7 @@ class NightsRenderTest(
         }
         config.assertAppliedTo(host.resources)
         val nights = (viewModel.state.value as NightsUiState.Loaded).nights
-        host.assertNoUnresolvedPlaceholders("demo nights")
+        host.assertTexts("demo nights")
         checkFilterAndBadge(viewModel, nights)
 
         val everyStatus = statusItems(nights.first())
@@ -158,7 +161,7 @@ class NightsRenderTest(
             host.waitUntil { (viewModel.state.value as? NightsUiState.Loaded)?.filter == filter }
             val shown = (viewModel.state.value as NightsUiState.Loaded).nights
             assertTrue("$filter shows its sessions", shown.isNotEmpty() && shown.all(filter::accepts))
-            host.assertNoUnresolvedPlaceholders("filter $filter")
+            host.assertTexts("filter $filter")
         }
     }
 
@@ -214,11 +217,11 @@ class NightsRenderTest(
         val resources = host.resources
         compose.onNode(hasText(resources.getString(R.string.night_epoch_title).substringBefore('%'), substring = true)).assertExists()
         compose.onNode(hasText(resources.getString(R.string.night_compare_title))).assertExists()
-        host.assertNoUnresolvedPlaceholders("demo night with an epoch and the comparison")
+        host.assertTexts("demo night with an epoch and the comparison")
         compose.runOnIdle { viewModel.requestDelete() }
         host.idle()
         compose.onNode(isDialog()).assertExists()
-        host.assertNoUnresolvedPlaceholders("delete confirmation")
+        host.assertTexts("delete confirmation")
         compose.runOnIdle { viewModel.dismissDelete() }
         host.idle()
 
@@ -238,7 +241,7 @@ class NightsRenderTest(
         ) { NightDetailRoute(clientRecordId = "ps:none", viewModel = missing, onBack = {}, onWideLayout = {}) }
         host.waitUntil { missing.state.value.load == DetailLoad.NOT_FOUND }
         compose.onNode(hasText(host.resources.getString(R.string.night_not_found_title))).assertExists()
-        host.assertNoUnresolvedPlaceholders("night not found")
+        host.assertTexts("night not found")
     }
 
     private fun checkWarnings(
@@ -246,11 +249,45 @@ class NightsRenderTest(
         state: NightDetailUiState,
     ) {
         val night = state.night ?: return
-        if (night.mode == SessionMode.NAP) {
-            compose.onNode(hasText(host.resources.getString(R.string.night_detail_nap_rough))).assertExists("$name: nap explanation")
+        val resources = host.resources
+        val rough = hasText(resources.getString(R.string.night_detail_nap_rough))
+        val roughGeneric = hasText(resources.getString(R.string.night_detail_nap_rough_generic))
+        val writtenNap = night.mode == SessionMode.NAP && night.status == NightStatus.WRITTEN
+        when {
+            !writtenNap -> {
+                // A nap without output (e.g. skipped by the nap policy) has no stages to take as rough.
+                compose.onNode(rough).assertDoesNotExist()
+                compose.onNode(roughGeneric).assertDoesNotExist()
+            }
+
+            night.estimator == EstimatorType.HYBRID -> {
+                compose.onNode(rough).assertExists("$name: nap explanation with the nap model's figures")
+            }
+
+            else -> {
+                compose.onNode(roughGeneric).assertExists("$name: nap explanation without the hybrid figures")
+                compose.onNode(rough).assertDoesNotExist()
+            }
         }
-        if (night.mode == SessionMode.NAP && night.sleepWakeOnly && night.status == NightStatus.WRITTEN) {
-            compose.onNode(hasText(host.resources.getString(R.string.night_detail_nap_sleep_wake))).assertExists("$name: asleep / awake")
+        if (writtenNap && night.sleepWakeOnly) {
+            compose.onNode(hasText(resources.getString(R.string.night_detail_nap_sleep_wake))).assertExists("$name: asleep / awake")
+            compose.onNode(hasText(resources.getString(R.string.night_detail_hypnogram))).assertDoesNotExist()
+            compose.onNode(hasText(resources.getString(R.string.night_detail_hypnogram_sleep_wake))).assertExists("$name: title")
+            state.selection?.let { selection ->
+                // Health Connect holds AWAKE or SLEEPING: the epoch card says "written: Asleep" or "written: Awake".
+                val written = selection.writtenStage ?: return@let
+                val label = if (written == SleepStage.AWAKE) R.string.stage_awake else R.string.stage_asleep
+                val text =
+                    resources.getString(
+                        R.string.night_epoch_stage,
+                        resources.getString(selection.estimatedStage.labelRes()),
+                        resources.getString(label),
+                    )
+                compose.onNode(hasText(text)).assertExists("$name: written value of the epoch")
+            }
+        }
+        if (night.stages.isEmpty()) {
+            compose.onNode(hasText(resources.getString(R.string.night_detail_hypnogram))).assertDoesNotExist()
         }
         if (night.warnings.isNotEmpty()) {
             compose.onNode(hasText(host.resources.getString(R.string.night_detail_warnings))).assertExists("$name: warnings card")
@@ -304,13 +341,40 @@ class NightsRenderTest(
             "exporting and deleting" to loaded.copy(exporting = true, deleting = true),
             "overwrite never" to loaded.copy(overwriteNever = true, synthetic = false),
             "message" to loaded.copy(messages = listOf(UiMessage(UiText.of(R.string.night_export_done, "pulsestages-2026-10-12.csv")))),
-            "nap" to loaded.copy(night = night.copy(mode = SessionMode.NAP)),
-            "nap written as asleep / awake" to loaded.copy(night = night.copy(mode = SessionMode.NAP, sleepWakeOnly = true)),
         ) +
+            napVariants(loaded) +
             NotEstimatedReason.entries.map { "not estimated $it" to idle.copy(inspection = InspectionState.NotEstimated(null, it)) } +
             BlockedReason.entries.map { "blocked $it" to idle.copy(inspection = InspectionState.Blocked(it)) } +
             listOf(true, false).map { "inspection failed, retryable $it" to idle.copy(inspection = InspectionState.Failed(it)) } +
             NightStatus.entries.map { "status $it" to idle.copy(night = night.copy(status = it, statusReason = reasonOf(it))) }
+    }
+
+    /** A nap: written with every stage, by RULES, as asleep / awake (with an epoch selected) and skipped by the policy. */
+    private fun napVariants(loaded: NightDetailUiState): List<Pair<String, NightDetailUiState>> {
+        val night = checkNotNull(loaded.night)
+        val selection = checkNotNull(loaded.selection)
+        val idle = loaded.copy(selection = null, comparison = ComparisonState.None)
+        return listOf(
+            "nap" to loaded.copy(night = night.copy(mode = SessionMode.NAP)),
+            "nap estimated by RULES" to loaded.copy(night = night.copy(mode = SessionMode.NAP, estimator = EstimatorType.RULES)),
+            "nap written as asleep / awake" to loaded.copy(night = night.copy(mode = SessionMode.NAP, sleepWakeOnly = true)),
+            "nap written as asleep / awake, a light epoch" to
+                loaded.copy(
+                    night = night.copy(mode = SessionMode.NAP, sleepWakeOnly = true),
+                    selection = selection.copy(estimatedStage = SleepStage.LIGHT, writtenStage = SleepStage.LIGHT),
+                ),
+            "nap skipped by the nap policy" to
+                idle.copy(
+                    night =
+                        night.copy(
+                            mode = SessionMode.NAP,
+                            status = NightStatus.NOT_ESTIMATED,
+                            statusReason = "${NotEstimatedReason.NAP_SKIPPED}: nap of 90 min",
+                            stages = emptyList(),
+                        ),
+                    inspection = InspectionState.NotEstimated(null, NotEstimatedReason.NAP_SKIPPED),
+                ),
+        )
     }
 
     private companion object {

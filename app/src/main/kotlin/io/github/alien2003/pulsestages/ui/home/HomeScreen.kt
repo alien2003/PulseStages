@@ -517,7 +517,7 @@ private fun HomeScreenPreview() {
                             background = SpecialAccess.GRANTED,
                         ),
                     sources = listOf(SourceLabel("com.heytap.health.international", null)),
-                    counters = HomeCounters(found = 120, estimated = 112, skipped = 8, failed = 0, stale = 3),
+                    counters = HomeCounters(found = 120, estimated = 112, skipped = 8, failed = 0, stale = 3, nights = 104, naps = 6),
                 ),
             notifications = NotificationAccess.NOT_GRANTED,
             actions = HomeActions(),

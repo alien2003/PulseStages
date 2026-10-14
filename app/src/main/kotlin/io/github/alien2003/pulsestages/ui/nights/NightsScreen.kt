@@ -23,9 +23,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
@@ -52,6 +49,7 @@ import io.github.alien2003.pulsestages.data.local.db.NightSummary
 import io.github.alien2003.pulsestages.ui.common.EmptyState
 import io.github.alien2003.pulsestages.ui.common.ErrorState
 import io.github.alien2003.pulsestages.ui.common.LoadingState
+import io.github.alien2003.pulsestages.ui.common.SingleChoice
 import io.github.alien2003.pulsestages.ui.common.SyntheticBanner
 import io.github.alien2003.pulsestages.ui.common.durationMinutes
 import io.github.alien2003.pulsestages.ui.common.formatDate
@@ -148,21 +146,16 @@ private fun FilterRow(
 ) {
     val spacing = MaterialTheme.spacing
     val label = stringResource(R.string.nights_filter_label)
-    SingleChoiceSegmentedButtonRow(
+    // Segmented buttons, or radio buttons when a label does not fit (e.g. Russian at the largest font).
+    SingleChoice(
+        labels = NightsFilter.entries.map { stringResource(it.labelRes()) },
+        selected = filter.ordinal,
+        onSelect = { onFilter(NightsFilter.entries[it]) },
         modifier =
             Modifier
-                .fillMaxWidth()
                 .padding(horizontal = spacing.medium, vertical = spacing.small)
                 .semantics { contentDescription = label },
-    ) {
-        NightsFilter.entries.forEachIndexed { index, option ->
-            SegmentedButton(
-                selected = option == filter,
-                onClick = { onFilter(option) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = NightsFilter.entries.size),
-            ) { Text(stringResource(option.labelRes())) }
-        }
-    }
+    )
 }
 
 @StringRes

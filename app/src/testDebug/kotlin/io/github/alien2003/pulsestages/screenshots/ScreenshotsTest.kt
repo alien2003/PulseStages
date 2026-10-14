@@ -130,7 +130,7 @@ class ScreenshotsTest {
                 sources = listOf(SourceLabel(OHEALTH_PACKAGE, LABELS.getValue(OHEALTH_PACKAGE))),
                 lastRun = LastRun(NOW.toEpochMilli() - 2 * HOUR_MS, NOW.toEpochMilli() - 2 * HOUR_MS + 40_000, SyncOutcome.SUCCESS, null),
                 nextRunMs = NOW.toEpochMilli() + HOUR_MS / 2,
-                counters = HomeCounters(found = 14, estimated = 13, skipped = 1, failed = 0, stale = 1),
+                counters = HomeCounters(found = 14, estimated = 13, skipped = 1, failed = 0, stale = 1, nights = 12, naps = 1),
             )
         // A tall window shows the whole screen: status, permissions, schedule, counters and the actions.
         capture("home", TopLevelDestination.HOME, ready = { true }) {

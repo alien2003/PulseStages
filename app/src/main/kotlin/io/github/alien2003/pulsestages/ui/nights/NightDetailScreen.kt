@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.alien2003.pulsestages.R
+import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightEntity
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
@@ -248,7 +249,7 @@ fun NightDetailContent(
         Column(modifier = Modifier.padding(spacing.medium), verticalArrangement = Arrangement.spacedBy(spacing.medium)) {
             HeaderCard(night, state.stale)
             ChartsCard(state, night, actions)
-            state.selection?.let { EpochCard(it, night.startZoneOffsetSec, actions) }
+            state.selection?.let { EpochCard(it, night.startZoneOffsetSec, actions, writtenAsSleepWake = night.sleepWakeOnly) }
             ActionsCard(state, night, actions)
             ComparisonCard(state.comparison, night)
             QualityCard(night)
@@ -278,9 +279,12 @@ private fun HeaderCard(
         )
         LabeledValue(stringResource(R.string.night_detail_status), stringResource(night.status.labelRes()))
         LabeledValue(stringResource(R.string.night_detail_mode), stringResource(night.mode.labelRes()))
-        if (night.mode == SessionMode.NAP) {
-            Text(text = stringResource(R.string.night_detail_nap_rough), style = MaterialTheme.typography.bodyMedium)
-            if (night.sleepWakeOnly && night.status == NightStatus.WRITTEN) {
+        if (night.mode == SessionMode.NAP && night.status == NightStatus.WRITTEN) {
+            // The figures describe the validated hybrid nap model; other estimators get the caution without them.
+            val rough =
+                if (night.estimator == EstimatorType.HYBRID) R.string.night_detail_nap_rough else R.string.night_detail_nap_rough_generic
+            Text(text = stringResource(rough), style = MaterialTheme.typography.bodyMedium)
+            if (night.sleepWakeOnly) {
                 Text(text = stringResource(R.string.night_detail_nap_sleep_wake), style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -306,7 +310,13 @@ private fun ChartsCard(
 ) {
     val ready = state.ready
     val window = ChartWindow(night.sessionStartMs, night.sessionEndMs, night.startZoneOffsetSec)
-    DetailCard(title = stringResource(R.string.night_detail_hypnogram)) {
+    val title =
+        when {
+            night.stages.isEmpty() -> R.string.night_detail_hypnogram_not_written
+            night.sleepWakeOnly -> R.string.night_detail_hypnogram_sleep_wake
+            else -> R.string.night_detail_hypnogram
+        }
+    DetailCard(title = stringResource(title)) {
         if (night.stages.isEmpty() && ready == null) {
             Text(stringResource(R.string.night_detail_no_stages), style = MaterialTheme.typography.bodyMedium)
         } else {

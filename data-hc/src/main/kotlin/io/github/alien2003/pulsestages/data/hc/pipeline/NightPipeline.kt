@@ -148,7 +148,9 @@ class NightPipeline
 
         /**
          * NOT_ESTIMATED / FAILED nights (no output) that end after [sinceMs] and were last processed before
-         * [processedBeforeMs]: candidates for a retry, e.g. when their heart rate arrived after the sleep session.
+         * [processedBeforeMs]: candidates for a retry, e.g. when their heart rate arrived after the sleep session. Naps
+         * skipped by the nap policy are not among them ([EstimatedNightEntity.skippedNap]): no data changes their
+         * outcome, only the settings (they count as stale then, see [EstimatedNightEntity.isStale]).
          */
         suspend fun unfinishedNights(
             sinceMs: Long,
@@ -156,7 +158,7 @@ class NightPipeline
         ): List<EstimatedNightEntity> =
             ledger.nights
                 .findOverlapping(sinceMs, Long.MAX_VALUE, listOf(NightStatus.NOT_ESTIMATED, NightStatus.FAILED))
-                .filter { it.updatedAt < processedBeforeMs }
+                .filter { it.updatedAt < processedBeforeMs && !it.skippedNap }
 
         /**
          * Source uuids of the ledger's nights (with or without an output) of [packages] starting in `[fromMs, toMs)`

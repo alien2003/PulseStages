@@ -126,7 +126,7 @@ class InMemoryLedger {
         night: EstimatedNightEntity,
         algoVersion: Int,
         paramsHash: String,
-    ): Boolean = night.status == NightStatus.WRITTEN && (night.algoVersion != algoVersion || night.paramsHash != paramsHash)
+    ): Boolean = night.isStale(algoVersion, paramsHash)
 
     @Suppress("TooManyFunctions") // Implements every query of EstimatedNightDao.
     private inner class Nights : EstimatedNightDao() {

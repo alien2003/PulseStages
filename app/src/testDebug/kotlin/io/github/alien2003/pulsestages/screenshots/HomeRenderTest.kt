@@ -93,7 +93,7 @@ class HomeRenderTest(
             background = SpecialAccess.GRANTED,
         )
 
-    private val counters = HomeCounters(found = 14, estimated = 13, skipped = 1, failed = 0, stale = 0)
+    private val counters = HomeCounters(found = 14, estimated = 13, skipped = 1, failed = 0, stale = 0, nights = 12, naps = 1)
 
     private val ready =
         HomeUiState(

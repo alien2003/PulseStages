@@ -221,6 +221,20 @@ def test_grid_points_set_the_nap_decoder_only():
     assert pts[5]["params"]["napMode"]["hybrid"] == pts[5]["hybrid"]
 
 
+def test_the_parity_check_fails_when_the_features_come_from_other_sessions(tmp_path):
+    # The training rows are the algo-cli features of the session file; the decodes run on the proxies themselves.
+    sessions = [_night([(1, 30)], nid="walch-7-inst-nap30"), _night([(1, 60)], nid="walch-7-inst-nap60")]
+    path = napmodel.write_sessions(tmp_path / "proxies.jsonl", sessions)
+    napmodel.check_sessions_file(path, sessions)
+    with pytest.raises(napmodel.NapModelError, match="parity"):
+        napmodel.check_sessions_file(path, sessions[:1])                      # a session missing
+    changed = [dict(sessions[0], sessionEndMs=sessions[0]["sessionEndMs"] - MIN), sessions[1]]
+    with pytest.raises(napmodel.NapModelError, match="parity"):
+        napmodel.check_sessions_file(path, changed)                           # a session cut differently
+    with pytest.raises(napmodel.NapModelError, match="parity"):
+        napmodel.check_sessions_file(tmp_path / "missing.jsonl", sessions)    # no session file
+
+
 # -------------------------------------------------------------------------------------- end to end (fake) ----
 
 @pytest.fixture(scope="module")

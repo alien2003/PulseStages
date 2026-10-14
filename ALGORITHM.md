@@ -399,7 +399,11 @@ than 180 min, and what deliberately does not:
   iterations pooling the posteriors of the full HMM over the nights and updating μ and σ with MAP shrinkage to the
   *global* table (τ = `personal.emPriorStrength` = 200), with the same order constraint.
 - The personal model applies only when `personal.enabled` (default true): δ is added to the classifier logits (only
-  for the bundle it was fitted for) and μ/σ override the HMM table. Its fingerprint enters the params hash;
+  for the night model it was fitted for) and μ/σ override the HMM table. δ is keyed by the bundle's night-model
+  fingerprint (`HybridModel.nightModelFingerprint`: the canonical JSON without the metadata `modelId` and `training` and
+  without the nap-only `stageLogBiasShort` and `nap`), so a retrained or added nap model, or a new model id, keeps a
+  calibration whose night model did not change; personal models stored before that key hold the whole bundle's
+  fingerprint and still apply to that bundle. Its fingerprint enters the params hash;
   `algoVersion` does not change.
 
 `paramsHash` = SHA-256 of `canonicalJson(AlgoParams) + "|model=" + bundle fingerprint + "|personal=" + personal
@@ -466,7 +470,7 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | personal | `emEveryNights` / `emPriorStrength` | 30 / 200 | population EM cadence and shrinkage |
 | personal | `calibrationRegularization` / `calibrationHoldout` | 10 / 0.3 | calibration strength (hours of evidence) and held-out share |
 | napMode | `maxSessionMin` | **180** (TrainedDefaults; the pre-registered nap experiment's threshold, section 13.11) | sessions shorter than this (min) are naps, longer ones nights; 0 = no naps (section 18). Replaces `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and `post.proportionsMinSessionMin` (all 180) |
-| napMode | `estimator` | HYBRID (TrainedDefaults) | estimator of naps |
+| napMode | `estimator` | null = the night's `estimator` (TrainedDefaults; no run chose a nap estimator) | estimator of naps |
 | napMode | `outputPolicy` | STAGES (TrainedDefaults; rule (ii) of the pre-registered nap-model experiment, section 13.12) | STAGES / SLEEP_WAKE (only AWAKE and SLEEPING written) / SKIP (not estimated, nothing written) |
 | napMode.post | `checkProportions` | false | sanity check and proportion calibration of naps too |
 | napMode.post | `minDeepMin` / `minRemMin` / `minAwakeMin` | null (= the night's) | minimum bouts of naps (min) |
@@ -1378,7 +1382,9 @@ SKIP) should be the default?
 **Pre-registration** (written to `tools/train/out/prereg-nap-model.md` and appended verbatim to
 `tools/train/out/commands.log` at 2026-10-14T02:22:45+02:00, before any nap model was trained, decoded or scored and
 before any ends-in-wake window was built; **committed together with its analysis code as `d0b7f7b` before the first
-algo-cli call of the experiment** (02:41:09), as section 13.11 recommended; [docs/prereg/prereg-nap-model.md](docs/prereg/prereg-nap-model.md),
+algo-cli call of the experiment** (commit at 02:40:47; the experiment run started at 02:41:13 by `commands-nap-model.log`,
+and its first algo-cli call at about 02:41:17, logged on completion at 02:41:20 in `out/nap-model/algocli.log`), as
+section 13.11 recommended; [docs/prereg/prereg-nap-model.md](docs/prereg/prereg-nap-model.md),
 SHA-256 `b79de349…d290`, with the log as `docs/prereg/commands-nap-model.log`; `tools/train/tests/test_prereg.py`
 checks that they agree). Known beforehand: the night-level results and the current default N0, RULES, HMM-table and
 "all LIGHT" on the onset proxies of 30–170 min (section 13.11 and its post-hoc check). Code:
@@ -1423,8 +1429,13 @@ from all its nights, is excluded from everything fitted for it; outer groups and
 **Checks before and during the experiment.** Reproduction gate: N0 reproduced all 568 whole nights (candidate B of
 `bias-base/bias`) and all 2272 onset proxies of 30–120 min (C-180 of `naps`) session by session, and the 1136 proxies
 of 150 / 170 min of `naps-posthoc`. Feature parity: the onset proxies cut in Python gave exactly (every field of every
-row) the features of `algo-cli features --nap-proxies` (Kotlin's cut). Every training matrix passed the train /
-inference parity check, every exported classifier reproduced sklearn to 1e-9. With the nap sections, N1 and N2 decoded
+row) the features of `algo-cli features --nap-proxies` (Kotlin's cut). Train / inference parity holds by construction:
+the training rows are the algo-cli features of the very session files that are decoded, with nothing masked or imputed
+in between. (The pre-registration names `loso.check_train_inference_parity` for this; in this pipeline that call compared
+each training matrix with itself and could not fail. Since the audit, `napmodel.check_sessions_file` checks the real
+condition, that the session file the features were computed from holds byte for byte the proxies that are decoded; the
+experiment's files pass it, 1854 of 1854 sessions per variant, re-cut from the data.) Every exported classifier
+reproduced sklearn to 1e-9. With the nap sections, N1 and N2 decoded
 568 of 568 whole nights identically to candidate B (a nap section never changes a night).
 
 **Rule (i), verbatim:** "On Walch, worse sampling variant, pooled over proxies of both kinds: adopt the nap-model
@@ -1468,7 +1479,8 @@ section 13.11, as the gate requires.)
   where N0 had 3.3 / 4.5 %): it removes both the REM excess of the night model in short naps and the REM deficit that
   b_short created at 120–170 min.
 - **Flags.** On naps only `LOW_HR_RANGE` flags low confidence (section 8); it depends on the heart rate, not the model:
-  25.3 / 32.3 % of the Walch proxies (instantaneous / mean2min), 58–74 % of the 30-min ones, 32.3 / 37.5 % on BIDSleep.
+  25.0 / 32.0 % of the estimated Walch proxies (instantaneous / mean2min; 25.3 / 32.3 % of the onset proxies alone),
+  58–74 % of the 30-min ones, and 32.3 / 37.5 % of the estimated BIDSleep proxies (32.0 / 37.2 % of the onset ones).
   One Walch ends-in-wake window (instantaneous) and 12 BIDSleep proxies per variant are not estimated (no heart rate /
   low coverage).
 - **BIDSleep (EEG headband, secondary;** worse variant, both kinds): N0 0.468 / 80.5, N1 0.546 / 63.4, N2 0.541 / 57.2
@@ -1509,7 +1521,10 @@ the earlier claim with the previous bundle and the previous nap defaults pinned.
 **Disclosed changes after the first run** (none touches a candidate, a fit or a decision): `final_model` also writes
 the note that explains the nap decoder in the generated `TrainedDefaults` KDoc (`nap-model-final` re-run with the same
 `--created-at`: bundle, defaults and fit byte-identical); the generator writes a chosen nap weight as `const val`
-(detekt); two core-algo tests and one app test that assumed empty nap decoder defaults now pin them. All logged in
+(detekt); two core-algo tests and one app test that assumed empty nap decoder defaults now pin them. After an audit
+(also none touching a result): the vacuous parity calls were replaced by `check_sessions_file` (above), and the
+generator writes `NAP_ESTIMATOR` as null, i.e. the night's estimator (section 18; `TrainedDefaults` regenerated from
+`nap-model-final`, only that line changed, and with the default settings it is the same HYBRID). All logged in
 `commands-nap-model.log`.
 
 **Conclusion.** A dedicated nap model makes naps clearly less wrong: on the Walch nap proxies about 6 in 10 of the 30-s
@@ -1519,8 +1534,11 @@ excluding 0), including the 30-min naps (0.72 vs 0.64). The default output for n
 are still rough: 4 in 10 epochs are wrong, the share error is about 1.5 times a whole night's (32–39 pp), deep sleep is
 over-called in the first hour, and the evidence comes from nights, not naps — onset proxies of 30–170 min and only 11
 Walch windows that end with an awakening, on which the model is no better than "all LIGHT". Short nights of 90–180 min
-(estimated under the default source filter) are decoded by the nap model too; at 150 and 170 min it is better than the
-short-session bias it replaces (0.58 / 0.61 vs 0.51 / 0.51 accuracy, E 53 / 46 vs 68 / 63 pp, worse variant).
+(estimated under the default source filter) are decoded by the nap model too; at 150 and 170 min it is more accurate
+than the short-session bias it replaces (0.58 / 0.61 vs 0.51 / 0.51, worse variant). Its share error is lower at 170 min
+in both variants (45.6 / 45.0 vs 63.2 / 58.1 pp, instantaneous / mean2min), but at 150 min only on instantaneous (52.9 vs
+68.2 pp): on mean2min it is the same (53.2 vs 52.8 pp, paired per subject +0.4 [−10.9, 11.8] pp, post hoc), so the
+worse-variant comparison "53 vs 68 pp" mixes the two variants there.
 
 **Limitations of the proxies** (in addition to section 13.11's): no afternoon circadian phase and no real post-nap
 wake heart rate in either kind; the context before an ends-in-wake window is nocturnal sleep, not daytime activity; the
@@ -1804,10 +1822,12 @@ pre-registered nap experiment's threshold, section 13.11; the legacy key `hybrid
 `trained_defaults.json` files is read as `napMode.maxSessionMin`).
 
 **What the mode changes.** `AlgoParams.forMode(mode)` gives the effective parameters of a session: for a night the
-configured ones, for a nap the configured ones with `estimator = napMode.estimator`, `post = napMode.post` applied to
-`post` and `hybrid = napMode.hybrid` applied to `hybrid`. Every nap override is nullable, null meaning "the night's
-value", so a parameter patch (such as a θ_g grid point or a user setting) moves naps and nights alike unless a nap
-override is set. The post-processing overrides are null by default; the nap decoder overrides `napMode.hybrid.*` have
+configured ones, for a nap the configured ones with `estimator = napMode.estimator ?: estimator`
+(`AlgoParams.napEstimator`), `post = napMode.post` applied to `post` and `hybrid = napMode.hybrid` applied to `hybrid`.
+Every nap override is nullable, null meaning "the night's value", so a parameter patch (such as a θ_g grid point or a
+user setting) moves naps and nights alike unless a nap override is set. The nap estimator and the post-processing
+overrides are null by default (so a settings file of 0.1.0 with only `algo.estimator` = HMM or RULES estimates its
+short sessions with that estimator, as before); the nap decoder overrides `napMode.hybrid.*` have
 trained defaults since the nap model of section 13.12 (EXPLICIT, 0.5, 0: the night's values, but set, so a changed
 night decoder no longer moves naps). The `paramsHash` of an estimate is computed from the configured parameters (both modes
 together), not from the effective ones.
@@ -1815,7 +1835,7 @@ together), not from the effective ones.
 | | night | nap |
 |---|---|---|
 | nadir baseline, elevated-HR check | counts for the baseline; compared with it | never counts; never compared (no `ELEVATED_HR`) |
-| estimator | `estimator` (HYBRID) | `napMode.estimator` (HYBRID, `TrainedDefaults.NAP_ESTIMATOR`) |
+| estimator | `estimator` (HYBRID) | `napMode.estimator`, null = the night's (`TrainedDefaults.NAP_ESTIMATOR` = null) |
 | HYBRID model | main model, `stageLogBias` | the bundle's `nap` model with its own `stageLogBias` when present; else the main model with `stageLogBiasShort` (or `stageLogBias` without it), exactly as before |
 | decoder (HYBRID) | `hybrid.durationModel` / `emissionWeight` / `timePriorWeight` | `napMode.hybrid.*` (EXPLICIT / 0.5 / 0 from `TrainedDefaults.NAP_HYBRID_*`; null = the night's) |
 | minimum bouts, low-confidence threshold / policy | `post.*` | `napMode.post.*` (null = the night's) |
@@ -1827,7 +1847,13 @@ together), not from the effective ones.
 Coverage gates (section 9), preprocessing and base features are the same in both modes. With SKIP the session is
 `NOT_ESTIMATED` with reason `NAP_SKIPPED` ("nap of X min (shorter than napMode.maxSessionMin = Y min) and naps are not
 estimated (napMode.outputPolicy = SKIP)"), checked right after the too-short gate and before any data is read; an
-output written for the nap earlier is deleted when the nap is processed again. With SLEEP_WAKE the estimate is
+output written for the nap earlier is deleted when the nap is processed again, also one the ledger does not know
+(written before a reinstall: the nap's own clientRecordId, or our record whose notes list one of its source sessions).
+A skipped nap writes nothing, so it replaces nothing else: it supersedes only nights of the same sleep (sharing a
+source session with it, or of its own package and overlapping it), never another source's overlapping night, and in
+the duplicate rule of the source priority it outranks no night (a lower-priority source's night of the same sleep is
+estimated instead). Its outcome depends on the settings only: it is not retried for late heart rate, and it counts as
+stale when the settings change, so after switching "Written for a nap" back, "Recompute stale" writes it. With SLEEP_WAKE the estimate is
 computed as with STAGES, then AWAKE is written as `STAGE_TYPE_AWAKE` and LIGHT, DEEP, REM and UNKNOWN (data gaps) as
 Health Connect's generic `STAGE_TYPE_SLEEPING` (the source session already says the whole span was sleep), adjacent
 equal types merged; the ledger keeps the estimated stages and minutes (`sleepWakeOnly` = true), so the Night detail
@@ -1860,7 +1886,10 @@ screen (metrics split by mode when reference sessions include naps).
 
 **No behaviour change.** With the defaults, and with any other parameters that set the three old thresholds to one
 common value (`napMode.maxSessionMin`), the build with the two modes decodes every session exactly as the build before
-them (`78bcc71`); only settings that gave the three thresholds different values cannot be expressed any more:
+them (`78bcc71`); only settings that gave the three thresholds different values cannot be expressed any more. A
+non-default estimator of that build (`algo.estimator` RULES or HMM, which applied to every session) still applies to naps,
+because `napMode.estimator` is null by default; the RULES and HMM configurations below set only `estimator`, as such a
+settings file does:
 
 - *Synthetic* (`NapModeRegressionTest`): 767 SHA-256 digests (intervals, per-epoch stages and posteriors, warning codes,
   flags, coverage, confidence; or the not-estimated reason) of 13 configurations (shipped bundle; bundle without

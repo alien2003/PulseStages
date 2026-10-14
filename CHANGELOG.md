@@ -23,15 +23,21 @@ releases").
   "Emission weight of naps", "Time-of-night prior of naps") now default to the validated values (explicit, 0.5, 0: the
   same as nights, but no longer following a change of the night settings). "Written for a nap" stays **Stages** by
   default, now as the outcome of the same pre-registered test. **Nights are estimated exactly as before** (checked
-  night by night and per epoch against the previous bundle). Because the bundle and the defaults changed, every
+  night by night and per epoch against the previous bundle). A personal calibration is now keyed by the night model
+  alone (the bundle without its nap parts and metadata), so this and later nap-model updates keep a calibration made
+  with the same night model; a calibration made with an earlier key still applies only to the bundle it was made with. Because the bundle and the defaults changed, every
   estimate's params hash changes and the app offers to recompute.
 - **Nights and naps are two processing modes** (ALGORITHM.md §18, README "Naps"). One threshold, Settings → **Naps**
   → "Nap threshold" (`napMode.maxSessionMin`, 180 min; 0 = no naps), decides whether a session is a nap or a night;
   it replaces the three 180-min thresholds `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and
   `post.proportionsMinSessionMin` of the entries below (a settings file with the old keys loads with them ignored).
-  The source setting "Minimum session length" stays the minimum below which sessions are ignored. A nap gets its own
-  estimator ("Estimator for naps", HYBRID), what is written for it ("Written for a nap": **Stages**, as before;
-  **Asleep / awake**, only AWAKE and SLEEPING in Health Connect; **Nothing**, not estimated and not written), and its
+  The source setting "Minimum session length" stays the minimum below which sessions are ignored. A nap may get its
+  own estimator ("Estimator for naps"; by default "Same as nights", so a settings file with `algo.estimator` HMM or
+  RULES still estimates its short sessions with that estimator), what is written for it ("Written for a nap":
+  **Stages**, as before; **Asleep / awake**, only AWAKE and SLEEPING in Health Connect; **Nothing**, not estimated and
+  not written: a skipped nap removes only its own earlier records and nights of the same sleep, never another app's
+  overlapping night, which is estimated instead; it is not retried for late heart rate, and after switching back
+  "Recompute stale" writes it), and its
   own values of the minimum bouts, the stage-share corridors and whether they are checked (off), the uncertain-epoch
   threshold and policy, and the hybrid decoder (duration model, emission and time-prior weights); empty = the
   value of nights. The model bundle may carry a nap model (`nap` section, docs/INTERCHANGE.md) that decodes naps
@@ -39,9 +45,14 @@ releases").
   every night and nap is estimated exactly as before** (checked on synthetic sessions against the previous build, and
   on the validation nights and nap segments: byte-identical output). Calibration on reference nights and the
   unsupervised adaptation use nights only.
-- **Nights list**: a **Nap** badge and a filter (All / Nights / Naps). **Night detail** says whether the session was
-  processed as a night or a nap, and for a nap that its stages are rough. **Home** counts written nights and naps
-  apart. **Compare** shows kappa and accuracy of nights and naps apart when the reference sessions include naps.
+- **Nights list**: a **Nap** badge and a filter (All / Nights / Naps); a nap skipped under **Nothing** is not shown as
+  a problem. **Night detail** says whether the session was processed as a night or a nap, and for a written nap that
+  its stages are rough; for a nap written as asleep / awake the hypnogram is labelled as the app's estimate and the
+  epoch details show the written value (asleep / awake). **Home** counts written nights and naps apart. **Compare**
+  shows kappa and accuracy of nights and naps apart when the reference sessions include naps. **Settings**: the group
+  **Naps** holds the threshold, "Written for a nap" and "Estimator for naps" (menus); the nap values of the algorithm
+  are in the collapsed group "Naps: algorithm". Wherever a choice's labels do not fit side by side (a translation, a
+  large font), it is shown as a list of radio buttons instead of segmented buttons.
 - The notes of every written session have `"mode"` (`NIGHT` / `NAP`); the CSV export has a last column `mode`;
   `algo-cli evaluate` reports metrics by mode (`byMode`), evaluates nap proxies (`--nap-proxies 30,60,90,120`) and
   takes fold bundles with nap sections (`--fold-models`); `--estimator` sets the estimator of nights and naps.

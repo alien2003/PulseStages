@@ -133,7 +133,7 @@ from memory.
   `post.proportionsMinSessionMin`); a session could be a nap for one rule and a night for another, and nothing else
   could differ between the two. They are replaced by one threshold `napMode.maxSessionMin` (180 min from
   `TrainedDefaults`, 0..720, 0 = no naps; strictly shorter = nap; the source setting `minSessionMin` stays the global
-  minimum) and a nap gets its own estimator (`napMode.estimator`, HYBRID), output policy (`napMode.outputPolicy`:
+  minimum) and a nap may get its own estimator (`napMode.estimator`, null = the night's), output policy (`napMode.outputPolicy`:
   STAGES / SLEEP_WAKE / SKIP, default STAGES), post-processing overrides (`napMode.post`: minimum bouts, sanity
   corridors, `checkProportions` = false, low-confidence threshold and policy) and HYBRID decoder overrides
   (`napMode.hybrid`: duration model, emission and time-prior weights). Decisions:

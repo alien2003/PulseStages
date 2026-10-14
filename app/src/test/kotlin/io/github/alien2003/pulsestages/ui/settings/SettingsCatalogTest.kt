@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.ui.settings
 
+import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.params.TrainedDefaults
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
 import io.github.alien2003.pulsestages.data.local.settings.SettingsJson
@@ -148,9 +149,41 @@ class SettingsCatalogTest {
             TrainedDefaults.NAP_OUTPUT_POLICY.name,
             checkNotNull(SettingsCatalog.spec("algo.napMode.outputPolicy") as ChoiceSpec).read(defaults),
         )
+        // The nap estimator follows the night's by default ("Same as nights"), as a settings file of 0.1.0 expects.
+        val estimator = checkNotNull(SettingsCatalog.spec("algo.napMode.estimator") as ChoiceSpec)
+        assertEquals(TrainedDefaults.NAP_ESTIMATOR?.name ?: SAME_AS_NIGHTS_KEY, estimator.read(defaults))
+        val hmm = defaults.copy(algo = defaults.algo.withEstimator(EstimatorType.HMM))
+        assertEquals(
+            null,
+            estimator
+                .write(hmm, SAME_AS_NIGHTS_KEY)
+                .algo.napMode.estimator,
+        )
+        assertEquals(
+            EstimatorType.RULES,
+            estimator
+                .write(defaults, "RULES")
+                .algo.napMode.estimator,
+        )
+        // Long labels ("Asleep / awake", "Same as nights") are dropdowns, not segments.
+        assertEquals(ChoiceStyle.DROPDOWN, estimator.style)
+        assertEquals(ChoiceStyle.DROPDOWN, (SettingsCatalog.spec("algo.napMode.outputPolicy") as ChoiceSpec).style)
         assertTrue(SettingsCatalog.spec("algo.features.baselineMinSessionMin") == null, "the old thresholds are gone")
         assertTrue(SettingsCatalog.spec("algo.hybrid.shortSessionMaxMin") == null)
         assertTrue(SettingsCatalog.spec("algo.post.proportionsMinSessionMin") == null)
+    }
+
+    @Test
+    fun `only the everyday groups start expanded, the nap overrides are in a collapsed algorithm group`() {
+        val expanded = SettingsCatalog.sections.filter { it.expandedByDefault }.map { it.id }
+        assertEquals(listOf("sources", "schedule", "write", "estimator", "naps", "debug"), expanded)
+        val naps = SettingsCatalog.sections.single { it.id == "naps" }
+        assertEquals(
+            listOf("algo.napMode.maxSessionMin", "algo.napMode.outputPolicy", "algo.napMode.estimator"),
+            naps.items.specs().map { it.path },
+        )
+        val algorithm = SettingsCatalog.sections.single { it.id == "naps_algorithm" }
+        assertTrue(algorithm.items.specs().all { it.path.startsWith("algo.napMode.post.") || it.path.startsWith("algo.napMode.hybrid.") })
     }
 
     private companion object {

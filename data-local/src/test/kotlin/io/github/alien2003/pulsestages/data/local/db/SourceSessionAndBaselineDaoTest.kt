@@ -106,11 +106,17 @@ class SourceSessionDaoTest : DatabaseTest() {
             nights.upsert(night("ps:stale", startMs = 24 * HOUR_MS, algoVersion = 1, paramsHash = "old"))
             nights.upsert(night("ps:nap", startMs = 48 * HOUR_MS, hours = 1, paramsHash = "h").copy(mode = SessionMode.NAP))
             nights.upsert(
-                night("ps:skipped-nap", startMs = 72 * HOUR_MS, hours = 1, status = NightStatus.NOT_ESTIMATED).copy(mode = SessionMode.NAP),
+                night("ps:not-estimated-nap", startMs = 72 * HOUR_MS, hours = 1, status = NightStatus.NOT_ESTIMATED)
+                    .copy(mode = SessionMode.NAP, statusReason = "NO_HR_DATA: no samples"),
+            )
+            // A nap skipped by the nap policy with other settings is stale: it may be written with the current ones.
+            nights.upsert(
+                night("ps:skipped-nap", startMs = 96 * HOUR_MS, hours = 1, status = NightStatus.NOT_ESTIMATED, paramsHash = "old")
+                    .copy(mode = SessionMode.NAP, statusReason = "$SKIPPED_NAP_REASON_PREFIX nap of 60 min"),
             )
 
             assertEquals(
-                HomeCounters(found = 8, estimated = 2, skipped = 5, failed = 1, stale = 1, nights = 2, naps = 1),
+                HomeCounters(found = 8, estimated = 2, skipped = 5, failed = 1, stale = 2, nights = 2, naps = 1),
                 dao.observeHomeCounters(1, "h").first(),
             )
         }

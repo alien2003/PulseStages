@@ -103,7 +103,7 @@ class HybridEstimator(
         val deltas =
             personalModel
                 ?.takeIf { params.personal.enabled && active.personal }
-                ?.biasDeltasFor(model.fingerprint())
+                ?.biasDeltasFor(model.nightModelFingerprint(), model.fingerprint())
         val emissions = HybridEmissions(night, active.components, active.network, deltas, active.stageBias, active.logitsKey)
         val decoder =
             when (params.hybrid.durationModel) {

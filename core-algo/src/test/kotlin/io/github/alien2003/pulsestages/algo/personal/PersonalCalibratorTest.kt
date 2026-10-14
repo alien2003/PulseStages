@@ -76,7 +76,7 @@ class PersonalCalibratorTest {
         assertEquals(PersonalModelKind.CALIBRATED, result.model.provenance.kind)
         assertEquals(before, result.model.provenance.kappaBefore)
         assertEquals(after, result.model.provenance.kappaAfter)
-        assertEquals(model.fingerprint(), result.model.baseModelFingerprint)
+        assertEquals(model.nightModelFingerprint(), result.model.baseModelFingerprint)
         assertEquals(0.0, checkNotNull(result.model.biasDeltas).sum(), 1e-9, "softmax-invariant direction stays at zero")
 
         val weak = PersonalCalibrator(model).calibrate(nights, regularized(params, 0.5))

@@ -38,12 +38,15 @@ data class AlgoParams(
     /** These parameters with [type] as the estimator of nights and of naps (`estimator` and `napMode.estimator`). */
     fun withEstimator(type: EstimatorType): AlgoParams = copy(estimator = type, napMode = napMode.copy(estimator = type))
 
+    /** The estimator of naps: `napMode.estimator`, or the night's [estimator] when it is null. */
+    val napEstimator: EstimatorType get() = napMode.estimator ?: estimator
+
     /** The mode of a session lasting [durationMs] ([NapModeParams.modeOf]). */
     fun modeOf(durationMs: Long): SessionMode = napMode.modeOf(durationMs)
 
     /**
      * The parameters in effect for a session of [mode]: these parameters for [SessionMode.NIGHT]; for
-     * [SessionMode.NAP] the estimator `napMode.estimator` and the post-processing and hybrid decoder parameters with the
+     * [SessionMode.NAP] the estimator [napEstimator] and the post-processing and hybrid decoder parameters with the
      * overrides of `napMode` applied (every other group unchanged, [napMode] included).
      */
     fun forMode(mode: SessionMode): AlgoParams =
@@ -54,7 +57,7 @@ data class AlgoParams(
 
             SessionMode.NAP -> {
                 copy(
-                    estimator = napMode.estimator,
+                    estimator = napEstimator,
                     post = napMode.post.applyTo(post),
                     hybrid = napMode.hybrid.applyTo(hybrid),
                 )

@@ -210,8 +210,10 @@ bout of >= 2 min to the start of the next wake bout of >= 5 min, with up to 5 mi
 5 min of the closing awakening after it, 30-179 min, up to 30 min of context before and nothing after the end; at most 3
 non-overlapping windows per night in a SHA-256 order shared by the two variants). Before any fit it checks that the
 current default at fold level (N0: night fold bundle + b_g + b_short_g(180)) reproduces `bias-base/bias` candidate B on
-every night and `naps` / `naps-posthoc` C-180 on every onset proxy, and that the Python cut gives exactly the features of
-`algo-cli features --nap-proxies`. Then, per (variant, outer group), the nested inner CV fits logistic regression (C by
+every night and `naps` / `naps-posthoc` C-180 on every onset proxy, that the Python cut gives exactly the features of
+`algo-cli features --nap-proxies`, and that the session files the features come from hold byte for byte the proxies
+that are decoded (`check_sessions_file`: the training rows are the algo-cli features as they are, so this is the
+train / inference parity check of the nap pipeline). Then, per (variant, outer group), the nested inner CV fits logistic regression (C by
 inner log-loss) and an MLP 2 x 32 on the inner training subjects' proxies (rows of both variants, instantaneous first;
 statistics from the evaluated variant), scores the 32-point decoder grid as `napMode.hybrid` patches (mean per-subject
 kappa of the inner held-out Walch subjects) and fits the nap stageLogBias with `bias.fit_stage_bias` on the inner
@@ -247,7 +249,7 @@ every phase). Rebuild algo-cli only between runs and log the rebuild in `tools/t
 (`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`,
 `emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it), nap mode (`napMode.maxSessionMin` —
 180 unless the run chose it, a legacy `hybrid.shortSessionMaxMin` of an earlier run read as it; `napMode.estimator` —
-the night's estimator unless chosen; `napMode.outputPolicy` — STAGES unless chosen; the nap decoder overrides
+null, i.e. the night's estimator, unless chosen; `napMode.outputPolicy` — STAGES unless chosen; the nap decoder overrides
 `napMode.hybrid.*` — null = the night's values unless chosen, a chosen weight is written as a `const val`) and HMM (`emissions`, `meanBouts`, `transitions`) defaults from it. The HMM
 fields hold the supervised estimates only when HMM-trained beat the physiology table by the selection rule;
 otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` / `TransitionWeights()`, and `HmmParams.PHYSIOLOGY`

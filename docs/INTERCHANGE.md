@@ -252,7 +252,7 @@ Conventions shared by training and decoding (they must not drift apart):
 {
   "schemaVersion": 1,
   "biasDeltas": [dA, dL, dD, dR],          // added to the hybrid classifier's output logits (or null)
-  "baseModelFingerprint": "…",              // bundle the deltas were fitted for; ignored with any other bundle
+  "baseModelFingerprint": "…",              // night model the deltas were fitted for (see below); ignored with any other
   "hmmMeans": {"awake": {"hrNorm": 2.9, "hrVar": 1.8, "hrSlope": 0.0}, "light": {…}, "deep": {…}, "rem": {…}},  // or null
   "hmmSds":   { /* same shape, σ > 0 */ },  // or null
   "provenance": {"kind": "CALIBRATED" | "EM", "nightsUsed": 8, "kappaBefore": 0.31, "kappaAfter": 0.34,
@@ -263,7 +263,11 @@ Conventions shared by training and decoding (they must not drift apart):
 Applied by `SleepStager(hybridModel, personalModel)` only when `AlgoParams.personal.enabled`; `fingerprint()` (SHA-256
 of the canonical JSON) then enters the params hash. `PersonalCalibrator` (reference nights with true stages) fits
 `biasDeltas` and `hmmMeans`; `PopulationEmAdapter` (unsupervised, many nights) fits `hmmMeans` and `hmmSds` and keeps
-the deltas of the model it starts from.
+the deltas of the model it starts from. `baseModelFingerprint` is `HybridModel.nightModelFingerprint()` of the bundle
+the deltas were fitted with: the SHA-256 of its canonical JSON without `modelId`, `training`, `stageLogBiasShort` and
+`nap`, i.e. of the parts that decode a night, so a bundle that differs only in its nap model, its short-session bias or
+its metadata keeps the deltas. A model written before this key existed holds the bundle's whole `fingerprint()`, which
+still matches that bundle.
 
 ## 5. Night / nap modes in the app's output (`napMode.outputPolicy`)
 
@@ -275,6 +279,20 @@ nights always get STAGES), the same `SleepSessionRecord` metadata, title and not
 | `STAGES` (default) | AWAKE → `STAGE_TYPE_AWAKE` (1), LIGHT → `STAGE_TYPE_LIGHT` (4), DEEP → `STAGE_TYPE_DEEP` (5), REM → `STAGE_TYPE_REM` (6), UNKNOWN (data gaps) → `STAGE_TYPE_UNKNOWN` (0), like a night | WRITTEN, `mode` NAP |
 | `SLEEP_WAKE` | AWAKE → `STAGE_TYPE_AWAKE` (1); LIGHT, DEEP, REM and UNKNOWN → `STAGE_TYPE_SLEEPING` (2) (the source session already says the whole span was sleep); adjacent equal types merged; with `awakeAsLight` AWAKE is written as SLEEPING too | WRITTEN, `mode` NAP, `sleepWakeOnly` = true (the row keeps the estimated stages and minutes) |
 | `SKIP` | nothing; an output written for the nap earlier is deleted when the nap is processed again | NOT_ESTIMATED, reason `NAP_SKIPPED: …`, `mode` NAP |
+
+Under `SKIP` a nap writes nothing, so it replaces nothing that another source wrote:
+
+- **Its own earlier records are deleted** when it is processed again: its clientRecordId (also when only Health Connect
+  knows it, e.g. after a reinstall) and any record of ours whose notes list one of its source uuids.
+- **Nights of the same sleep are superseded**: those sharing a source session with it (the sleep cut differently, e.g. a
+  night that became this nap when a fragment was deleted; its remaining fragments are linked to the nap) and
+  overlapping nights of its own package.
+- **Another source's night is never removed or blocked by it.** An overlapping night of a lower-priority source keeps its
+  output, and the source-priority rule does not make that night a duplicate of the skipped nap: it is estimated as if
+  the nap were not there. Under `STAGES` and `SLEEP_WAKE` the higher-priority nap replaces it as usual.
+- **No retries, but stale.** A skipped nap is not retried for late heart rate (nothing it could read changes the
+  outcome); when the settings change it counts as stale, so after "Written for a nap" is switched back, "Recompute
+  stale" writes it.
 
 The notes JSON of every written session has `"mode": "NIGHT"` or `"NAP"` after `"algo"`:
 `{"algo":"HYBRID","mode":"NAP","version":1,"paramsHash":"…",…}`.

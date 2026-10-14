@@ -26,13 +26,14 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
  * The night / nap modes of [SleepStager] (ALGORITHM.md section 18): the mode follows the session length and
- * `napMode.maxSessionMin`; a nap is estimated with `napMode.estimator`, the nap overrides and the output policy, and the
- * bundle's nap model when it has one; nights are untouched by every nap setting.
+ * `napMode.maxSessionMin`; a nap is estimated with `napMode.estimator` (the night's when null), the nap overrides and
+ * the output policy, and the bundle's nap model when it has one; nights are untouched by every nap setting.
  */
 class NapModeTest {
     private val model = SyntheticHybridModels.default
@@ -114,11 +115,24 @@ class NapModeTest {
         val params = AlgoParams().copy(napMode = AlgoParams().napMode.copy(estimator = EstimatorType.RULES))
         assertEquals(EstimatorType.RULES, estimate(nap(90), params).estimator)
         assertEquals(EstimatorType.HYBRID, estimate(night, params).estimator)
-        val hmmNights = AlgoParams().copy(estimator = EstimatorType.HMM)
-        assertEquals(EstimatorType.HYBRID, estimate(nap(90), hmmNights).estimator, "naps keep napMode.estimator (HYBRID)")
-        assertEquals(EstimatorType.HMM, estimate(night, hmmNights).estimator)
+        val hybridNaps =
+            AlgoParams().copy(estimator = EstimatorType.HMM, napMode = AlgoParams().napMode.copy(estimator = EstimatorType.HYBRID))
+        assertEquals(EstimatorType.HYBRID, estimate(nap(90), hybridNaps).estimator, "an explicit nap estimator is kept")
+        assertEquals(EstimatorType.HMM, estimate(night, hybridNaps).estimator)
         val both = AlgoParams().withEstimator(EstimatorType.HMM)
         assertEquals(EstimatorType.HMM, estimate(nap(90), both).estimator)
+    }
+
+    @Test
+    fun `by default naps follow the night's estimator, as a settings file of 0_1_0 expects`() {
+        assertNull(AlgoParams().napMode.estimator, "no nap estimator by default: the night's is used")
+        for (type in EstimatorType.entries) {
+            // A 0.1.0 settings file had only algo.estimator, which applied to every session.
+            val stored = AlgoParams().copy(estimator = type)
+            assertEquals(type, stored.napEstimator)
+            assertEquals(type, stored.forMode(SessionMode.NAP).estimator)
+            assertEquals(type, estimate(nap(90), stored).estimator)
+        }
     }
 
     @Test
@@ -222,13 +236,46 @@ class NapModeTest {
         val deltas =
             PersonalModel(
                 biasDeltas = listOf(3.0, -1.0, -1.0, -1.0),
-                baseModelFingerprint = bundle.fingerprint(),
+                baseModelFingerprint = bundle.nightModelFingerprint(),
                 provenance = PersonalProvenance(PersonalModelKind.CALIBRATED, nightsUsed = 1),
             )
         val personal = SleepStager(bundle, deltas)
         val plain = SleepStager(bundle)
         assertEquals(estimate(nap(90), AlgoParams(), plain).perEpoch, estimate(nap(90), AlgoParams(), personal).perEpoch)
         assertNotEquals(estimate(night, AlgoParams(), plain).perEpoch, estimate(night, AlgoParams(), personal).perEpoch)
+    }
+
+    @Test
+    fun `a calibration keeps applying to nights when only the nap parts or the metadata of the bundle change`() {
+        val before = model.copy(stageLogBiasShort = null, nap = null)
+        val deltas =
+            PersonalModel(
+                biasDeltas = listOf(3.0, -1.0, -1.0, -1.0),
+                baseModelFingerprint = before.nightModelFingerprint(),
+                provenance = PersonalProvenance(PersonalModelKind.CALIBRATED, nightsUsed = 1),
+            )
+        val withPersonal = estimate(night, AlgoParams(), SleepStager(before, deltas)).perEpoch
+        assertNotEquals(estimate(night, AlgoParams(), SleepStager(before)).perEpoch, withPersonal, "the deltas change the night")
+        // A nap model added (or retrained), a new short-session bias, a new modelId: the night model is the same.
+        val after =
+            before.copy(
+                modelId = "${before.modelId}-with-nap",
+                stageLogBiasShort = listOf(0.1, 0.2, -0.1, -0.2),
+                nap = NapModels.from(MinimalBundles.logreg()),
+            )
+        assertNotEquals(before.fingerprint(), after.fingerprint())
+        assertEquals(before.nightModelFingerprint(), after.nightModelFingerprint())
+        assertEquals(withPersonal, estimate(night, AlgoParams(), SleepStager(after, deltas)).perEpoch)
+        // A key stored before the night-model fingerprint existed (the whole bundle's) still applies to that bundle.
+        val legacy = deltas.copy(baseModelFingerprint = before.fingerprint())
+        assertEquals(withPersonal, estimate(night, AlgoParams(), SleepStager(before, legacy)).perEpoch)
+        // A changed night model (its stage bias) drops the deltas.
+        val retrained = after.copy(stageLogBias = listOf(0.3, 0.0, -0.1, -0.2))
+        assertNotEquals(before.nightModelFingerprint(), retrained.nightModelFingerprint())
+        assertEquals(
+            estimate(night, AlgoParams(), SleepStager(retrained)).perEpoch,
+            estimate(night, AlgoParams(), SleepStager(retrained, deltas)).perEpoch,
+        )
     }
 
     @Test

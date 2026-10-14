@@ -28,8 +28,9 @@ import java.io.File
  * bundle shipped then (`nap-mode-regression-bundle.json`, `pulsestages-walch+bidsleep-mlp-naps-final`), so the test
  * keeps proving the same thing after a new bundle is installed. The threshold variants map the old three thresholds
  * (`features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`, `post.proportionsMinSessionMin`, all set to the same
- * value) onto `napMode.maxSessionMin`, and an estimator variant sets the estimator of both modes (before the modes,
- * `estimator` applied to every session). The params hash is not compared: the parameters changed shape, so every hash
+ * value) onto `napMode.maxSessionMin`, and an estimator variant sets only `estimator`, as a settings file of the
+ * recording build does (there `estimator` applied to every session; now naps follow it while `napMode.estimator` is
+ * null). The params hash is not compared: the parameters changed shape, so every hash
  * changed by design; the bundle fingerprint is compared and must be the one the old build computed. The parameters are
  * the defaults of the recording build ([PREVIOUS_DEFAULTS]: no nap decoder overrides, every stage written), so a later
  * trained nap default (TrainedDefaults `NAP_HYBRID_*`, `NAP_OUTPUT_POLICY`) does not change what is proved here.
@@ -61,10 +62,10 @@ class NapModeRegressionTest {
             Case("bundled/elevated", stager, base, baseline = LOW_BASELINE),
             Case("bundled/elevatedThreshold0", stager, base.withNapThreshold(0.0), baseline = LOW_BASELINE),
             Case("synthetic/default", SleepStager(SyntheticHybridModels.default), base),
-            // The recording build had one estimator for every session: withEstimator sets the night and nap estimator.
-            Case("rules", stager, base.withEstimator(EstimatorType.RULES)),
-            Case("hmm", stager, base.withEstimator(EstimatorType.HMM)),
-            Case("hmm/elevated", stager, base.withEstimator(EstimatorType.HMM), baseline = LOW_BASELINE),
+            // The recording build had one estimator for every session: its settings set only `estimator`.
+            Case("rules", stager, base.copy(estimator = EstimatorType.RULES)),
+            Case("hmm", stager, base.copy(estimator = EstimatorType.HMM)),
+            Case("hmm/elevated", stager, base.copy(estimator = EstimatorType.HMM), baseline = LOW_BASELINE),
         )
     }
 
@@ -199,9 +200,14 @@ class NapModeRegressionTest {
         val PROXY_MINUTES = listOf(30, 60, 90, 120, 150, 179, 180, 181)
         val SESSION_MINUTES = listOf(45, 120, 179, 180, 181)
 
-        /** The defaults of the recording build: today's defaults without nap decoder overrides, naps written as STAGES. */
+        /**
+         * The defaults of the recording build: today's defaults without nap decoder overrides and without a nap
+         * estimator of its own (naps follow `estimator`), naps written as STAGES.
+         */
         val PREVIOUS_DEFAULTS: AlgoParams =
-            AlgoParams().let { it.copy(napMode = it.napMode.copy(outputPolicy = NapOutputPolicy.STAGES, hybrid = NapHybridParams())) }
+            AlgoParams().let {
+                it.copy(napMode = it.napMode.copy(estimator = null, outputPolicy = NapOutputPolicy.STAGES, hybrid = NapHybridParams()))
+            }
 
         /**
          * The single nap threshold [minutes] in this build's parameters. The recording build (before the modes) set its

@@ -40,8 +40,11 @@ object TrainedDefaults {
      */
     const val NAP_MAX_SESSION_MIN: Double = 180.0
 
-    /** Nap mode: the estimator of naps (not part of this run's selection: the night's estimator). */
-    val NAP_ESTIMATOR: EstimatorType = EstimatorType.HYBRID
+    /**
+     * Nap mode: the estimator of naps (not part of this run's selection: null = the night's estimator, so a changed
+     * night estimator moves naps too).
+     */
+    val NAP_ESTIMATOR: EstimatorType? = null
 
     /**
      * Nap mode: what is written for a nap (rule (ii) of the pre-registered nap-model experiment on N1: STAGES

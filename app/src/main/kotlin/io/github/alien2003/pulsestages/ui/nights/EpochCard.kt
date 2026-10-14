@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.ui.nights
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -36,12 +37,15 @@ private const val FEATURE_DIGITS = 3
 /**
  * Details of the selected epoch: its stage (re-estimate and as written), the four posterior probabilities, the heart
  * rate and the per-epoch features; buttons move to the previous / next epoch (also usable without touching the charts).
+ * For a nap written as asleep / awake only ([writtenAsSleepWake]) the written value is "Asleep" or "Awake", which is
+ * what Health Connect holds, not the estimated stage the ledger keeps.
  */
 @Composable
 internal fun EpochCard(
     selection: EpochSelection,
     zoneOffsetSec: Int,
     actions: NightDetailActions,
+    writtenAsSleepWake: Boolean = false,
 ) {
     val start = localDateTime(selection.startMs, zoneOffsetSec).formatTime()
     val end = localDateTime(selection.endMs, zoneOffsetSec).formatTime()
@@ -51,7 +55,8 @@ internal fun EpochCard(
                 stringResource(
                     R.string.night_epoch_stage,
                     stringResource(selection.estimatedStage.labelRes()),
-                    selection.writtenStage?.let { stringResource(it.labelRes()) } ?: stringResource(R.string.value_not_available),
+                    selection.writtenStage?.let { stringResource(it.writtenLabelRes(writtenAsSleepWake)) }
+                        ?: stringResource(R.string.value_not_available),
                 ),
             style = MaterialTheme.typography.bodyLarge,
         )
@@ -73,6 +78,14 @@ internal fun EpochCard(
         }
     }
 }
+
+/**
+ * The label of a written stage: the stage itself, or for a nap written as asleep / awake "Awake" or "Asleep" (every
+ * other stage, data gaps included, was written as Health Connect's generic sleeping stage).
+ */
+@StringRes
+private fun SleepStage.writtenLabelRes(sleepWakeOnly: Boolean): Int =
+    if (!sleepWakeOnly || this == SleepStage.AWAKE) labelRes() else R.string.stage_asleep
 
 @Composable
 private fun PosteriorRow(

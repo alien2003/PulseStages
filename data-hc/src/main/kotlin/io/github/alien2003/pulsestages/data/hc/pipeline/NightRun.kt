@@ -315,7 +315,7 @@ internal class NightRun(
 
     /**
      * Estimates [candidate] in its mode ([NightCandidate.mode]) and writes it; a nap under `napMode.outputPolicy` SKIP
-     * is not estimated and nothing is read for it ([skipNap]).
+     * is not estimated and no heart rate is read for it ([skipNap]).
      */
     private suspend fun estimateAndWrite(
         candidate: NightCandidate,
@@ -614,9 +614,13 @@ internal class NightRun(
     }
 
     /**
-     * A nap under `napMode.outputPolicy` SKIP: nothing is estimated or written, and nothing is read for it. An output
-     * written for it earlier (another policy, or before it was a nap) is deleted, and so is every output it would
-     * replace if it were written (`related`); the night is recorded NOT_ESTIMATED with the reason `NAP_SKIPPED: …`.
+     * A nap under `napMode.outputPolicy` SKIP: nothing is estimated or written, and no heart rate is read for it. Our
+     * earlier records of the nap are deleted ([ownRecordsOfSkippedNap]: its own output, also one the ledger does not
+     * know, e.g. from before a reinstall, and our records listing one of its source sessions), and the nights it
+     * replaces as the same sleep are superseded: those sharing a source session with it and overlapping nights of its
+     * own package (`related` restricted to them). A nap that is not written replaces nothing else: overlapping nights
+     * of other packages keep their outputs. The night is recorded NOT_ESTIMATED with the reason `NAP_SKIPPED: …`, after
+     * the superseding, so its fragments are linked to it rather than to a night that was just retired.
      */
     private suspend fun skipNap(
         candidate: NightCandidate,
@@ -627,14 +631,21 @@ internal class NightRun(
         val reason =
             "${NotEstimatedReason.NAP_SKIPPED}: nap of $minutes min (shorter than napMode.maxSessionMin = " +
                 "${settings.algo.napMode.maxSessionMin} min) and naps are not written (napMode.outputPolicy = SKIP)"
-        if (existing?.status == NightStatus.WRITTEN) {
-            deleteOutputs(listOf(candidate.clientRecordId))
+        val own = ownRecordsOfSkippedNap(candidate, existing)
+        if (own.isNotEmpty()) {
+            deleteOutputs(own)
             logger.i(
                 TAG,
-                "nap output removed: naps are no longer written (napMode.outputPolicy = SKIP)",
+                "nap output removed: naps are no longer written (napMode.outputPolicy = SKIP): ${own.size} record(s)",
                 nightKey = candidate.clientRecordId,
             )
+            superseded += own.count { it != candidate.clientRecordId }
         }
+        val sameSleep =
+            related.filter { night ->
+                night.sourcePackage == candidate.packageName || night.sourceUuids.any { it in candidate.sourceUuids }
+            }
+        supersede(sameSleep, candidate.clientRecordId)
         val now = clock.millis()
         val protected = ledger.protectedUuids(candidate.sourceUuids, candidate.clientRecordId)
         ledger.nights.recordNight(
@@ -643,9 +654,30 @@ internal class NightRun(
                 .filter { it.uuid !in protected }
                 .map { it.toSourceRow(SourceOutcome.NOT_ESTIMATED, reason, candidate.clientRecordId, now) },
         )
-        supersede(related, candidate.clientRecordId)
         logger.i(TAG, "not estimated: $reason", nightKey = candidate.clientRecordId)
         return NightResult.NOT_ESTIMATED
+    }
+
+    /**
+     * Our records in Health Connect that a skipped nap must not leave behind: its own clientRecordId when the ledger has
+     * it WRITTEN or Health Connect has it (written before a reinstall / "clear data"), and our other records whose notes
+     * list one of its source sessions that the ledger does not hold as a WRITTEN night (those are superseded through
+     * `related`). Records that merely overlap the nap are left alone: they may belong to another source's night.
+     */
+    private suspend fun ownRecordsOfSkippedNap(
+        candidate: NightCandidate,
+        existing: EstimatedNightEntity?,
+    ): List<String> {
+        val stored = storedOwnSessions()
+        val ownId = candidate.clientRecordId.takeIf { existing?.status == NightStatus.WRITTEN || it in stored }
+        val listing =
+            stored.values
+                .filter { record ->
+                    record.clientRecordId != candidate.clientRecordId &&
+                        SessionText.sourceUuidsOf(record.notes).any { it in candidate.sourceUuids }
+                }.mapNotNull { it.clientRecordId }
+                .filter { ledger.nights.findByClientRecordId(it)?.status != NightStatus.WRITTEN }
+        return listOfNotNull(ownId) + listing
     }
 
     private suspend fun notEstimated(

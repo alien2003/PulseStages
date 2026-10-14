@@ -90,9 +90,10 @@ section is the authoritative source; if it differs from this paragraph, it wins.
 ### Naps
 
 PulseStages can estimate daytime naps if you lower "Minimum session length" (`minSessionMin`, 90 min by default) to
-30 min. No public dataset has labelled naps, so a separate nap model was trained and tested, in a pre-registered test,
-on nap-length pieces of the 31 sleep-lab nights: about 6 in 10 of the 30-second epochs matched polysomnography,
-against 5 in 10 for the earlier night-model approach and for simply calling the whole nap light sleep. Treat a nap's
+30 min. No public dataset has labelled naps, so a separate nap model was trained on nap-length pieces of sleep-lab and
+EEG-headband nights (78 people) and tested, in a pre-registered test, on pieces of the 31 sleep-lab nights: about 6 in
+10 of the 30-second epochs matched polysomnography, against 5 in 10 for the earlier night-model approach and for simply
+calling the whole nap light sleep. Treat a nap's
 stages as a rough sketch: deep sleep tends to be over-called in the first hour, and the test pieces were night sleep,
 with only 11 that end with an awakening as a real nap does. Because the nap model beat the light-sleep reference by the
 pre-registered margin, the default for naps is **Stages**: a nap is written to Health Connect with its estimated
@@ -100,24 +101,29 @@ stages, like a night; choose **Asleep / awake** to write only sleep and awakenin
 Details: [ALGORITHM.md §13.12](ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted).
 
 **Nights and naps are two processing modes.** One setting decides which is which: Settings → **Naps** → "Nap
-threshold" (`napMode.maxSessionMin`, 180 min). A session shorter than that is a nap, a longer one a night; 0 turns
+threshold" (`napMode.maxSessionMin`, 180 min); the nap values of the algorithm are in the collapsed group "Naps:
+algorithm". A session shorter than that is a nap, a longer one a night; 0 turns
 naps off. Sessions shorter than "Minimum session length" of the sources are still ignored altogether. A nap:
 
 - is never compared with your heart-rate baseline and never counts for it (no "elevated heart rate" for naps);
 - gets no stage-share check unless "Check the stage shares of naps" is on;
-- is estimated with "Estimator for naps" (HYBRID), and with the nap values of the minimum bouts and the
-  uncertain-epoch settings (empty by default, which means "same as nights") and of the hybrid decoder (set by the
-  nap-model validation; empty = same as nights);
+- is estimated with "Estimator for naps" ("Same as nights" by default, i.e. the estimator under Algorithm), and with
+  the nap values of the minimum bouts and the uncertain-epoch settings (empty by default, which means "same as nights")
+  and of the hybrid decoder (set by the nap-model validation; empty = same as nights);
 - is decoded with the bundle's nap model. With the default settings this also applies to short nights of 90 minutes
   to 3 hours; nights of 3 hours or more are decoded exactly as before;
 - is written as "Written for a nap" says: **Stages** (like a night, the default), **Asleep / awake** (only AWAKE and
   SLEEPING in Health Connect; the app still shows its stage estimate) or **Nothing** (not estimated, nothing written;
-  an earlier output of the nap is removed when it is processed again);
+  an earlier output of the nap is removed when it is processed again, but another app's night of the same sleep is
+  never removed or replaced by a skipped nap; after switching back from Nothing, "Recompute stale" writes the skipped
+  naps);
 - is left out of the calibration on reference nights and of the unsupervised adaptation.
 
-The Nights tab marks naps with a **Nap** badge and can show all sessions, only nights or only naps. The night detail
-says whether a session was processed as a night or a nap and, for a nap, that its stages are rough. Home counts
-written nights and naps apart. Details: [ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
+The Nights tab marks naps with a **Nap** badge and can show all sessions, only nights or only naps; a nap skipped under
+**Nothing** is listed as not estimated, but not as a problem. The night detail says whether a session was processed as
+a night or a nap and, for a written nap, that its stages are rough; for a nap written as **Asleep / awake** it labels
+the hypnogram as the app's estimate and shows each epoch as written (asleep or awake). Home counts written nights and
+naps apart. Details: [ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
 
 ## Screenshots
 

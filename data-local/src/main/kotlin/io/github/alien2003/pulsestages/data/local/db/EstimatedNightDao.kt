@@ -63,18 +63,18 @@ abstract class EstimatedNightDao {
     @Query("SELECT sourceUuid FROM night_sources WHERE clientRecordId = :clientRecordId ORDER BY sourceUuid")
     abstract suspend fun sourceUuidsOf(clientRecordId: String): List<String>
 
-    /** WRITTEN nights with another algorithm version or params hash (to offer a recompute), oldest first. */
-    @Query(
-        "SELECT * FROM estimated_nights WHERE status = 'WRITTEN' AND (algoVersion != :algoVersion OR paramsHash != :paramsHash) " +
-            "ORDER BY sessionStartMs, id",
-    )
+    /**
+     * Stale nights (to offer a recompute), oldest first: WRITTEN nights and naps skipped by the nap policy
+     * ([isSkippedNap]) with another algorithm version or params hash ([EstimatedNightEntity.isStale]).
+     */
+    @Query("SELECT * FROM estimated_nights WHERE $STALE_CONDITION ORDER BY sessionStartMs, id")
     abstract suspend fun findStale(
         algoVersion: Int,
         paramsHash: String,
     ): List<EstimatedNightEntity>
 
-    /** Number of stale WRITTEN nights. */
-    @Query("SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND (algoVersion != :algoVersion OR paramsHash != :paramsHash)")
+    /** Number of stale nights ([findStale]). */
+    @Query("SELECT COUNT(*) FROM estimated_nights WHERE $STALE_CONDITION")
     abstract fun observeStaleCount(
         algoVersion: Int,
         paramsHash: String,
@@ -245,8 +245,18 @@ abstract class EstimatedNightDao {
         now: Long,
     ): Int
 
-    private companion object {
-        const val SUMMARY_COLUMNS =
+    /** Constants. */
+    companion object {
+        /**
+         * SQL condition of a stale night ([EstimatedNightEntity.isStale]) with the bound parameters `:algoVersion` and
+         * `:paramsHash`: WRITTEN, or NOT_ESTIMATED with a reason starting with [SKIPPED_NAP_REASON_PREFIX], and another
+         * algorithm version or params hash.
+         */
+        const val STALE_CONDITION: String =
+            "(status = 'WRITTEN' OR (status = 'NOT_ESTIMATED' AND substr(statusReason, 1, 12) = '$SKIPPED_NAP_REASON_PREFIX')) " +
+                "AND (algoVersion != :algoVersion OR paramsHash != :paramsHash)"
+
+        private const val SUMMARY_COLUMNS =
             "id, clientRecordId, sourcePackage, sessionStartMs, sessionEndMs, startZoneOffsetSec, endZoneOffsetSec, " +
                 "status, statusReason, estimator, algoVersion, paramsHash, coverage, confidence, awakeMin, lightMin, deepMin, " +
                 "remMin, unknownMin, elevatedHr, lowConfidence, calibrated, rulesFallback, updatedAt, mode, sleepWakeOnly"

@@ -52,8 +52,7 @@ abstract class SourceSessionDao {
             "(SELECT COUNT(*) FROM source_sessions WHERE outcome IN " +
             "('NAP', 'HAS_STAGES', 'LOWER_PRIORITY_DUPLICATE', 'NOT_ESTIMATED', 'FAILED')) AS skipped, " +
             "(SELECT COUNT(*) FROM source_sessions WHERE outcome = 'FAILED') AS failed, " +
-            "(SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND " +
-            "(algoVersion != :algoVersion OR paramsHash != :paramsHash)) AS stale, " +
+            "(SELECT COUNT(*) FROM estimated_nights WHERE ${EstimatedNightDao.STALE_CONDITION}) AS stale, " +
             "(SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND mode = 'NIGHT') AS nights, " +
             "(SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND mode = 'NAP') AS naps",
     )

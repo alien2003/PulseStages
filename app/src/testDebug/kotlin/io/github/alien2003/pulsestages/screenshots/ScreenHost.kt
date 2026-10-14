@@ -19,8 +19,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -29,7 +32,9 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.toSize
 import io.github.alien2003.pulsestages.ui.TopLevelDestination
 import io.github.alien2003.pulsestages.ui.theme.PulseStagesTheme
 import org.junit.Assert.assertEquals
@@ -158,7 +163,7 @@ class ScreenHost(
         variants.forEach { (name, variant) ->
             compose.runOnIdle { current.value = variant }
             idle()
-            assertNoUnresolvedPlaceholders(name)
+            assertTexts(name)
             check(name, variant)
             scrollLazyList(name, lazyItems(variant))
         }
@@ -174,7 +179,7 @@ class ScreenHost(
         repeat(count) { index ->
             list.performScrollToIndex(index)
             idle()
-            assertNoUnresolvedPlaceholders("$where, item $index")
+            assertTexts("$where, item $index")
         }
         list.performScrollToIndex(0)
         idle()
@@ -209,16 +214,81 @@ class ScreenHost(
 
     /**
      * No text, editable text, content or state description on screen (popups and dialogs included) still has a format
-     * placeholder such as `%1$s`: a text resource shown without its arguments.
+     * placeholder such as `%1$s`: a text resource shown without its arguments. And in every row of segmented buttons the
+     * segments have one height and no label wraps, is cut or leaves its segment: a label that does not fit (a
+     * translation, the largest font) must make the row fall back to radio buttons.
      */
-    fun assertNoUnresolvedPlaceholders(where: String) {
+    fun assertTexts(where: String) {
         val texts = compose.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes().flatMap { it.allTexts() }
         assertEquals(
             "$where: texts with an unfilled format placeholder",
             emptyList<String>(),
             texts.filter { PLACEHOLDER.containsMatchIn(it) },
         )
+        val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
+        assertEquals(
+            "$where: segmented-button labels that do not fit their segment",
+            emptyList<String>(),
+            roots.flatMap { it.segmentedRows() }.flatMap { it.segmentProblems() },
+        )
     }
+
+    /**
+     * Rows of segmented buttons below this node: nodes with two or more radio-button children side by side (a vertical
+     * list of radio buttons is no such row: its labels may wrap).
+     */
+    private fun SemanticsNode.segmentedRows(): List<SemanticsNode> {
+        val radios = children.filter { it.config.getOrNull(SemanticsProperties.Role) == Role.RadioButton }
+        val sideBySide = radios.size >= 2 && radios.map { it.positionInRoot.y }.distinct().size == 1
+        return listOfNotNull(takeIf { sideBySide }) + children.flatMap { it.segmentedRows() }
+    }
+
+    /** Segments of this row whose height differs from the others', and labels that wrap, are cut or leave their segment. */
+    private fun SemanticsNode.segmentProblems(): List<String> {
+        val segments = children.filter { it.config.getOrNull(SemanticsProperties.Role) == Role.RadioButton }
+        val heights = segments.map { it.size.height }
+        val uneven = heights.max() - heights.min() > 1
+        return listOfNotNull("segments of different heights $heights".takeIf { uneven }) + segments.flatMap { it.segmentLabelProblems() }
+    }
+
+    /** Labels of this segmented button that wrap, are cut or leave the button's bounds. */
+    private fun SemanticsNode.segmentLabelProblems(): List<String> {
+        // Unclipped geometry: a row partly scrolled out of view is still checked as it is laid out.
+        val button = unclippedBounds()
+        return descendantsWithText().mapNotNull { node ->
+            val label = node.config[SemanticsProperties.Text].joinToString { it.text }
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.config
+                .getOrNull(SemanticsActions.GetTextLayoutResult)
+                ?.action
+                ?.invoke(layouts)
+            val layout = layouts.firstOrNull()
+            val bounds = node.unclippedBounds()
+            when {
+                layout != null && layout.lineCount > 1 -> {
+                    "\"$label\" wraps to ${layout.lineCount} lines"
+                }
+
+                // Cut to one line: the label's single-line width exceeds the width it was given.
+                layout != null && layout.multiParagraph.intrinsics.maxIntrinsicWidth > layout.size.width + EDGE_TOLERANCE_PX -> {
+                    "\"$label\" is cut"
+                }
+
+                bounds.left < button.left - EDGE_TOLERANCE_PX || bounds.right > button.right + EDGE_TOLERANCE_PX -> {
+                    "\"$label\" ($bounds) leaves its segment ($button)"
+                }
+
+                else -> {
+                    null
+                }
+            }
+        }
+    }
+
+    private fun SemanticsNode.unclippedBounds(): Rect = Rect(positionInRoot, size.toSize())
+
+    private fun SemanticsNode.descendantsWithText(): List<SemanticsNode> =
+        children.flatMap { child -> listOfNotNull(child.takeIf { SemanticsProperties.Text in it.config }) + child.descendantsWithText() }
 
     private fun SemanticsNode.allTexts(): List<String> {
         val own =
@@ -237,6 +307,9 @@ class ScreenHost(
 
     private companion object {
         const val TIMEOUT_MS = 120_000L
+
+        /** Rounding of the layout: a label may end this far outside its segment. */
+        const val EDGE_TOLERANCE_PX = 1f
 
         /** A java.util.Formatter conversion (`%s`, `%1$d`, `%.2f`); "50 %" is not one. */
         val PLACEHOLDER = Regex("""%(\d+\$)?[-#+0,(]*\d*(\.\d+)?[a-zA-Z]""")

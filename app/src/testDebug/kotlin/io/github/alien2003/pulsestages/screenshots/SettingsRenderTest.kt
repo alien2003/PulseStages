@@ -181,7 +181,7 @@ class SettingsRenderTest(
         host.show(TopLevelDestination.SETTINGS) {
             SettingsScreen(state = state, actions = SettingsActions(), about = about, debugTools = demoCard)
         }
-        host.assertNoUnresolvedPlaceholders("loading")
+        host.assertTexts("loading")
         val loaded = SettingsUiState(loading = false)
         val errors =
             SettingsErrorCode.entries.map { code -> SettingsError("algo.preprocess.minBpm", code, "250", "1..220") } +
@@ -215,7 +215,7 @@ class SettingsRenderTest(
             compose.runOnIdle { state = variant }
             host.idle()
             if (variant.confirmReset || variant.importErrors != null) compose.onNode(isDialog()).assertExists()
-            host.assertNoUnresolvedPlaceholders(name)
+            host.assertTexts(name)
         }
         compose.runOnIdle { state = loaded }
         expandEveryGroup()
@@ -252,7 +252,7 @@ class SettingsRenderTest(
         host.idle()
         row.assertIsOn()
         assertTrue("the card switched demo mode on", demoMode)
-        host.assertNoUnresolvedPlaceholders("demo mode on")
+        host.assertTexts("demo mode on")
         row.performSemanticsAction(SemanticsActions.OnClick)
         host.idle()
         row.assertIsOff()
@@ -323,7 +323,7 @@ class SettingsRenderTest(
             spec.options.forEach { option ->
                 compose.onNode(hasText(option.label.resolve(resources)) and hasAnyAncestor(isPopup())).assertExists()
             }
-            host.assertNoUnresolvedPlaceholders("${spec.path} menu")
+            host.assertTexts("${spec.path} menu")
             compose.onNode(hasText(current) and hasAnyAncestor(isPopup())).performClick()
             host.idle()
         }
@@ -337,7 +337,7 @@ class SettingsRenderTest(
             compose.onNode(hasContentDescription(title, substring = true) and hasClickAction()).performScrollTo().performClick()
             host.idle()
             compose.onNode(isDialog()).assertExists()
-            host.assertNoUnresolvedPlaceholders("${spec.path} picker")
+            host.assertTexts("${spec.path} picker")
             compose.onNode(hasText(resources.getString(R.string.action_cancel)) and hasAnyAncestor(isDialog())).performClick()
             host.idle()
         }
@@ -350,16 +350,16 @@ class SettingsRenderTest(
     ) {
         grid().performScrollToIndex(0)
         host.idle()
-        host.assertNoUnresolvedPlaceholders("$what: actions")
+        host.assertTexts("$what: actions")
         sections.forEachIndexed { index, section ->
             scrollToGroup(index)
-            host.assertNoUnresolvedPlaceholders("$what: ${section.id}")
+            host.assertTexts("$what: ${section.id}")
             check(section)
         }
         scrollToDebugTools()
-        host.assertNoUnresolvedPlaceholders("$what: debug build")
+        host.assertTexts("$what: debug build")
         scrollToAbout()
-        host.assertNoUnresolvedPlaceholders("$what: about")
+        host.assertTexts("$what: about")
     }
 
     /** An invalid edit of every setting that can hold an invalid value: not a number, out of range, too long, ... */

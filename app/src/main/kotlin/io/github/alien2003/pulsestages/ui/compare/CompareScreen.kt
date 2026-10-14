@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.ui.compare
 
+import androidx.annotation.PluralsRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -24,9 +25,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -62,6 +60,7 @@ import io.github.alien2003.pulsestages.ui.common.LoadingState
 import io.github.alien2003.pulsestages.ui.common.MessageSnackbarEffect
 import io.github.alien2003.pulsestages.ui.common.PrimaryAction
 import io.github.alien2003.pulsestages.ui.common.SecondaryAction
+import io.github.alien2003.pulsestages.ui.common.SingleChoice
 import io.github.alien2003.pulsestages.ui.common.SyntheticBanner
 import io.github.alien2003.pulsestages.ui.common.durationMinutes
 import io.github.alien2003.pulsestages.ui.common.formatDate
@@ -281,19 +280,23 @@ private fun RangeSelector(
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.semantics { heading() },
             )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                CompareRange.entries.forEachIndexed { index, range ->
-                    SegmentedButton(
-                        selected = range == state.range,
-                        onClick = { onSelect(range) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = CompareRange.entries.size),
-                        enabled = state.canSelect(range) || range == state.range,
-                    ) { Text(stringResource(range.labelRes())) }
-                }
-            }
+            SingleChoice(
+                labels = CompareRange.entries.map { stringResource(it.labelRes()) },
+                selected = state.range.ordinal,
+                onSelect = { onSelect(CompareRange.entries[it]) },
+                enabled = { index -> CompareRange.entries[index].let { state.canSelect(it) || it == state.range } },
+            )
         }
     }
 }
+
+/** "N nights scored" or "N naps scored". */
+@PluralsRes
+private fun SessionMode.scoredPlural(): Int =
+    when (this) {
+        SessionMode.NIGHT -> R.plurals.compare_scored_nights
+        SessionMode.NAP -> R.plurals.compare_scored_naps
+    }
 
 private fun CompareRange.labelRes(): Int =
     when (this) {
@@ -368,7 +371,7 @@ private fun ModeMetricsLines(byMode: List<ModeMetrics>) {
                 part.kappa?.let { formatDecimal(it, KAPPA_DIGITS) } ?: none,
                 part.accuracy?.let { formatPercent(it) } ?: none,
             ) + stringResource(R.string.list_separator) +
-                pluralStringResource(R.plurals.compare_scored_nights, part.scoredNights, part.scoredNights),
+                pluralStringResource(part.mode.scoredPlural(), part.scoredNights, part.scoredNights),
             style = MaterialTheme.typography.bodySmall,
         )
     }

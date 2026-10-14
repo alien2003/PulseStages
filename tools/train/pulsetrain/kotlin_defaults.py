@@ -13,7 +13,7 @@
   runs made before the two processing modes stored the same threshold as ``hybrid.shortSessionMaxMin`` (the
   pre-registered nap experiment, :mod:`pulsetrain.naps`; ``selection.shortSessionMaxMin.note``), which is read as
   ``napMode.maxSessionMin``; else 180.0, the nap threshold the baseline and sanity-check rules used before the modes;
-- ``NAP_ESTIMATOR``: ``napMode.estimator`` of the patch, else the run's ``estimator``;
+- ``NAP_ESTIMATOR``: ``napMode.estimator`` of the patch, else ``null`` (naps use the night's estimator);
 - ``NAP_OUTPUT_POLICY``: ``napMode.outputPolicy`` of the patch (rule (ii) of the pre-registered nap-model
   experiment, :mod:`pulsetrain.napmodel`; ``selection.napOutputPolicy.note``), else ``STAGES``;
 - ``NAP_HYBRID_DURATION_MODEL``, ``NAP_HYBRID_EMISSION_WEIGHT``, ``NAP_HYBRID_TIME_PRIOR_WEIGHT``: the nap decoder
@@ -125,12 +125,16 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
               "    ")
     L.append(f"    const val NAP_MAX_SESSION_MIN: Double = {value}")
     L.append("")
-    nap_est = nap.get("estimator", est)
-    if nap_est not in ESTIMATORS:
+    nap_est = nap.get("estimator")
+    if nap_est is not None and nap_est not in ESTIMATORS:
         raise DefaultsError(f"napMode.estimator must be one of {ESTIMATORS}, got {nap_est!r}")
-    why = "chosen in run " + run if "estimator" in nap else "not part of this run's selection: the night's estimator"
-    L += _kdoc(f"Nap mode: the estimator of naps ({why}).", "    ")
-    L.append(f"    val NAP_ESTIMATOR: EstimatorType = EstimatorType.{nap_est}")
+    if nap_est is not None:
+        L += _kdoc(f"Nap mode: the estimator of naps (chosen in run {run}).", "    ")
+        L.append(f"    val NAP_ESTIMATOR: EstimatorType? = EstimatorType.{nap_est}")
+    else:
+        L += _kdoc("Nap mode: the estimator of naps (not part of this run's selection: null = the night's estimator, "
+                   "so a changed night estimator moves naps too).", "    ")
+        L.append("    val NAP_ESTIMATOR: EstimatorType? = null")
     L.append("")
     policy = nap.get("outputPolicy", "STAGES")
     if policy not in NAP_OUTPUT_POLICIES:

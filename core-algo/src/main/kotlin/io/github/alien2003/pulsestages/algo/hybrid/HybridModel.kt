@@ -324,6 +324,17 @@ data class HybridModel(
         Fingerprints.of(JsonObject(tree.filterNot { (key, value) -> key in OMITTED_WHEN_ABSENT && value is JsonNull }))
     }
 
+    private val nightModelFingerprintValue: String by lazy {
+        val tree = JSON.encodeToJsonElement(serializer(), this).jsonObject
+        Fingerprints.of(
+            JsonObject(
+                tree.filterNot { (key, value) ->
+                    key in NOT_DECODING_NIGHTS || (key in OMITTED_WHEN_ABSENT && value is JsonNull)
+                },
+            ),
+        )
+    }
+
     /**
      * SHA-256 (lower-case hex) of the canonical JSON of the bundle (every field, object keys sorted, no whitespace;
      * the [nap] model included). It identifies the model in the params hash. Optional fields introduced after the
@@ -331,6 +342,14 @@ data class HybridModel(
      * keeps the fingerprint it always had (and personal models fitted for it stay valid).
      */
     fun fingerprint(): String = fingerprintValue
+
+    /**
+     * SHA-256 (lower-case hex) of the canonical JSON of the parts that decode a night: [fingerprint] without the
+     * metadata ([modelId], [training]) and without the parts that only naps use ([stageLogBiasShort], [nap]). Personal
+     * classifier deltas are fitted on nights and keyed by it, so a retrained or added nap model, or a new model id, does
+     * not switch off a calibration whose night model did not change.
+     */
+    fun nightModelFingerprint(): String = nightModelFingerprintValue
 
     /**
      * Why the nap model cannot be used with this build ([HybridComponents.compatibilityProblem] of [nap]), or null
@@ -348,6 +367,9 @@ data class HybridModel(
 
         /** Optional keys that do not enter the fingerprint when they are null (added after schema 1 shipped). */
         private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias", "stageLogBiasShort", "nap")
+
+        /** Keys left out of [nightModelFingerprint]: metadata and the parts used by naps only. */
+        private val NOT_DECODING_NIGHTS: Set<String> = setOf("modelId", "training", "stageLogBiasShort", "nap")
 
         private val JSON: Json =
             Json {

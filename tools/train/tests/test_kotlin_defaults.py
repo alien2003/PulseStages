@@ -127,10 +127,12 @@ def _flat(src):
 
 def test_nap_mode_defaults_are_rendered():
     # a run that chose no nap rule: 180 min (the threshold of the baseline / sanity rules before the modes),
-    # the night's estimator, and no nap decoder overrides
+    # the night's estimator (null: a changed night estimator moves naps too), and no nap decoder overrides
     src = render({"estimator": "HYBRID", "hybrid": HYBRID}, SELECTION, "r", "2026", "x")
     assert "const val NAP_MAX_SESSION_MIN: Double = 180.0" in src
-    assert "val NAP_ESTIMATOR: EstimatorType = EstimatorType.HYBRID" in src
+    assert "val NAP_ESTIMATOR: EstimatorType? = null" in src
+    assert render({"estimator": "RULES", "hybrid": HYBRID}, SELECTION, "r", "2026", "x").count(
+        "val NAP_ESTIMATOR: EstimatorType? = null") == 1
     for name in ("NAP_HYBRID_EMISSION_WEIGHT", "NAP_HYBRID_TIME_PRIOR_WEIGHT"):
         assert f"val {name}: Double? = null" in src
     assert "val NAP_HYBRID_DURATION_MODEL: DurationModel? = null" in src
@@ -146,7 +148,7 @@ def test_nap_mode_defaults_are_rendered():
     sel = dict(SELECTION, napMode={"note": "nap model run"})
     chosen = render({"estimator": "HYBRID", "hybrid": HYBRID, "napMode": nap}, sel, "r", "2026", "x")
     assert "const val NAP_MAX_SESSION_MIN: Double = 120.0" in chosen and "nap model run" in _flat(chosen)
-    assert "val NAP_ESTIMATOR: EstimatorType = EstimatorType.RULES" in chosen
+    assert "val NAP_ESTIMATOR: EstimatorType? = EstimatorType.RULES" in chosen
     assert "val NAP_HYBRID_DURATION_MODEL: DurationModel? = DurationModel.GEOMETRIC" in chosen
     assert "const val NAP_HYBRID_EMISSION_WEIGHT: Double = 0.3" in chosen
     assert "const val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double = 1.0" in chosen
@@ -163,6 +165,7 @@ def test_nap_mode_defaults_are_rendered():
     assert [x for x in kotlin_defaults.NAP_OUTPUT_POLICIES if f"    {x}," in enum] == list(
         kotlin_defaults.NAP_OUTPUT_POLICIES)
     assert "val outputPolicy: NapOutputPolicy = TrainedDefaults.NAP_OUTPUT_POLICY" in kt
+    assert "val estimator: EstimatorType? = TrainedDefaults.NAP_ESTIMATOR" in kt   # null = the night's estimator
     # the Kotlin side has exactly these fields
     assert {"maxSessionMin", "estimator", "hybrid"} <= set(data_class_fields("NapModeParams"))
     assert data_class_fields("NapHybridParams") == ["durationModel", "emissionWeight", "timePriorWeight"]

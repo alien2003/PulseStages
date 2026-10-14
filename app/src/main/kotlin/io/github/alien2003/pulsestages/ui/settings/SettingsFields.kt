@@ -18,9 +18,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -45,6 +42,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import io.github.alien2003.pulsestages.R
+import io.github.alien2003.pulsestages.ui.common.SingleChoice
 import io.github.alien2003.pulsestages.ui.common.UiText
 import io.github.alien2003.pulsestages.ui.common.resolve
 import io.github.alien2003.pulsestages.ui.theme.spacing
@@ -267,15 +265,12 @@ private fun ChoiceSetting(
         when (spec.style) {
             ChoiceStyle.SEGMENTED -> {
                 SettingHeader(spec, problems)
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    spec.options.forEachIndexed { index, option ->
-                        SegmentedButton(
-                            selected = option.key == selected,
-                            onClick = { onEdit(SettingsEdit.Choice(spec.path, option.key)) },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = spec.options.size),
-                        ) { Text(option.label.resolve()) }
-                    }
-                }
+                // Segmented buttons, or radio buttons when a label does not fit (a translation, a large font).
+                SingleChoice(
+                    labels = spec.options.map { it.label.resolve() },
+                    selected = spec.options.indexOfFirst { it.key == selected },
+                    onSelect = { index -> onEdit(SettingsEdit.Choice(spec.path, spec.options[index].key)) },
+                )
             }
 
             ChoiceStyle.DROPDOWN -> {

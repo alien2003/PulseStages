@@ -45,6 +45,7 @@ object SettingsCatalog {
             priorsSection,
             hybridSection,
             postSection,
+            napsAlgorithmSection,
             personalSection,
             debugSection,
         )

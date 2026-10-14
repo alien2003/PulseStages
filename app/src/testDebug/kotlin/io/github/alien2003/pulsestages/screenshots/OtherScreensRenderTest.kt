@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import io.github.alien2003.pulsestages.PermissionsRationaleActivity
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository
 import io.github.alien2003.pulsestages.data.hc.fake.FakeSettingsRepository
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
@@ -111,12 +112,16 @@ class OtherScreensRenderTest(
         host.show(TopLevelDestination.COMPARE) { CompareRoute(viewModel = viewModel) }
         host.waitUntil { viewModel.state.value.let { it.phase == ComparePhase.READY && it.metrics != null } }
         config.assertAppliedTo(host.resources)
-        host.assertNoUnresolvedPlaceholders("demo reference nights")
+        host.assertTexts("demo reference nights")
         val data = viewModel.state.value
+        // The demo has a nap among its reference sessions: its line counts naps, not nights.
+        val nap = checkNotNull(data.metrics?.byMode?.singleOrNull { it.mode == SessionMode.NAP }) { "the demo scores a nap" }
+        val napsScored = host.resources.getQuantityString(R.plurals.compare_scored_naps, nap.scoredNights, nap.scoredNights)
+        compose.onNode(hasText(napsScored, substring = true)).assertExists()
         // A calibration on the demo nights: its result message is shown in the Snackbar.
         compose.runOnIdle { viewModel.calibrate() }
         host.waitUntil { viewModel.state.value.let { it.busy == null && it.model != null } }
-        host.assertNoUnresolvedPlaceholders("calibrated")
+        host.assertTexts("calibrated")
 
         val variants =
             listOf(
@@ -160,7 +165,7 @@ class OtherScreensRenderTest(
         host.show(TopLevelDestination.SETTINGS) { SourcesRoute(onBack = {}, viewModel = viewModel) }
         host.waitUntil { !viewModel.state.value.loading && viewModel.state.value.items.size == 3 }
         config.assertAppliedTo(host.resources)
-        host.assertNoUnresolvedPlaceholders("scanned sources")
+        host.assertTexts("scanned sources")
 
         val data = viewModel.state.value
         val fromSettings = data.items.map { it.copy(sessionCount = null, lastSessionEndMs = null) }
@@ -234,7 +239,7 @@ class OtherScreensRenderTest(
             val activity = host.launch(PermissionsRationaleActivity::class.java, intent)
             config.assertAppliedTo(activity.resources)
             compose.onNode(hasText(activity.getString(R.string.rationale_title))).assertExists()
-            host.assertNoUnresolvedPlaceholders("rationale, from the app: $fromApp")
+            host.assertTexts("rationale, from the app: $fromApp")
         }
     }
 

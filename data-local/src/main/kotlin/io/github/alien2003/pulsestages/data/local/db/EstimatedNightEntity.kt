@@ -10,8 +10,9 @@ import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 
 /**
- * Lifecycle of one output night. "Stale" is not a status: a [WRITTEN] night is stale when its algorithm version or
- * params hash differs from the current ones ([EstimatedNightEntity.isStale]).
+ * Lifecycle of one output night. "Stale" is not a status: a [WRITTEN] night, or a nap skipped by the nap policy (see
+ * [isSkippedNap]), is stale when its algorithm version or params hash differs from the current ones
+ * ([EstimatedNightEntity.isStale]).
  */
 enum class NightStatus {
     /** Our session with stages is in Health Connect. */
@@ -125,11 +126,17 @@ data class EstimatedNightEntity(
     @ColumnInfo(defaultValue = "NIGHT") val mode: SessionMode = SessionMode.NIGHT,
     @ColumnInfo(defaultValue = "0") val sleepWakeOnly: Boolean = false,
 ) {
-    /** True when this night is [NightStatus.WRITTEN] with a different algorithm version or params hash. */
+    /** A nap that the nap policy skipped ([isSkippedNap]): its outcome depends on the settings only, not on data. */
+    val skippedNap: Boolean get() = isSkippedNap(status, statusReason)
+
+    /**
+     * True when this night is [NightStatus.WRITTEN], or a [skippedNap], with a different algorithm version or params
+     * hash: processing it again with the current settings may give another result.
+     */
     fun isStale(
         currentAlgoVersion: Int,
         currentParamsHash: String,
-    ): Boolean = isStale(status, algoVersion, paramsHash, currentAlgoVersion, currentParamsHash)
+    ): Boolean = isStale(status, statusReason, sameVersion = algoVersion == currentAlgoVersion && paramsHash == currentParamsHash)
 }
 
 /**
@@ -192,17 +199,35 @@ data class NightSummary(
     val mode: SessionMode = SessionMode.NIGHT,
     val sleepWakeOnly: Boolean = false,
 ) {
-    /** True when this night is [NightStatus.WRITTEN] with a different algorithm version or params hash. */
+    /** A nap that the nap policy skipped ([isSkippedNap]). */
+    val skippedNap: Boolean get() = isSkippedNap(status, statusReason)
+
+    /** True when this night is [NightStatus.WRITTEN], or a [skippedNap], with a different algorithm version or params hash. */
     fun isStale(
         currentAlgoVersion: Int,
         currentParamsHash: String,
-    ): Boolean = isStale(status, algoVersion, paramsHash, currentAlgoVersion, currentParamsHash)
+    ): Boolean = isStale(status, statusReason, sameVersion = algoVersion == currentAlgoVersion && paramsHash == currentParamsHash)
 }
 
+/**
+ * The start of the `statusReason` of a nap that `napMode.outputPolicy` SKIP left out: the code of
+ * `NotEstimatedReason.NAP_SKIPPED` and a colon (the pipeline writes `"NAP_SKIPPED: nap of … min …"`).
+ */
+const val SKIPPED_NAP_REASON_PREFIX: String = "NAP_SKIPPED:"
+
+/**
+ * Whether a night with [status] and [statusReason] is a nap skipped by the nap policy: NOT_ESTIMATED with a reason
+ * starting with [SKIPPED_NAP_REASON_PREFIX]. Its outcome depends on the settings only (no data is read for it): it is
+ * not retried for late heart rate, it counts as stale when the settings change, and it is no problem in the list.
+ */
+fun isSkippedNap(
+    status: NightStatus,
+    statusReason: String?,
+): Boolean = status == NightStatus.NOT_ESTIMATED && statusReason?.startsWith(SKIPPED_NAP_REASON_PREFIX) == true
+
+/** A night with [status] and [statusReason] made with another algorithm version or params hash (not [sameVersion]). */
 private fun isStale(
     status: NightStatus,
-    algoVersion: Int,
-    paramsHash: String,
-    currentAlgoVersion: Int,
-    currentParamsHash: String,
-): Boolean = status == NightStatus.WRITTEN && (algoVersion != currentAlgoVersion || paramsHash != currentParamsHash)
+    statusReason: String?,
+    sameVersion: Boolean,
+): Boolean = (status == NightStatus.WRITTEN || isSkippedNap(status, statusReason)) && !sameVersion

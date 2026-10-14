@@ -29,7 +29,7 @@ class NightWindowReader
             val packages = enabledPackages(settings)
             if (packages.isEmpty() || fromMs >= toMs) return CandidateSet.EMPTY
             val sessions = repository.readSleepSessions(fromMs, toMs, packages)
-            return builder.build(sessions, settings.sources, settings.write.overwritePolicy)
+            return builder.build(sessions, settings.sources, settings.write.overwritePolicy, settings.algo)
         }
 
         /** The nights owned by the window `[fromMs, toMs)` (first fragment starts inside it; see [CandidateSet.ownedBy]). */

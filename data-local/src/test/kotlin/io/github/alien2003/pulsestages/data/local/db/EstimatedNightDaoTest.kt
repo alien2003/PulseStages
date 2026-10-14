@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.data.local.db
 
 import android.database.sqlite.SQLiteConstraintException
 import androidx.room.withTransaction
+import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
 import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.data.local.testutil.DatabaseTest
@@ -12,6 +13,7 @@ import io.github.alien2003.pulsestages.data.local.testutil.session
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -268,6 +270,30 @@ class EstimatedNightDaoTest : DatabaseTest() {
             dao.upsert(night("ps:old-hash", startMs = 48 * HOUR_MS, algoVersion = 2, paramsHash = "h"))
 
             assertEquals(1, dao.observeStaleCount(2, "h").first())
+        }
+
+    @Test
+    fun skippedNapsAreStaleWithAnotherHashOtherNightsWithoutOutputAreNot() =
+        runTest {
+            val skipped = "${NotEstimatedReason.NAP_SKIPPED}: nap of 60 min (napMode.outputPolicy = SKIP)"
+            assertTrue(skipped.startsWith(SKIPPED_NAP_REASON_PREFIX))
+
+            fun noOutput(
+                id: String,
+                day: Long,
+                reason: String,
+                hash: String = "g",
+            ) = night(id, startMs = day * 24 * HOUR_MS, algoVersion = 2, paramsHash = hash, status = NightStatus.NOT_ESTIMATED)
+                .copy(statusReason = reason)
+            dao.upsert(noOutput("ps:nap-old", 0, skipped))
+            dao.upsert(noOutput("ps:nap-current", 1, skipped, hash = "h"))
+            dao.upsert(noOutput("ps:no-hr", 2, "${NotEstimatedReason.NO_HR_DATA}: no samples"))
+            dao.upsert(noOutput("ps:look-alike", 3, "NAPXSKIPPED: not the code"))
+
+            assertEquals(listOf("ps:nap-old"), dao.findStale(2, "h").map { it.clientRecordId })
+            assertEquals(1, dao.observeStaleCount(2, "h").first())
+            assertTrue(checkNotNull(dao.findByClientRecordId("ps:nap-old")).isStale(2, "h"))
+            assertFalse(checkNotNull(dao.findByClientRecordId("ps:no-hr")).isStale(2, "h"))
         }
 
     @Test
