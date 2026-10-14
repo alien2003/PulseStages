@@ -40,7 +40,18 @@ class ReleaseApkTest {
         assertFalse("string/demo_" in resources, "the release APK has demo string resources")
         val strings = aapt2("dump", "strings", apk.absolutePath)
         assertTrue("PulseStages" in strings, "aapt2 lists the string pool")
-        DEMO_TEXTS.forEach { text -> assertFalse(strings.contains(text, ignoreCase = true), "the release APK contains \"$text\"") }
+        val texts = DEMO_WORDS + demoTexts()
+        texts.forEach { text -> assertFalse(strings.contains(text, ignoreCase = true), "the release APK contains \"$text\"") }
+    }
+
+    /** Every value of the debug build's demo strings (switch, hint, banner) in every language, from src/debug/res. */
+    private fun demoTexts(): List<String> {
+        val files = File("src/debug/res").walkTopDown().filter { it.name == "strings_demo.xml" }.toList()
+        assertTrue(files.size >= 2, "the demo strings exist in English and in the translation: $files")
+        val value = Regex("<string name=\"[^\"]+\">([^<]+)</string>")
+        return files
+            .flatMap { file -> value.findAll(file.readText()).map { it.groupValues[1].trim() }.toList() }
+            .filter { it.isNotEmpty() }
     }
 
     private fun property(name: String): String =
@@ -58,7 +69,7 @@ class ReleaseApkTest {
         const val APPLICATION_ID = "io.github.alien2003.pulsestages"
         const val AAPT2_TIMEOUT_SECONDS = 60L
 
-        /** Words of the debug build's demo texts (switch, hint, banner), in English and Russian. */
-        val DEMO_TEXTS = listOf("demo", "synthetic nights")
+        /** Words of the debug build's demo texts; the full texts in every language come from [demoTexts]. */
+        val DEMO_WORDS = listOf("demo", "synthetic nights")
     }
 }
