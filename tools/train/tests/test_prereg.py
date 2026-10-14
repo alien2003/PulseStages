@@ -64,3 +64,34 @@ def test_logged_naps_prereg_is_the_committed_text_and_precedes_every_run():
     assert log[start].startswith(written)
     first_run = next(i for i, x in enumerate(log) if " START " in x and "train.py naps " in x)
     assert start < end < first_run
+
+
+# ------------------------------------------------------------------------- dedicated nap model pre-registration ----
+
+from pulsetrain import napmodel  # noqa: E402
+
+NAP_MODEL_PREREG = REPO / napmodel.PREREG_PATH
+NAP_MODEL_LOG = NAP_MODEL_PREREG.parent / "commands-nap-model.log"
+
+
+def test_nap_model_prereg_sha256_matches_every_record():
+    digest = hashlib.sha256(NAP_MODEL_PREREG.read_bytes()).hexdigest()
+    assert digest == napmodel.PREREG_SHA256
+    assert (NAP_MODEL_PREREG.parent / "prereg-nap-model.md.sha256").read_text().split() == [digest,
+                                                                                          NAP_MODEL_PREREG.name]
+    assert f"NOTE prereg-nap-model.md sha256 {digest}" in NAP_MODEL_LOG.read_text(encoding="utf-8")
+
+
+def test_logged_nap_model_prereg_is_the_committed_text_and_precedes_every_run():
+    log = NAP_MODEL_LOG.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, x in enumerate(log) if " PRE-REGISTRATION nap-model " in x)
+    end = next(i for i, x in enumerate(log) if " NOTE prereg-nap-model.md sha256 " in x)
+    logged = [x[2:] if x.startswith("  ") else x for x in log[start + 1:end]]
+    assert logged == NAP_MODEL_PREREG.read_text(encoding="utf-8").splitlines()   # verbatim, timestamp included
+    stamp = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+    times = [m.group(1) for x in log if (m := stamp.match(x))]
+    assert times == sorted(times)                                                # append-only, in time order
+    written = re.search(r"^Written (\S+),", NAP_MODEL_PREREG.read_text(encoding="utf-8"), re.M).group(1)
+    assert log[start].startswith(written)
+    runs = [i for i, x in enumerate(log) if " START " in x and "train.py nap-model" in x]
+    assert all(start < end < i for i in runs)                                   # no run before the pre-registration

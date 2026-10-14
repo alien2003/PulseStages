@@ -4,7 +4,7 @@
 Implements the command lines of docs/INTERCHANGE.md section 2 that tools/train relies on, with toy features and
 decoders, in the file formats of the real Kotlin algo-cli (header layout, metrics block, --param-grid array):
 
-    features --nights <dir|jsonl> --out <csv> [--params <json>]
+    features --nights <dir|jsonl> --out <csv> [--params <json>] [--nap-proxies <minutes,...>]
     evaluate --nights <dir|jsonl> --estimator RULES|HMM|HYBRID [--params] [--model | --fold-models <dir>]
              [--param-grid <grid.json>] --out <metrics.json> [--per-epoch <csv>]
     feature-names
@@ -122,13 +122,30 @@ def fmt(v):
     return repr(float(v))
 
 
+def nap_proxy(n, minutes):
+    """The first ``minutes`` of night ``n`` (like core-algo's NapProxies / pulsetrain.naps.nap_proxy)."""
+    s0 = n["sessionStartMs"]
+    s1 = s0 + int(round(minutes * 60_000))
+    if s1 > n["sessionEndMs"]:
+        return None
+    c0 = s0 - 30 * 60_000
+    return dict(n, id=f"{n['id']}-nap{minutes:g}", sessionEndMs=s1, hr=[h for h in n["hr"] if c0 <= h[0] <= s1],
+                steps=[x for x in n.get("steps", []) if c0 < x[1] <= s1],
+                labels=[x for x in n.get("labels", []) if x[0] >= s0 and x[1] <= s1])
+
+
 def cmd_features(argv):
-    a = parse_args(argv, {"nights", "out", "params"})
+    a = parse_args(argv, {"nights", "out", "params", "nap-proxies"})
     out = Path(a["out"])
+    nights = load_nights(a["nights"])
+    if "nap-proxies" in a:
+        lengths = [float(x) for x in a["nap-proxies"].split(",") if x.strip()]
+        nights = nights + [p for L in lengths for p in (nap_proxy(n, int(L) if L.is_integer() else L)
+                                                        for n in nights) if p is not None]
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["night_id", "subject", "epoch", "start_ms", "has_data", "label"] + FEATURE_NAMES + TRAILING)
-        for n in load_nights(a["nights"]):
+        for n in nights:
             for r in night_epochs(n):
                 w.writerow([n["id"], n["subject"], r["epoch"], r["start_ms"], 1 if r["has_data"] else 0,
                             r["label"] or ""] + [fmt(v) for v in r["hybrid"]]
@@ -214,11 +231,15 @@ def predict(n, rows, estimator, params, bundle):
             pred.append(arg)
     else:
         hp = params.get("hybrid", {})
+        # like core-algo: a nap (shorter than napMode.maxSessionMin; 0 here when not given) uses the bundle's nap
+        # section when it has one, else the main model with stageLogBiasShort (HybridEstimator / HybridEmissions),
+        # and the nap decoder overrides napMode.hybrid (null = the night's value; AlgoParams.forMode)
+        short = is_nap(n, params)
+        if short:
+            hp = {**hp, **{k: v for k, v in ((params.get("napMode") or {}).get("hybrid") or {}).items()
+                           if v is not None}}
         ew, tw = hp.get("emissionWeight", 1.0), hp.get("timePriorWeight", 1.0)
         beta = hp.get("priorExponent", 1.0)
-        # like core-algo: a nap (shorter than napMode.maxSessionMin; 0 here when not given) uses the bundle's nap
-        # section when it has one, else the main model with stageLogBiasShort (HybridEstimator / HybridEmissions)
-        short = is_nap(n, params)
         nap = bundle.get("nap") if short else None
         if nap is not None:
             bundle, bias = nap, nap.get("stageLogBias") or [0.0] * 4

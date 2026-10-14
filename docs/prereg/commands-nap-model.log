@@ -1,0 +1,291 @@
+2026-10-13T05:24:50+02:00 START mise exec -- python -I tools/train/train.py run --run smoke-walch-lr --configs walch --classifiers lr --variants instantaneous,mean2min --jobs 22
+2026-10-13T05:26:11+02:00 END rc=0 81s mise exec -- python -I tools/train/train.py run --run smoke-walch-lr --configs walch --classifiers lr --variants instantaneous,mean2min --jobs 22
+2026-10-13T05:27:26+02:00 START algo-cli/build/install/algo-cli/bin/algo-cli features --nights tools/train/data/nights/instantaneous --out tools/train/out/time-probe/features/instantaneous.csv && algo-cli/build/install/algo-cli/bin/algo-cli features --nights tools/train/data/nights/mean2min --out tools/train/out/time-probe/features/mean2min.csv
+2026-10-13T05:27:31+02:00 END rc=0 5s algo-cli/build/install/algo-cli/bin/algo-cli features --nights tools/train/data/nights/instantaneous --out tools/train/out/time-probe/features/instantaneous.csv && algo-cli/build/install/algo-cli/bin/algo-cli features --nights tools/train/data/nights/mean2min --out tools/train/out/time-probe/features/mean2min.csv
+2026-10-13T05:32:07+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1 --jobs 22
+2026-10-13T05:37:49+02:00 KILLED loso-v1 (per-subject nested selection): projected > 2.5 h under full load (Walch tasks 3x slower than unloaded probe); restarting as loso-v1 with --selection per-group
+2026-10-13T05:37:56+02:00 NOTE probes run earlier (timing only, outputs discarded): mise exec -- python -I /tmp/claude-1000/-home-user-PulseStages/7236c5dc-94c0-41ea-8aef-0570392dc954/scratchpad/time_fits.py ; mise exec -- python -I /tmp/claude-1000/-home-user-PulseStages/7236c5dc-94c0-41ea-8aef-0570392dc954/scratchpad/probe_selection.py
+2026-10-13T05:38:03+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1 --selection per-group --jobs 24
+2026-10-13T05:42:00+02:00 PRE-REGISTRATION (written before any HYBRID result of loso-v1 was seen):
+  E1 class weighting: retrain the chosen (classifier, training config) of loso-v1 with --class-weight balanced
+     (sample weights n/(4 n_c); exported bias shifted back to the natural class priors), same LOSO protocol
+     (--selection per-group, same grids / seeds), variants instantaneous + mean2min only.
+  E2 MLP regularization: HYBRID-MLP with --mlp-alpha 1e-2 (100x the default L2 1e-4) on the training config chosen
+     for the MLP in loso-v1, same protocol, variants instantaneous + mean2min only.
+  Adoption rule (both): adopt only if the worse-variant (instantaneous / mean2min) mean per-subject Cohen's kappa on
+  the Walch held-out subjects exceeds that of the loso-v1 default HYBRID configuration; report either way.
+2026-10-13T06:14:48+02:00 END rc=0 2205s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1 --selection per-group --jobs 24
+2026-10-13T06:15:08+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-e1-balanced --configs walch+bid-nonstep --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --class-weight balanced --jobs 12
+2026-10-13T06:15:08+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-e2-mlp-alpha --configs walch+bid-nonstep --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --mlp-alpha 1e-2 --jobs 12
+2026-10-13T06:15:34+02:00 START mise exec -- python -I tools/train/train.py defaults --run loso-v1 --write
+2026-10-13T06:15:36+02:00 END rc=0 2s mise exec -- python -I tools/train/train.py defaults --run loso-v1 --write
+2026-10-13T06:15:36+02:00 NOTE provisional copy of tools/train/out/loso-v1/final/hybrid_model.json to app assets (official install via train.py final --install-model after the experiments)
+2026-10-13T06:21:58+02:00 END rc=0 410s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-e1-balanced --configs walch+bid-nonstep --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --class-weight balanced --jobs 12
+2026-10-13T06:22:29+02:00 END rc=0 441s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-e2-mlp-alpha --configs walch+bid-nonstep --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --mlp-alpha 1e-2 --jobs 12
+2026-10-13T06:22:55+02:00 RESULT E1 exp-e1-balanced: worse-variant Walch kappa 0.335 < 0.347 (loso-v1 default) -> not adopted; E2 exp-e2-mlp-alpha: 0.361 > 0.347 -> adopted (pre-registered rule)
+2026-10-13T06:23:03+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1-final --configs walch+bid-nonstep --classifiers mlp --mlp-alpha 1e-2 --selection per-group --jobs 24 --install-model
+2026-10-13T06:38:02+02:00 END rc=0 899s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1-final --configs walch+bid-nonstep --classifiers mlp --mlp-alpha 1e-2 --selection per-group --jobs 24 --install-model
+2026-10-13T06:39:47+02:00 NOTE loso-v1-final #1 discarded: its HMM-table baseline used the (already trained) AlgoParams HMM defaults; pipeline fixed to pass the physiology table explicitly (loso.physiology_hmm_patch); HYBRID/HMM-trained results unaffected (explicit params). Re-running.
+2026-10-13T06:39:47+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1-final --configs walch+bid-nonstep --classifiers mlp --mlp-alpha 1e-2 --selection per-group --jobs 24 --install-model
+2026-10-13T06:53:13+02:00 END rc=0 806s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v1-final --configs walch+bid-nonstep --classifiers mlp --mlp-alpha 1e-2 --selection per-group --jobs 24 --install-model
+2026-10-13T06:53:37+02:00 START mise exec -- python -I tools/train/train.py defaults --run loso-v1-final --write
+2026-10-13T06:53:38+02:00 END rc=0 1s mise exec -- python -I tools/train/train.py defaults --run loso-v1-final --write
+2026-10-13T06:57:58+02:00 FINAL CHECKS: mise exec -- ./gradlew :core-algo:test :algo-cli:test ktlintCheck detekt (--rerun-tasks: 236 JVM tests, 0 failures; BUILD SUCCESSFUL); mise exec -- python -I -m pytest tools/train/tests -q (167 passed)
+2026-10-13T07:41:41+02:00 NOTE audit fixes (PART C) begin: pipeline changes (nonstep retired -> walch+bid-zero, HMM time-prior MLE + validity gate, algo-cli fingerprint per run, decoder evidence per inner selection, paired CIs, robustness subcommands); TrainedDefaults.kt regenerated from loso-v1-final with the new generator (adds HMM_TIME_PRIOR = HmmTimePrior()) only so that core-algo compiles before the v2 runs
+2026-10-13T07:41:41+02:00 START mise exec -- python -I tools/train/train.py defaults --run loso-v1-final --write
+2026-10-13T07:41:42+02:00 END rc=0 1s mise exec -- python -I tools/train/train.py defaults --run loso-v1-final --write
+2026-10-13T07:41:46+02:00 START mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist :core-algo:ktlintCheck :algo-cli:ktlintCheck :core-algo:detekt :algo-cli:detekt -q
+2026-10-13T07:42:00+02:00 END rc=0 14s mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist :core-algo:ktlintCheck :algo-cli:ktlintCheck :core-algo:detekt :algo-cli:detekt -q
+2026-10-13T07:42:29+02:00 BUILD algo-cli installDist at 07:41:53 (core-algo HmmTimePrior + TrainedDefaults.HMM_TIME_PRIOR; logged above as the gradle START/END pair); jar-set digest a5509e4786328d20. No rebuild until loso-v2, the experiments, the seeds and the sensitivity runs are finished (each run also records its own fingerprint in config.json and fails if it changes).
+2026-10-13T07:42:29+02:00 PRE-REGISTRATION v2 (written before any loso-v2 result; NOT blind: the loso-v1 / E1 / E2 results, obtained with the retired nonstep configuration, are known):
+  Reason: audit finding — walch+bid-nonstep coded BIDSleep step features as missing in training, but algo-cli and the app compute 0 steps for them (train/inference mismatch; the MLP learned it as a dataset switch). nonstep is retired; replaced by walch+bid-zero (BIDSleep step features exactly as algo-cli computes them). walch and walch+bid-mask are unchanged.
+  HMM-trained now also estimates the time prior (LIGHT->DEEP / LIGHT->REM time multipliers, REM lockout factor with the lockout length fixed at 45 min, initial AWAKE/LIGHT) by conditional MLE. Adoption of the trained HMM as default requires (a) a higher worse-variant Walch kappa than the physiology table AND (b) validity: hrNorm means of the estimates on all pool subjects ordered DEEP < LIGHT < REM < AWAKE, and pooled predicted DEEP share in [3 %, 35 %] and REM share <= 40 % on both headline variants (the spec's sanity corridors). Otherwise the table stays the default.
+  loso-v2: all estimators, configs walch / walch+bid-mask / walch+bid-zero, LR and MLP (alpha 1e-4), 4 variants, --selection per-group, seed 0. Selection rule unchanged (worse of instantaneous / mean2min, mean per-subject kappa on Walch).
+  Experiments, same definitions and adoption rule as in v1, applied to the loso-v2 selection: E1 = --class-weight balanced on the chosen (classifier, config); E2 = MLP --mlp-alpha 1e-2 on the config chosen for the MLP. Adopt if the worse-variant score exceeds the loso-v2 default; if both do, adopt the higher one (no combination run). Walch subjects held out, variants instantaneous + mean2min.
+  Then the adopted setting with the complete protocol (all variants, all subjects held out, baselines) trains and installs the final model; if no experiment is adopted, loso-v2 itself is that run.
+  Reporting only, never used for a choice: paired per-subject bootstrap CIs for every comparison; the adopted setting with seeds 1, 2, 3 (Walch held out, headline variants); session-boundary sensitivity and a no-steps evaluation of the adopted outer fold models (train.py sensitivity). The conservative headline is the loso-v2 default before the experiments.
+2026-10-13T07:42:36+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v2 --selection per-group --jobs 24
+2026-10-13T08:14:54+02:00 END rc=0 1938s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run loso-v2 --selection per-group --jobs 24
+2026-10-13T08:15:13+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-v2-e1-balanced --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --class-weight balanced --jobs 12
+2026-10-13T08:15:13+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-v2-e2-mlp-alpha --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --mlp-alpha 1e-2 --jobs 12
+2026-10-13T08:20:53+02:00 END rc=0 340s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-v2-e2-mlp-alpha --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --mlp-alpha 1e-2 --jobs 12
+2026-10-13T08:21:35+02:00 END rc=0 382s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run exp-v2-e1-balanced --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --class-weight balanced --jobs 12
+2026-10-13T08:22:13+02:00 RESULT v2: loso-v2 default HYBRID-MLP [walch+bid-zero] (alpha 1e-4) worse-variant Walch kappa 0.334 (mask 0.309; best LR 0.288 [walch]); HMM-trained 0.117 > table 0.070 but fails the validity gate (hrNorm order; DEEP share 46.6 % / 42.4 %) -> table kept. E1 exp-v2-e1-balanced 0.307 < 0.334 -> not adopted; E2 exp-v2-e2-mlp-alpha 0.300 < 0.334 -> not adopted (pre-registered rule; paired CIs in tools/train/out/compare-v2-experiments.json). Adopted setting = loso-v2 itself (complete protocol); its final model is installed with train.py final --run loso-v2 --install-model.
+2026-10-13T08:22:13+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py final --run loso-v2 --install-model
+2026-10-13T08:22:42+02:00 END rc=0 29s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py final --run loso-v2 --install-model
+2026-10-13T08:22:49+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run seed-v2-s1 --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --seed 1 --jobs 12
+2026-10-13T08:22:49+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run seed-v2-s2 --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --seed 2 --jobs 12
+2026-10-13T08:28:58+02:00 END rc=0 369s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run seed-v2-s1 --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --seed 1 --jobs 12
+2026-10-13T08:29:21+02:00 END rc=0 392s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run seed-v2-s2 --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --seed 2 --jobs 12
+2026-10-13T08:29:34+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py sensitivity --run loso-v2 --jobs 8
+2026-10-13T08:29:34+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run seed-v2-s3 --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --seed 3 --jobs 16
+2026-10-13T08:29:48+02:00 END rc=0 14s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py sensitivity --run loso-v2 --jobs 8
+2026-10-13T08:34:33+02:00 END rc=0 299s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py run --run seed-v2-s3 --configs walch+bid-zero --classifiers mlp --estimators HYBRID --variants instantaneous,mean2min --selection per-group --heldout-datasets walch --seed 3 --jobs 16
+2026-10-13T08:34:44+02:00 START mise exec -- python -I tools/train/train.py compare --runs loso-v2,seed-v2-s1,seed-v2-s2,seed-v2-s3 --output tools/train/out/compare-v2-seeds.json
+2026-10-13T08:34:45+02:00 END rc=0 1s mise exec -- python -I tools/train/train.py compare --runs loso-v2,seed-v2-s1,seed-v2-s2,seed-v2-s3 --output tools/train/out/compare-v2-seeds.json
+2026-10-13T08:35:01+02:00 RESULT seeds (reporting only): worse-variant Walch kappa seed0 (loso-v2) 0.334, s1 0.326, s2 0.291, s3 0.318 -> mean 0.317, sample sd 0.019 (tools/train/out/compare-v2-seeds.json); sensitivity of the loso-v2 fold models in tools/train/out/loso-v2/sensitivity/ (original nights reproduced the run's numbers on the 07:41:53 build)
+2026-10-13T08:35:01+02:00 START mise exec -- python -I tools/train/train.py defaults --run loso-v2 --write
+2026-10-13T08:35:02+02:00 END rc=0 1s mise exec -- python -I tools/train/train.py defaults --run loso-v2 --write
+2026-10-13T08:35:13+02:00 START mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist ktlintCheck detekt --rerun-tasks
+2026-10-13T08:35:37+02:00 END rc=0 24s mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist ktlintCheck detekt --rerun-tasks
+2026-10-13T08:35:44+02:00 BUILD algo-cli installDist after TrainedDefaults.kt from loso-v2 (gradle START/END above, --rerun-tasks); jar-set digest 374a78ac1c7ad883
+2026-10-13T08:35:53+02:00 START JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py sensitivity --run loso-v2 --jobs 16
+2026-10-13T08:36:03+02:00 END rc=0 10s JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py sensitivity --run loso-v2 --jobs 16
+2026-10-13T08:36:09+02:00 CHECK the final build (08:35:28, TrainedDefaults from loso-v2) re-evaluates the loso-v2 Walch fold models with identical per-subject results for all 10 sensitivity scenarios and the original nights (sensitivity/summary.json rows identical to the 07:41:53 build)
+2026-10-13T08:45:07+02:00 START mise exec -- ./gradlew :core-algo:test :algo-cli:test ktlintCheck detekt
+2026-10-13T08:45:08+02:00 END rc=0 1s mise exec -- ./gradlew :core-algo:test :algo-cli:test ktlintCheck detekt
+2026-10-13T08:45:32+02:00 START mise exec -- ./gradlew :core-algo:test :core-algo:ktlintCheck :core-algo:detekt
+2026-10-13T08:45:49+02:00 END rc=0 17s mise exec -- ./gradlew :core-algo:test :core-algo:ktlintCheck :core-algo:detekt
+2026-10-13T08:46:02+02:00 FINAL CHECKS (PART C): mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist ktlintCheck detekt --rerun-tasks (08:35, 236 JVM tests, 0 failures) + :core-algo:test with the new HmmTimePriorTest (226 + 12 = 238 JVM tests, 0 failures, ktlint/detekt clean); mise exec -- python -I -m pytest tools/train/tests -q (192 passed). Shipped: model loso-v2 (pulsestages-walch+bidsleep-mlp-loso-v2), TrainedDefaults.kt from loso-v2.
+2026-10-14T02:22:45+02:00 PRE-REGISTRATION nap-model (written before any nap model was trained, decoded or scored and before any ends-in-wake window was built; full text also in tools/train/out/prereg-nap-model.md):
+  # Pre-registration: a dedicated nap model (LOSO on nap proxies v2)
+  
+  Written 2026-10-14T02:22:45+02:00, BEFORE any nap model has been trained, decoded or scored and before any ends-in-wake window
+  (kind b below) has been built: no candidate code has been written or run. Main checkout, branch main, base commit
+  c2392ea (two processing modes, nap section of the bundle supported, no nap model shipped). Also appended verbatim to
+  `tools/train/out/commands.log`. Known numbers: the published night-level results of ALGORITHM.md section 13 (runs
+  `loso-v2`, `bias-base`, `bias-base/bias`, `bias-final`) and the nap-proxy results of section 13.11 (runs `naps`,
+  `naps-posthoc`), i.e. the current default N0, RULES, HMM-table and "all LIGHT" on the onset proxies of 30, 60, 90,
+  120, 150 and 170 min. Nothing is known about a nap model or about ends-in-wake windows.
+  
+  ## Question
+  
+  Naps (sessions shorter than `napMode.maxSessionMin` = 180 min) are decoded today by the night model with the
+  short-session bias `stageLogBiasShort` (candidate C-180 of section 13.11): about half of the 30-s epochs agree with
+  PSG, the stage shares are far off, and a 30-min nap is no better than "all LIGHT". Does a dedicated nap model (the
+  bundle's optional `nap` section: classifier, durations, transitions, initial stage, time prior, class priors and its
+  own stageLogBias, all fitted on nap-length sessions, with its own decoder parameters `napMode.hybrid.*`) do better,
+  validated with the same rigour as the night model (leave one subject out, nested selection, pre-registered rules)?
+  And, whatever is adopted, which nap output policy (STAGES / SLEEP_WAKE / SKIP) should be the default?
+  
+  ## Nap proxies v2
+  
+  From every OHealth-like night file of both headline variants (`tools/train/data/nights/{instantaneous,mean2min}/`;
+  Walch = PSG, headline; BIDSleep = EEG headband, secondary), two kinds of proxy sessions:
+  
+  (a) ONSET proxies, exactly as in section 13.11 (`pulsetrain.naps.nap_proxy`, unchanged): session start s0 = the
+  night's OHealth-like session start (first non-wake epoch - 5 min), end s1 = s0 + L, L in {30, 60, 90, 120, 150, 170}
+  min; heart rate of [s0 - 30 min, s1], step records ending in (s0 - 30 min, s1], label epochs fully inside [s0, s1];
+  NO data after s1; id `<night id>-nap<L>`. Every prepared session is at least 199 min long, so all exist.
+  
+  (b) ENDS-IN-WAKE windows. On the night's 30-s label epochs (inside its OHealth-like session), a wake bout is a
+  maximal run of consecutive AWAKE epochs (each starting where the previous one ends; any other stage or a gap in the
+  labels ends the run). For every wake bout o of at least 2 min (the opening bout), the closing bout c is the first wake
+  bout of at least 5 min that starts at or after the end of o. The sleep segment is [end of o, start of c]; the proxy
+  session puts the OHealth-like margins of `prepare.py` around it: s0 = end of o - min(5 min, length of o) (never more
+  wake than the opening bout has), s1 = start of c + 5 min (the first 5 min of the closing awakening, so the session
+  ends in wake as a real nap does). The window is kept when 30 min <= s1 - s0 <= 179 min (a nap under the 180-min
+  threshold). Heart rate of [s0 - 30 min, s1] (up to 30 min of pre-session context, as far as the night file has data),
+  step records ending in (s0 - 30 min, s1], label epochs fully inside [s0, s1], NO data after s1 (cut by the same code
+  as (a)); id `<night id>-ew<m>` with m = (s0 - night session start) in minutes (`f"{m:g}"`). Deterministic sampling,
+  capped per night: the night's windows are ordered by SHA-256 of `<night key>|<s0 - night session start in ms>` (night
+  key = the night id without its variant suffix `-inst` / `-mean2min`, so both variants get the same windows), and
+  taken greedily in that order when they do not overlap a window already taken, at most K = 3 per night.
+  
+  Why both kinds: a real nap starts after wakefulness and ends with an awakening. (a) has the first property (sleep
+  onset after wake, the stage sequence of sleep onset) but ends inside sleep; (b) has the second (the session ends 5 min
+  into an awakening of at least 5 min, the end that the model's time-to-end features should learn for naps) but starts
+  after a nocturnal awakening. Neither alone is a nap; both together cover the two ends of one. Stated limitations
+  (reported with the results): no afternoon circadian phase (both kinds are night-time sleep, (a) in the evening after a
+  full day awake, (b) in the middle or late part of the night with sleep pressure partly dissipated and more REM); no
+  real post-nap wake heart rate or steps (no data after the end); the pre-session context of (b) is nocturnal sleep or
+  wake, not daytime activity; (a)'s session start is the PSG sleep onset - 5 min (a watch may detect a nap late); the
+  onset proxies of one night overlap (the first 30 min appear in all six lengths); 31 young healthy adults in one lab
+  (Walch) and 47 adults at home with headband labels (BIDSleep).
+  
+  ## Data, folds and the artefacts of the current default
+  
+  - Pool = all 78 subjects (31 Walch + 47 BIDSleep), training configuration `walch+bid-zero` (BIDSleep step features
+    exactly as algo-cli computes them: 0 steps). Every subject is held out once (LOSO by subject: all proxies of the
+    held-out subject, of both kinds and from all its nights, are excluded from everything fitted for it).
+  - Outer groups and inner folds: those of run `bias-base` (`--selection per-group`, 5 dataset-stratified groups, seed
+    0): the selection set of a group g is the night run's `selection/<key>.json` `subjects` (the pool minus g's
+    subjects), its inner folds are that file's `innerFolds`, inner scoring on its Walch subjects. The same groups in both
+    variants.
+  - N0 at fold level (the current main behaviour): each held-out subject's outer fold night bundle of `bias-base`
+    (`hybrid/walch+bid-zero/<variant>/mlp/folds/<subject>.json`) + the fold-level stageLogBias b_g
+    (`bias-base/bias/decisions.json`, candidate B) + the fold-level stageLogBiasShort b_short_g(180) (`naps/fits.json`,
+    T = 180), no nap section, decoder theta_g of the night run for nights and naps, beta = 1.
+  - Reproduction gate, before any nap model is fitted: with the algo-cli build of the commit that holds this
+    pre-registration and its analysis code (fingerprint recorded), N0 must reproduce (1) every whole night of both
+    variants (568 decodes) as `bias-base/bias/results.jsonl` candidate B and (2) every onset proxy of 30-120 min (2272
+    decodes) as candidate C-180 of `naps/results.jsonl` (confusion matrix, estimated or not, warnings; the `SANITY_*`
+    codes of sessions shorter than 180 min are absent in this build, `naps.expected_warnings`); the 150 / 170-min onset
+    proxies are compared with `naps-posthoc` and reported. If (1) or (2) fails: stop and document.
+  - Feature parity, before any fit: the features of the onset proxies cut in Python must equal (every field) the rows
+    that `algo-cli features --nap-proxies 30,60,90,120,150,170` cuts in Kotlin for the same nights; the feature set must
+    be `FEATURE_SET_VERSION` 1 with the 40 names of `algo-cli feature-names`. Every training matrix passes
+    `loso.check_train_inference_parity` (the training values are the algo-cli values of the same epochs) and every
+    exported classifier reproduces sklearn to 1e-9 (`models.verify_export`).
+  
+  ## Candidates for nap sessions (all proxies are naps: shorter than 180 min)
+  
+  - N0: current main behaviour, as above (night model + stageLogBiasShort).
+  - N1: dedicated nap model, per held-out subject s of outer group g and variant v:
+    - training rows: the epochs with heart-rate data and a label of all proxies (both kinds) of the training subjects
+      (pool minus s), from BOTH variants (instantaneous rows, then mean2min rows), the 40 features as algo-cli computes
+      them for the proxy sessions;
+    - classifier: multinomial logistic regression (lbfgs, L2, C in {0.01, 0.1, 1} chosen by inner log-loss as in
+      `loso.run_selection`) or an MLP 2 x 32 (relu, adam, alpha 1e-4, batch 256, early stopping on 10 %, seed 0), the
+      type (and C) chosen per (variant, g) in the nested inner CV below;
+    - nap-specific statistics fitted on the training subjects' proxies of variant v (`stats.fit_label_stats`, the
+      night protocol's settings): gamma bout durations, bout transitions, initial stage, time prior P(stage | 30-min bin
+      since the session start), class priors = the classifier's training-row frequencies;
+    - nap stageLogBias b_nap_g: the fixed point of `pulsetrain/bias.py` (`fit_stage_bias`, unchanged: start 0, eta 1
+      halved on a non-improving step, at most 8 decodes, stop at D <= 0.005) per (variant, g) on the training folds
+      only: the inner out-of-fold decodes (all proxies of both kinds) of g's inner held-out Walch selection subjects,
+      each by its inner fold nap model, at g's chosen classifier and decoder parameters;
+    - decoder parameters theta_nap_g = (durationModel, emissionWeight, timePriorWeight), set as `napMode.hybrid.*`;
+    - the nap model goes into the `nap` section of s's N0 fold bundle (main part unchanged), so the evaluation runs the
+      code path the app runs.
+  - N2: N1 without the nap stageLogBias (same classifier, statistics and theta_nap_g).
+  - Nested inner CV per (variant v, group g), never touching g's subjects: for each inner fold, LR (each C) and the MLP
+    are fitted on the inner training subjects' proxies (both variants), with statistics from v; one
+    `algo-cli evaluate --param-grid` per classifier scores the full grid durationModel {EXPLICIT, GEOMETRIC} x
+    emissionWeight {1, 0.7, 0.5, 0.3} x timePriorWeight {1, 0.5, 2, 0} (32 points, the order of `loso.GRIDS["full"]`)
+    as `napMode.hybrid` patches on the inner held-out Walch subjects' proxies (both kinds, variant v), each decoded by
+    its inner fold nap model (a bundle whose main model and nap section are both that model: every evaluated session is
+    a nap, so only the nap section decodes). Inner score = mean
+    per-subject Cohen's kappa (AWAKE / LIGHT / DEEP / REM; each subject's proxies of both kinds pooled; the night
+    protocol's score). The (classifier, grid point) with the highest inner score is chosen; ties -> logreg before MLP,
+    then grid order.
+  - Context (not candidates): RULES (AlgoParams defaults) and HMM-table (the physiology table,
+    `loso.physiology_hmm_patch`) as the nap estimator, untrained, on the same proxies; "all LIGHT" (every scored chunk
+    of N0 predicted LIGHT, from the labels); and a SLEEP_WAKE evaluation of N0 and N1 (N2 and the context estimators also
+    reported).
+  - Common evaluation parameters: the night run's base parameters, `hybrid` = theta_g of the night run and beta 1,
+    `napMode.maxSessionMin` 180, `napMode.estimator` HYBRID, `napMode.outputPolicy` STAGES (the stages are scored; the
+    policy is applied after the estimate), `napMode.post` defaults (no stage-share checks on naps), `napMode.hybrid` =
+    theta_nap_g (N1, N2) or theta_g of the night run (N0).
+  - Nights unchanged at fold level: the N1 and N2 evaluations include the held-out subjects' whole nights, which must
+    reproduce candidate B of `bias-base/bias/results.jsonl` night by night (568 of 568); otherwise stop and document.
+  
+  ## Metrics
+  
+  Per session, on its scored 30-s chunks (prediction at the chunk midpoint; chunks predicted UNKNOWN in long heart-rate
+  gaps are not scored): confusion matrix, accuracy, true and predicted shares, summed share error E = 100 * sum over
+  AWAKE, LIGHT, DEEP, REM of |P_s - T_s| (percentage points, 0-200), kappa, flags, NOT_ESTIMATED reason.
+  
+  Pooled over the proxies of both kinds (per candidate, dataset and variant; the rules use Walch):
+  - accuracy = correct / scored chunks over all scored chunks of all proxies of both kinds (one pooled matrix);
+  - E = mean over all proxies (sessions) of the per-session E;
+  - 4-class kappa = mean per-subject Cohen's kappa, each subject's proxies of both kinds pooled (subjects where defined);
+  - sleep/wake (SLEEP_WAKE output: AWAKE stays AWAKE, LIGHT / DEEP / REM become "sleeping"; every 4 x 4 matrix
+    collapsed to 2 x 2 wake / sleep): sleep/wake kappa = mean per-subject Cohen's kappa of the collapsed matrices (each
+    subject's proxies pooled; where defined), wake F1 and sleep/wake accuracy of the pooled collapsed matrix;
+  - "all LIGHT" accuracy = the LIGHT share of the true labels of the same scored chunks.
+  Also reported, not used: the same per kind (onset / ends-in-wake), per onset length, per ends-in-wake length bin
+  (30-59, 60-89, 90-119, 120-149, 150-179 min), per-session mean accuracy, chunk-pooled kappas, shares, flags,
+  NOT_ESTIMATED counts, the inner choices and scores per group, the b fits, BIDSleep (secondary) for everything.
+  Paired per-subject bootstrap (`report.paired_bootstrap`, 10 000 resamples of subjects, seed 0, 95 % percentile CI) of
+  N1 - N0, N2 - N0, N1 - N2 and every context estimator - N0, per dataset and variant, pooled and per kind: accuracy
+  (subject value = the subject's pooled accuracy), E (mean over the subject's proxies), 4-class kappa, sleep/wake kappa,
+  wake F1 (subjects where defined in both); and candidate - "all LIGHT" accuracy for the policy rule.
+  
+  ## Rule (i): the model (verbatim)
+  
+  "On Walch, worse sampling variant, pooled over proxies of both kinds: adopt the nap-model candidate with the highest
+  accuracy among those whose summed share error <= N0's and whose accuracy >= N0's + 0.02; else keep N0."
+  
+  Operational definitions: nap-model candidates = N1, N2; accuracy worse = min and E worse = max over {instantaneous,
+  mean2min} of the pooled values above (each criterion on its own worse variant); qualify = E worse <= E worse of N0
+  and accuracy worse >= accuracy worse of N0 + 0.02; ties in accuracy (within 0.0005) -> lower E worse, then N1 before
+  N2. Keeping N0 means: no nap section is installed.
+  
+  ## Rule (ii): the default output policy for naps (verbatim)
+  
+  "STAGES if the adopted candidate's accuracy >= 'all LIGHT' accuracy + 0.03 AND its 4-class kappa >= 0.15; otherwise
+  SLEEP_WAKE if its sleep/wake kappa >= 0.20; otherwise SKIP."
+  
+  Operational definitions: the adopted candidate X of rule (i) (N0 if kept); Walch, pooled over proxies of both kinds;
+  accuracy margin = min over the two variants of (accuracy of X - "all LIGHT" accuracy on X's scored chunks of that
+  variant); 4-class kappa and sleep/wake kappa = min over the two variants of the mean per-subject values above. The
+  result becomes `TrainedDefaults.NAP_OUTPUT_POLICY`, the default of `napMode.outputPolicy`.
+  
+  ## If a nap model (N1 or N2) is adopted: final model and installation
+  
+  - Final classifier type = the most frequent choice over the 156 outer folds (78 subjects x 2 variants, each fold
+    carrying its group's choice; ties -> higher mean inner score, then logreg); C = the most frequent C of the folds
+    with that type; theta_nap = the most frequent theta_nap_g of those folds (ties -> higher mean inner score, then
+    grid order).
+  - Final nap model fitted on the proxies of all 78 subjects (rows of both variants, instantaneous first), statistics
+    from the instantaneous proxies (labels are identical in the two variants).
+  - N1 only: final nap stageLogBias = the same fixed point on the LOSO out-of-fold decodes of all proxies (both kinds)
+    of the 31 Walch subjects, both variants pooled, each decoded by its outer fold nap model of the final type and C
+    without b (refitted on the same training subjects where its group chose another type or C) at theta_nap.
+  - Installed as the `nap` section of the shipped bundle (`naps-final/final/hybrid_model.json`, main model unchanged)
+    into `app/src/main/assets/models/hybrid_model.json`; `TrainedDefaults` regenerated: `NAP_HYBRID_DURATION_MODEL`,
+    `NAP_HYBRID_EMISSION_WEIGHT`, `NAP_HYBRID_TIME_PRIOR_WEIGHT` = theta_nap and `NAP_OUTPUT_POLICY` = rule (ii). If N0
+    is kept: no nap section, `NAP_HYBRID_*` stay null, only `NAP_OUTPUT_POLICY` is set by rule (ii).
+  
+  ## Verification: nights unchanged (with the final build)
+  
+  After the new defaults and bundle are built into algo-cli: (1) the fold bundles of the adopted candidate (N0 bundles
+  plus its nap section, or N0's) decoded with each group's night decoder theta_g and otherwise the build's DEFAULT
+  parameters (`napMode` not passed) reproduce candidate B of `bias-base/bias/results.jsonl` on all 568 whole nights; (2)
+  the adopted candidate's proxy decodes are reproduced session by session (its theta_nap_g and `outputPolicy` STAGES
+  passed explicitly); (3) the installed bundle and the previous shipped bundle
+  decode all 568 whole nights with the default parameters identically (confusion matrix, warnings, estimated status and
+  the per-epoch output); (4) the installed bundle is accepted on every proxy (HYBRID used; resubstitution, not a
+  validation result). Any failure is documented and blocks the installation.
+  
+  ## Commands, outputs, provenance
+  
+  ```
+  mise exec -- ./gradlew :algo-cli:installDist    # the build of the commit with this file and its analysis code
+  JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py nap-model --out-run nap-model --jobs 16
+  mise exec -- python -I tools/train/train.py nap-model-report --out-run nap-model
+  JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py nap-model-final --exp nap-model --out-run nap-model-final --install-model
+  mise exec -- python -I tools/train/train.py defaults --run nap-model-final --write
+  mise exec -- ./gradlew :algo-cli:installDist
+  JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py nap-model-verify --exp nap-model --final nap-model-final --out-run nap-model-verify
+  ```
+  
+  Code: `tools/train/pulsetrain/napmodel.py`, `train.py nap-model | nap-model-report | nap-model-final |
+  nap-model-verify`, tests in `tools/train/tests/`. This file, its SHA-256 and the analysis code are committed before
+  the first algo-cli call of the experiment; every later change to the analysis code is logged in
+  `tools/train/out/commands.log` and disclosed in ALGORITHM.md section 13.12, which documents the protocol, all tables,
+  both decisions and a plain conclusion whatever the outcome. `--jobs` changes no result (fixed seeds, single-threaded
+  BLAS).
+2026-10-14T02:22:45+02:00 NOTE prereg-nap-model.md sha256 b79de349c58adf2459de89955b72a1433e3d3eb79664b647b3ab5bceb476d290
+2026-10-14T02:40:23+02:00 NOTE nap-model analysis code written after the pre-registration (tools/train/pulsetrain/napmodel.py sha256 4b3fd9f7569753ad..., train.py nap-model | nap-model-report | nap-model-final | nap-model-verify, tests/test_napmodel.py, tests/test_prereg.py, fake algo-cli: --nap-proxies in features and the napMode.hybrid overrides; kotlin_defaults: NAP_OUTPUT_POLICY; core-algo: napMode.outputPolicy defaults to TrainedDefaults.NAP_OUTPUT_POLICY = STAGES, regenerated from naps-final, no behaviour change); tested on the fake algo-cli only (pytest 266 + 2 prereg checks; core-algo / algo-cli tests, ktlint, detekt green); committed with the pre-registration on main BEFORE the first algo-cli call of the experiment

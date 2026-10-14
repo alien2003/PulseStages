@@ -14,8 +14,11 @@
   pre-registered nap experiment, :mod:`pulsetrain.naps`; ``selection.shortSessionMaxMin.note``), which is read as
   ``napMode.maxSessionMin``; else 180.0, the nap threshold the baseline and sanity-check rules used before the modes;
 - ``NAP_ESTIMATOR``: ``napMode.estimator`` of the patch, else the run's ``estimator``;
+- ``NAP_OUTPUT_POLICY``: ``napMode.outputPolicy`` of the patch (rule (ii) of the pre-registered nap-model
+  experiment, :mod:`pulsetrain.napmodel`; ``selection.napOutputPolicy.note``), else ``STAGES``;
 - ``NAP_HYBRID_DURATION_MODEL``, ``NAP_HYBRID_EMISSION_WEIGHT``, ``NAP_HYBRID_TIME_PRIOR_WEIGHT``: the nap decoder
-  overrides ``napMode.hybrid.*`` of the patch, else ``null`` (naps use the night's decoder parameters);
+  overrides ``napMode.hybrid.*`` of the patch (``selection.napModel.decoderNote`` explains the choice), else ``null``
+  (naps use the night's decoder parameters);
 - ``HMM_EMISSIONS``, ``HMM_MEAN_BOUTS``, ``HMM_TRANSITIONS``, ``HMM_TIME_PRIOR``: the supervised MLE estimates when
   the trained HMM scored higher than the physiology table and passed the validity gate (``report.hmm_validity``),
   otherwise references to the specification's defaults (``EmissionTable.PHYSIOLOGY``, ``MeanBouts()``,
@@ -40,6 +43,7 @@ KOTLIN_PATH = (REPO_ROOT / "core-algo" / "src" / "main" / "kotlin" / "io" / "git
                / "algo" / "params" / "TrainedDefaults.kt")
 ESTIMATORS = ("RULES", "HMM", "HYBRID")
 DURATION_MODELS = ("EXPLICIT", "GEOMETRIC")
+NAP_OUTPUT_POLICIES = ("STAGES", "SLEEP_WAKE", "SKIP")
 DEFAULT_NAP_MAX_SESSION_MIN = 180.0     # the threshold of the baseline / sanity-check rules before the modes
 STATE_ORDER = ("awake", "light", "deep", "rem")       # EmissionTable constructor order
 
@@ -98,7 +102,7 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
     """The ``NAP_*`` constants (see the module docstring)."""
     hyb = defaults.get("hybrid") or {}
     nap = defaults.get("napMode") or {}
-    unknown = sorted(set(nap) - {"maxSessionMin", "estimator", "hybrid"})
+    unknown = sorted(set(nap) - {"maxSessionMin", "estimator", "outputPolicy", "hybrid"})
     if unknown:
         raise DefaultsError(f"napMode.{unknown[0]} is not a trained default")
     if "maxSessionMin" in nap and "shortSessionMaxMin" in hyb:
@@ -128,6 +132,16 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
     L += _kdoc(f"Nap mode: the estimator of naps ({why}).", "    ")
     L.append(f"    val NAP_ESTIMATOR: EstimatorType = EstimatorType.{nap_est}")
     L.append("")
+    policy = nap.get("outputPolicy", "STAGES")
+    if policy not in NAP_OUTPUT_POLICIES:
+        raise DefaultsError(f"napMode.outputPolicy must be one of {NAP_OUTPUT_POLICIES}, got {policy!r}")
+    if "outputPolicy" in nap:
+        why = str((sel.get("napOutputPolicy") or {}).get("note") or f"chosen in run {run}")
+    else:
+        why = "not part of this run's selection: every stage is written, as for a night"
+    L += _kdoc(f"Nap mode: what is written for a nap ({why}).", "    ")
+    L.append(f"    val NAP_OUTPUT_POLICY: NapOutputPolicy = NapOutputPolicy.{policy}")
+    L.append("")
     nh = nap.get("hybrid") or {}
     unknown = sorted(set(nh) - {"durationModel", "emissionWeight", "timePriorWeight"})
     if unknown:
@@ -136,7 +150,8 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
     if nh.get("durationModel") is not None and nh["durationModel"] not in DURATION_MODELS:
         raise DefaultsError(f"napMode.hybrid.durationModel must be one of {DURATION_MODELS}")
     dm = f"DurationModel.{nh['durationModel']}" if nh.get("durationModel") is not None else "null"
-    why = f"chosen in run {run}" if dm != "null" else same
+    chosen = str((sel.get("napModel") or {}).get("decoderNote") or f"chosen in run {run}")
+    why = chosen if dm != "null" else same
     L += _kdoc(f"Nap mode: duration model of the hybrid decoder for naps ({why}).", "    ")
     L.append(f"    val NAP_HYBRID_DURATION_MODEL: DurationModel? = {dm}")
     L.append("")
@@ -146,7 +161,8 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
         if v is not None and not float(v) >= 0:
             raise DefaultsError(f"napMode.hybrid.{k} must be >= 0")
         text = _num(v, f"napMode.hybrid.{k}") if v is not None else "null"
-        why = f"chosen in run {run}" if v is not None else same
+        why = (f"chosen in run {run}, with the duration model" if (sel.get("napModel") or {}).get("decoderNote")
+               else f"chosen in run {run}") if v is not None else same
         L += _kdoc(f"Nap mode: {what} of the hybrid decoder for naps ({why}).", "    ")
         L.append(f"    val {name}: Double? = {text}")
         L.append("")

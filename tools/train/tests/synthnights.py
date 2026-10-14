@@ -12,22 +12,26 @@ STAGE_HR = {"AWAKE": 74.0, "LIGHT": 60.0, "DEEP": 53.0, "REM": 66.0}
 VARIANTS = ("instantaneous", "mean2min")
 
 
-def hypnogram(rng: np.random.Generator, minutes: int) -> list[str]:
-    """Per-minute stages: wake, then cycles LIGHT-DEEP-LIGHT-REM with short awakenings."""
+def hypnogram(rng: np.random.Generator, minutes: int, long_wakes: bool = False) -> list[str]:
+    """Per-minute stages: wake, then cycles LIGHT-DEEP-LIGHT-REM with short awakenings (1-3 min; 1-8 min with
+    ``long_wakes``, so that some awakenings last 5 min or more)."""
     seq = ["AWAKE"] * int(rng.integers(6, 12))
     cycle = 0
     while len(seq) < minutes:
         deep = int(rng.integers(12, 25)) if cycle < 2 else int(rng.integers(0, 6))
         rem = int(rng.integers(6, 12)) + 5 * cycle
         seq += ["LIGHT"] * int(rng.integers(10, 20)) + ["DEEP"] * deep + ["LIGHT"] * int(rng.integers(5, 12))
-        seq += ["REM"] * rem + ["AWAKE"] * int(rng.integers(1, 4))
+        seq += ["REM"] * rem + ["AWAKE"] * int(rng.integers(1, 9 if long_wakes else 4))
         cycle += 1
     return seq[:minutes]
 
 
 def make_night(night_id: str, subject: str, variant: str, rng: np.random.Generator, *, minutes: int = 200,
-               start_ms: int = 0, with_steps: bool = True, offset: float = 0.0, coverage: float = 1.0) -> dict:
-    stages = hypnogram(rng, minutes)
+               start_ms: int = 0, with_steps: bool = True, offset: float = 0.0, coverage: float = 1.0,
+               long_wakes: bool = False, stages_seed: int | None = None) -> dict:
+    """One night; ``stages_seed`` draws the hypnogram from its own generator (so that two variants of a night can
+    share their labels, as the prepared OHealth-like variants do), otherwise from ``rng``."""
+    stages = hypnogram(rng if stages_seed is None else np.random.default_rng(stages_seed), minutes, long_wakes)
     s0, s1 = start_ms, start_ms + minutes * 60_000
     labels = []
     for k, st in enumerate(stages):
@@ -53,7 +57,7 @@ def make_night(night_id: str, subject: str, variant: str, rng: np.random.Generat
 
 
 def write_dataset(root: Path, n_walch: int = 6, n_bid: int = 3, bid_nights: int = 2, seed: int = 1,
-                  low_coverage_night: bool = True) -> Path:
+                  low_coverage_night: bool = True, long_wakes: bool = False, shared_labels: bool = False) -> Path:
     """Writes <root>/<variant>/*.night.json for two variants, summary.csv and manifest.json; returns root."""
     rng = np.random.default_rng(seed)
     rows = []
@@ -73,7 +77,8 @@ def write_dataset(root: Path, n_walch: int = 6, n_bid: int = 3, bid_nights: int 
         for v in VARIANTS:
             nid = f"{key}-{'inst' if v == 'instantaneous' else 'mean2min'}"
             n = make_night(nid, subj, v, np.random.default_rng(night_seed + (0 if v == "instantaneous" else 7)),
-                           start_ms=start, with_steps=steps, offset=offset, coverage=cov)
+                           start_ms=start, with_steps=steps, offset=offset, coverage=cov, long_wakes=long_wakes,
+                           stages_seed=night_seed if shared_labels else None)
             (root / v / f"{stem}.night.json").write_text(json.dumps(n))
             rows.append({"dataset": ds, "subject": subj, "night_id": nid, "variant": v,
                          "steps_file": str(sum(c for _, _, c in n["steps"])) if steps else ""})

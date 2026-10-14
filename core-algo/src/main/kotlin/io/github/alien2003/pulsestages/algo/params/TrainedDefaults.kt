@@ -44,6 +44,12 @@ object TrainedDefaults {
     val NAP_ESTIMATOR: EstimatorType = EstimatorType.HYBRID
 
     /**
+     * Nap mode: what is written for a nap (not part of this run's selection: every stage is written, as for a
+     * night).
+     */
+    val NAP_OUTPUT_POLICY: NapOutputPolicy = NapOutputPolicy.STAGES
+
+    /**
      * Nap mode: duration model of the hybrid decoder for naps (null = the night's value; this run chose no nap
      * decoder).
      */

@@ -15,6 +15,10 @@
     mise exec -- python -I tools/train/train.py naps-final --out-run naps-final [--install-model]   # its bundle
     mise exec -- python -I tools/train/train.py naps-verify --out-run naps-verify     # check the Kotlin build
     mise exec -- python -I tools/train/train.py naps-posthoc --rerun naps-rerun        # post-hoc, reporting only
+    mise exec -- python -I tools/train/train.py nap-model --out-run nap-model          # dedicated nap model (prereg)
+    mise exec -- python -I tools/train/train.py nap-model-report --out-run nap-model   # re-render its report
+    mise exec -- python -I tools/train/train.py nap-model-final --install-model        # its nap section + defaults
+    mise exec -- python -I tools/train/train.py nap-model-verify                       # nights unchanged, new build
 
 Features and decoding are computed by the Kotlin ``algo-cli`` (``mise exec -- ./gradlew :algo-cli:installDist``;
 override the launcher with ``--algo-cli`` or $ALGO_CLI). Reads untrusted data: run with ``python -I``.
@@ -32,7 +36,7 @@ from pathlib import Path
 TRAIN_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TRAIN_DIR))  # our own package only; `python -I` does not add the script directory
 
-from pulsetrain import bias, kotlin_defaults, loso, naps, naps_posthoc, pipeline, robustness  # noqa: E402
+from pulsetrain import bias, kotlin_defaults, loso, napmodel, naps, naps_posthoc, pipeline, robustness  # noqa: E402
 from pulsetrain.algocli import AlgoCliError  # noqa: E402
 from pulsetrain.bundle import BundleError  # noqa: E402
 from pulsetrain.features import FeatureFileError  # noqa: E402
@@ -43,7 +47,8 @@ from pulsetrain.util import read_json  # noqa: E402
 
 OUT_ROOT = TRAIN_DIR / "out"
 EXPECTED_ERRORS = (AlgoCliError, BundleError, FeatureFileError, MetricsFormatError, FileNotFoundError,
-                   kotlin_defaults.DefaultsError, robustness.RobustnessError, bias.BiasError, naps.NapError)
+                   kotlin_defaults.DefaultsError, robustness.RobustnessError, bias.BiasError, naps.NapError,
+                   napmodel.NapModelError)
 NIGHTS_ROOT = TRAIN_DIR / "data" / "nights"
 
 
@@ -203,7 +208,41 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--nights-root", type=Path, default=NIGHTS_ROOT)
     ph.add_argument("--algo-cli", default=None)
     ph.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    _nap_model_parsers(sub)
     return p
+
+
+def _nap_model_parsers(sub) -> None:
+    jobs = max(1, (os.cpu_count() or 2) - 2)
+    for name, default_out, what in (
+            ("nap-model", "nap-model", "pre-registered dedicated nap model (docs/prereg/prereg-nap-model.md): nap "
+                                       "proxies v2, LOSO, N0 / N1 / N2, rules (i) and (ii)"),
+            ("nap-model-final", "nap-model-final", "final nap model of the candidate adopted by `nap-model` (nap "
+                                                   "section of the shipped bundle) and trained defaults"),
+            ("nap-model-verify", "nap-model-verify", "with the final build: nights unchanged, the adopted candidate "
+                                                     "reproduced, the installed bundle accepted")):
+        q = sub.add_parser(name, help=what)
+        q.add_argument("--run", default="bias-base", help="the night run with the fold bundles and groups (read only)")
+        q.add_argument("--naps", default="naps", help="the `naps` experiment (b_short_g(180), stored C-180 proxies)")
+        q.add_argument("--posthoc", default="naps-posthoc", help="`naps-posthoc` (stored 150 / 170-min proxies)")
+        q.add_argument("--out-root", type=Path, default=OUT_ROOT)
+        q.add_argument("--out-run", default=default_out)
+        q.add_argument("--nights-root", type=Path, default=NIGHTS_ROOT)
+        q.add_argument("--algo-cli", default=None)
+        q.add_argument("--jobs", type=int, default=jobs)
+        if name != "nap-model":
+            q.add_argument("--exp", default="nap-model", help="the `nap-model` output directory under --out-root")
+        if name == "nap-model-final":
+            q.add_argument("--base-run", default="naps-final", help="run with the shipped final bundle / defaults")
+            q.add_argument("--install-model", action="store_true")
+            q.add_argument("--created-at", default=None, help="ISO-8601 timestamp of the nap section (default: now)")
+        if name == "nap-model-verify":
+            q.add_argument("--final", default="nap-model-final", help="the `nap-model-final` output directory")
+            q.add_argument("--previous", type=Path, default=None,
+                           help="the previously shipped bundle (default: <out-root>/naps-final/final/hybrid_model.json)")
+    r = sub.add_parser("nap-model-report", help="re-render <out-run>/{summary.json,report.md} of `nap-model`")
+    r.add_argument("--out-root", type=Path, default=OUT_ROOT)
+    r.add_argument("--out-run", default="nap-model")
 
 
 def _bias_common(p: argparse.ArgumentParser) -> None:
@@ -338,6 +377,29 @@ def _dispatch(a: argparse.Namespace) -> int:
                           "rerunIdentical": (res.get("rerun") or {}).get("allIdentical"),
                           "check": (res.get("between") or {}).get("check")}, indent=2))
         print(out / "report.md")
+    elif a.cmd == "nap-model-report":
+        res = napmodel.rerender(a.out_root / a.out_run)
+        print(json.dumps({"decision": res["decision"], "policy": res["policy"]}, indent=2))
+        print(a.out_root / a.out_run / "report.md")
+    elif a.cmd in ("nap-model", "nap-model-final", "nap-model-verify"):
+        out = a.out_root / a.out_run
+        pipeline.setup_logging(out)
+        from pulsetrain.algocli import AlgoCli
+        cli = AlgoCli.locate(a.algo_cli, commands_log=out / "algocli.log")
+        posthoc = a.out_root / a.posthoc if a.posthoc else None
+        inp = napmodel.Inputs(a.out_root / a.run, a.out_root / a.naps, a.nights_root, posthoc_dir=posthoc)
+        if a.cmd == "nap-model":
+            res = napmodel.run_experiment(inp, cli, out, jobs=a.jobs)
+            print(json.dumps({"decision": res["decision"], "policy": res["policy"]}, indent=2))
+            print(out / "report.md")
+        elif a.cmd == "nap-model-final":
+            res = napmodel.final_model(inp, cli, a.out_root / a.exp, a.out_root / a.base_run, out, jobs=a.jobs,
+                                       install=APP_MODEL_PATH if a.install_model else None, created_at=a.created_at)
+            print(json.dumps({k: v for k, v in res.items() if k not in ("fit", "proxyCounts")}, indent=2))
+        else:
+            prev = a.previous or a.out_root / "naps-final" / "final" / "hybrid_model.json"
+            res = napmodel.verify(inp, cli, a.out_root / a.exp, a.out_root / a.final, prev, out, jobs=a.jobs)
+            print(json.dumps({k: v for k, v in res.items() if k not in ("algoCli", "code")}, indent=2))
     elif a.cmd == "defaults":
         text = kotlin_defaults.render_run(a.out_root / a.run)
         target = a.output or (kotlin_defaults.KOTLIN_PATH if a.write else None)
