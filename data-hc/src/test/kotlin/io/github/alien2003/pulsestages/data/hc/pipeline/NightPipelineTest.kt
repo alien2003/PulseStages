@@ -289,7 +289,7 @@ class NightPipelineTest {
         }
 
     @Test
-    fun `naps are skipped and recorded`() =
+    fun `sessions shorter than the minimum length are ignored and recorded`() =
         harnessTest(dir) { h ->
             h.repository.addNight(OHEALTH, nightStart(1) + 14 * HOUR_MS, durationMs = 60 * MINUTE_MS)
 

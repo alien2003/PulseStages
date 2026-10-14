@@ -169,13 +169,15 @@ data class NightDetailActions(
 /**
  * The detail of the night [clientRecordId] with the Nights tab's shared [viewModel]; used by the detail destination
  * and as the right pane of wide layouts. While the pane is visible (started), the ViewModel re-estimates the night
- * when its ledger row changes.
+ * when its ledger row changes. [showSyntheticBanner] is false in the right pane, where the list's banner above both
+ * panes already says that the data are synthetic.
  */
 @Composable
 fun NightDetailPane(
     clientRecordId: String,
     viewModel: NightDetailViewModel,
     modifier: Modifier = Modifier,
+    showSyntheticBanner: Boolean = true,
 ) {
     LaunchedEffect(viewModel, clientRecordId) { viewModel.show(clientRecordId) }
     LifecycleStartEffect(viewModel) {
@@ -208,6 +210,7 @@ fun NightDetailPane(
             DetailLoad.LOADED -> {
                 NightDetailContent(
                     state = state,
+                    showSyntheticBanner = showSyntheticBanner,
                     actions =
                         NightDetailActions(
                             onSelectTime = viewModel::selectAt,
@@ -235,17 +238,18 @@ fun NightDetailPane(
     }
 }
 
-/** Stateless content of the night detail. */
+/** Stateless content of the night detail; [showSyntheticBanner] shows the demo banner when the data are synthetic. */
 @Composable
 fun NightDetailContent(
     state: NightDetailUiState,
     actions: NightDetailActions,
     modifier: Modifier = Modifier,
+    showSyntheticBanner: Boolean = true,
 ) {
     val night = state.night ?: return
     val spacing = MaterialTheme.spacing
     Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        if (state.synthetic) SyntheticBanner()
+        if (state.synthetic && showSyntheticBanner) SyntheticBanner()
         Column(modifier = Modifier.padding(spacing.medium), verticalArrangement = Arrangement.spacedBy(spacing.medium)) {
             HeaderCard(night, state.stale)
             ChartsCard(state, night, actions)

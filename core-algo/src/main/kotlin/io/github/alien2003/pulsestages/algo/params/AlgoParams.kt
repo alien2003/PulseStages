@@ -99,7 +99,8 @@ data class PreprocessParams(
     /**
      * Sessions shorter than this many minutes are not estimated
      * ([io.github.alien2003.pulsestages.algo.model.NotEstimatedReason.SESSION_TOO_SHORT]); 0 disables the gate. The
-     * app filters naps by its source setting before calling the estimators and leaves this at 0.
+     * app ignores sessions shorter than its source setting `minSessionMin` before calling the estimators and leaves
+     * this at 0.
      */
     val minSessionMin: Double = 0.0,
 )

@@ -7,12 +7,15 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
-/** The demo naps (debug builds only): afternoon sessions short enough to be estimated as naps. */
+/**
+ * The demo naps (debug builds only): afternoon sessions between the default "Minimum session length" (90 min) and the
+ * default nap threshold (180 min), so that an installation with the default settings would also process them as naps.
+ */
 internal object DemoNaps {
     private const val YESTERDAY = 1
     private const val SIX_DAYS_AGO = 6
-    private const val LONG_NAP_MINUTES = 75
-    private const val SHORT_NAP_MINUTES = 45
+    private const val LONG_NAP_MINUTES = 150
+    private const val SHORT_NAP_MINUTES = 100
     private const val NAP_SEED = 20_261_200L
     private const val NAP_HOUR = 15
 

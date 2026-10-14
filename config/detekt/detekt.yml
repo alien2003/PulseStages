@@ -1,6 +1,6 @@
 # detekt 1.23.8 configuration. Applied with buildUponDefaultConfig = true, so only deviations from the
-# default configuration are listed here. No baseline is used: the code base must pass as-is (the one exception is
-# core-algo-baseline.xml, two enum entries whose KDoc is pending). :core-algo additionally runs public-api.yml.
+# default configuration are listed here. No baseline is used: the code base must pass as-is. :core-algo additionally
+# runs public-api.yml.
 
 config:
   validation: true

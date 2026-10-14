@@ -6,14 +6,25 @@ on:
     branches:
       - "**"
     # Changes to pure documentation (files no build or test reads) skip CI. Keep this list in sync with the
-    # "changes" job below. docs/INTERCHANGE.md and docs/prereg/ are not listed: the Python tests read them.
+    # "changes" job below. Never list a file a test reads: ALGORITHM.md and docs/settings-reference.md
+    # (SettingsReferenceTest), docs/INTERCHANGE.md and docs/prereg/ (the Python tests).
     paths-ignore:
-      - "*.md"
+      - CHANGELOG.md
+      - CONTRIBUTING.md
       - LICENSE
+      - PLAN.md
+      - README.md
+      - SECURITY.md
       - core-algo/SYNTHETIC_RESULTS.md
+      - docs/README.md
       - docs/SCREENSHOTS.md
+      - docs/architecture.md
+      - docs/development.md
+      - docs/health-connect.md
       - docs/icon.svg
+      - docs/privacy.md
       - docs/screenshots/**
+      - docs/user-guide.md
       - tools/train/DATASETS.md
       - tools/train/README.md
   # No path filter for pull requests: a workflow skipped by a path filter never reports its checks, so a docs-only pull
@@ -54,10 +65,10 @@ jobs:
           # Same files as on.push.paths-ignore.
           is_doc() {
             case "$1" in
-              LICENSE | core-algo/SYNTHETIC_RESULTS.md | docs/SCREENSHOTS.md | docs/icon.svg | docs/screenshots/*) return 0 ;;
-              tools/train/DATASETS.md | tools/train/README.md) return 0 ;;
-              */*) return 1 ;;
-              *.md) return 0 ;;
+              CHANGELOG.md | CONTRIBUTING.md | LICENSE | PLAN.md | README.md | SECURITY.md) return 0 ;;
+              core-algo/SYNTHETIC_RESULTS.md | tools/train/DATASETS.md | tools/train/README.md) return 0 ;;
+              docs/README.md | docs/SCREENSHOTS.md | docs/architecture.md | docs/development.md) return 0 ;;
+              docs/health-connect.md | docs/icon.svg | docs/privacy.md | docs/screenshots/* | docs/user-guide.md) return 0 ;;
               *) return 1 ;;
             esac
           }

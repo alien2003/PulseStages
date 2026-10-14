@@ -8,8 +8,10 @@ import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.lifecycle.SavedStateHandle
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
 import io.github.alien2003.pulsestages.data.hc.HcAvailability
@@ -51,6 +53,7 @@ import io.github.alien2003.pulsestages.ui.nights.NightDetailViewModel
 import io.github.alien2003.pulsestages.ui.nights.NightsRoute
 import io.github.alien2003.pulsestages.ui.nights.NightsUiState
 import io.github.alien2003.pulsestages.ui.nights.NightsViewModel
+import io.github.alien2003.pulsestages.ui.settings.SettingsCatalog
 import io.github.alien2003.pulsestages.ui.settings.SettingsRoute
 import io.github.alien2003.pulsestages.ui.settings.SettingsViewModel
 import io.github.alien2003.pulsestages.ui.sources.SourcesRoute
@@ -73,11 +76,12 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Renders the six screens of the README (docs/screenshots) from synthetic data on the JVM, with Robolectric's native
- * graphics: the Nights list, the night detail and Compare from the debug build's demo sources (synthetic nights from
- * core-algo's generator, estimated with the bundled model), Home, Settings and Sources from fixed example states. No
- * real health data is involved. Every test run renders them (a smoke test of every main screen) into
- * build/screenshots; `-PrecordScreenshots` writes them to docs/screenshots (see app/build.gradle.kts).
+ * Renders the eight screenshots of the README (docs/screenshots) from synthetic data on the JVM, with Robolectric's
+ * native graphics: the Nights list (also in the two-pane layout of a wide window), the night detail and Compare from the
+ * debug build's demo sources (synthetic nights from core-algo's generator, estimated with the bundled model), Home,
+ * Settings (also scrolled to the Naps group) and Sources from fixed example states. No real health data is involved.
+ * Every test run renders them (a smoke test of every main screen) into build/screenshots; `-PrecordScreenshots` writes
+ * them to docs/screenshots (see app/build.gradle.kts).
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -151,6 +155,26 @@ class ScreenshotsTest {
         }
     }
 
+    /** The Nights tab on the inner screen of a foldable (a window of the medium width class): list and detail side by side. */
+    @Test
+    @Config(qualifiers = "+w800dp-h700dp-land")
+    fun nightsWide() {
+        val source = demoNights()
+        val viewModel = NightsViewModel(TestScreenSources(source), logger, SavedStateHandle())
+        val detail = NightDetailViewModel(TestScreenSources(source), FakeDocumentStore(), logger, SavedStateHandle())
+        capture(
+            "nights-wide",
+            TopLevelDestination.NIGHTS,
+            ready = {
+                val loaded = (viewModel.state.value as? NightsUiState.Loaded)?.nights?.isNotEmpty() == true
+                // The right pane shows the newest night when nothing is selected.
+                loaded && detail.state.value.let { it.load == DetailLoad.LOADED && it.ready != null }
+            },
+        ) {
+            NightsRoute(onOpenNight = {}, viewModel = viewModel, detailViewModel = detail)
+        }
+    }
+
     @Test
     fun nightDetail() {
         val viewModel = NightDetailViewModel(TestScreenSources(demoNights()), FakeDocumentStore(), logger, SavedStateHandle())
@@ -193,6 +217,27 @@ class ScreenshotsTest {
         val about = AboutViewModel({ "1.0.0" }, models, logger)
         capture("settings", TopLevelDestination.SETTINGS, ready = { !viewModel.state.value.loading }) {
             // The debug build's demo-mode card is far below the visible part: the screenshot shows what every build shows.
+            SettingsRoute(onOpenSources = {}, onOpenLog = {}, viewModel = viewModel, aboutViewModel = about, debugTools = null)
+        }
+    }
+
+    /** The Settings tab scrolled to the "Naps" group (expanded by default): nap threshold, nap output and nap estimator. */
+    @Test
+    fun settingsNaps() {
+        val viewModel = SettingsViewModel(settings, FakeDocumentStore(), logger, FakeStaleNightsSource(settings))
+        val about = AboutViewModel({ "1.0.0" }, models, logger)
+        val naps = SettingsCatalog.sections.indexOfFirst { it.id == NAPS_SECTION }
+        assertTrue("the Naps group is expanded by default", SettingsCatalog.sections[naps].expandedByDefault)
+        capture(
+            "settings-naps",
+            TopLevelDestination.SETTINGS,
+            ready = { !viewModel.state.value.loading },
+            prepare = {
+                // Item 0 of the grid is the "Backup and reset" card, the groups follow in catalog order.
+                compose.onNode(hasScrollToIndexAction()).performScrollToIndex(naps + 1)
+                host.idle()
+            },
+        ) {
             SettingsRoute(onOpenSources = {}, onOpenLog = {}, viewModel = viewModel, aboutViewModel = about, debugTools = null)
         }
     }
@@ -244,6 +289,7 @@ class ScreenshotsTest {
         const val PNG_QUALITY = 100
         const val MINUTE_MS = 60_000L
         const val DETAIL_NIGHT = "ps:demo-2"
+        const val NAPS_SECTION = "naps"
         const val SLEEP_APP = "com.urbandroid.sleep"
 
         /** 2026-10-13 09:30 UTC: the morning after the newest demo night. */

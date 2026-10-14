@@ -171,6 +171,13 @@ val screenshotDir: String =
             .get()
             .asFile.absolutePath
     }
+// docs/settings-reference.md is generated from the settings catalog, the defaults and the validators by
+// SettingsReferenceTest, which fails when the committed file is out of date; with -PrecordSettingsReference it
+// rewrites the file:  ./gradlew :app:testDebugUnitTest --tests '*SettingsReferenceTest' -PrecordSettingsReference
+val recordSettingsReference = providers.gradleProperty("recordSettingsReference").isPresent
+val settingsReferenceFile: File = rootProject.layout.projectDirectory.file("docs/settings-reference.md").asFile
+// The reference links to the sections of ALGORITHM.md; a renamed heading must re-run (and fail) the test.
+val algorithmDoc: File = rootProject.layout.projectDirectory.file("ALGORITHM.md").asFile
 // ResourcesParityTest reads the strings of every module; their changes must re-run the app's tests.
 val moduleStrings =
     files(
@@ -187,6 +194,14 @@ tasks.withType<Test>().configureEach {
     systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
     systemProperty("pulsestages.screenshots.dir", screenshotDir)
     if (recordScreenshots) outputs.upToDateWhen { false }
+    inputs.files(algorithmDoc).withPropertyName("algorithmDoc").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("pulsestages.settingsReference.file", settingsReferenceFile.absolutePath)
+    if (recordSettingsReference) {
+        systemProperty("pulsestages.settingsReference.record", "true")
+        outputs.upToDateWhen { false }
+    } else {
+        inputs.files(settingsReferenceFile).withPropertyName("settingsReference").withPathSensitivity(PathSensitivity.RELATIVE)
+    }
 }
 
 androidComponents {

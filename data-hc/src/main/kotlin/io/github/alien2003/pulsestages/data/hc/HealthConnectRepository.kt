@@ -86,7 +86,7 @@ class HealthConnectRepository internal constructor(
     @Volatile
     private var cachedClient: HealthConnectClient? = null
 
-    /** The phone that computes and writes the estimates (see README for the recordingMethod rationale). */
+    /** The phone that computes and writes the estimates (docs/health-connect.md §4.2 has the recordingMethod rationale). */
     private val device: Device by lazy(platform.device)
 
     /** Android 9–13: the Health Connect APK, whose errors carry less information than the framework's. */

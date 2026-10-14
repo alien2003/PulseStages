@@ -94,7 +94,10 @@ fun NightsRoute(
             if (!wide) onOpenNight(id)
         },
         onFilter = viewModel::setFilter,
-        detailPane = { id, modifier -> NightDetailPane(clientRecordId = id, viewModel = detailViewModel, modifier = modifier) },
+        detailPane = { id, modifier ->
+            // The list's banner spans both panes, so the detail pane does not repeat it.
+            NightDetailPane(clientRecordId = id, viewModel = detailViewModel, modifier = modifier, showSyntheticBanner = false)
+        },
     )
 }
 

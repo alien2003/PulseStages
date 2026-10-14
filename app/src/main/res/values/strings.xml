@@ -30,7 +30,7 @@
     <string name="cd_app_icon">Icon of %1$s</string>
     <string name="cd_filter_selected">Selected</string>
     <string name="format_duration_hours_minutes">%1$d h %2$02d min</string>
-    <string name="format_percent">%1$d %%</string>
+    <string name="format_percent">%1$d\u00A0%%</string>
     <string name="format_bpm">%1$d bpm</string>
     <string name="format_seconds">%1$d s</string>
     <string name="format_value_unit">%1$s %2$s</string>
@@ -108,7 +108,7 @@
     <string name="nights_empty_title">No nights yet</string>
     <string name="nights_empty_body">Nights appear here after PulseStages has read sleep sessions from Health Connect and estimated their stages.</string>
     <string name="nights_time_range">%1$s–%2$s · %3$s</string>
-    <string name="nights_stage_share">%1$s %2$s</string>
+    <string name="nights_stage_share">%1$s\u00A0%2$s</string>
     <string name="nights_quality">Confidence %1$s · coverage %2$s</string>
     <string name="night_detail_title">Night</string>
     <string name="night_not_found_title">Night not found</string>

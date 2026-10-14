@@ -4,7 +4,7 @@
     <string name="set_src_hr_sources_title">Heart rate and steps from</string>
     <string name="set_src_hr_sources_hint">The app that wrote the sleep session, or any app that writes heart rate and steps.</string>
     <string name="set_src_min_session_title">Minimum session length</string>
-    <string name="set_src_min_session_hint">Shorter sessions (after merging fragments) are naps and are skipped.</string>
+    <string name="set_src_min_session_hint">Shorter sessions (after merging fragments) are ignored; longer ones below the nap threshold are processed as naps.</string>
     <string name="set_src_merge_gap_title">Merge gap</string>
     <string name="set_src_merge_gap_hint">Fragments of one night from one app with a shorter gap become one night; the gap is written as awake.</string>
     <string name="set_src_backfill_days_title">History depth</string>
@@ -48,7 +48,7 @@
     <string name="set_pre_rules_min_coverage_title">Rules fallback coverage</string>
     <string name="set_pre_rules_min_coverage_hint">Between this and the minimum coverage the rules estimator is used; below it the night is skipped.</string>
     <string name="set_pre_min_session_title">Estimator session gate</string>
-    <string name="set_pre_min_session_hint">Sessions shorter than this are not estimated; 0 = off (naps are filtered by the source setting).</string>
+    <string name="set_pre_min_session_hint">Sessions shorter than this are not estimated; 0 = off (sessions shorter than the minimum session length of the sources are ignored anyway).</string>
     <string name="set_fea_norm_low_title">Normalization low percentile</string>
     <string name="set_fea_norm_low_hint">hrNorm = (hr − P_low) / (P_high − P_low) over the night.</string>
     <string name="set_fea_norm_high_title">Normalization high percentile</string>
@@ -197,7 +197,7 @@
     <string name="set_post_calibration_iterations_title">Calibration iterations</string>
     <string name="set_post_calibration_iterations_hint">Maximum number of calibration iterations.</string>
     <string name="set_per_enabled_title">Personal model</string>
-    <string name="set_per_enabled_hint">Calibrate to reference nights and adapt to your nights every few weeks.</string>
+    <string name="set_per_enabled_hint">Use the personal model that Calibrate on the Compare tab fits on reference nights. With the HMM, also adapt to your nights every few weeks.</string>
     <string name="set_per_em_every_title">Adapt every</string>
     <string name="set_per_em_every_hint">The population adaptation (EM) runs after this many newly estimated nights.</string>
     <string name="set_per_em_prior_title">Adaptation prior strength</string>

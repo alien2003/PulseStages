@@ -65,7 +65,7 @@
     <string name="home_model_label">Модель</string>
 
     <string name="home_counters_title">Исходные сессии</string>
-    <string name="home_counters_hint">Сессии сна включённых источников в записях приложения. Устаревшие ночи оценены с другими настройками.</string>
+    <string name="home_counters_hint">Сессии сна других приложений в записях приложения, включая сессии источников, отключённых позже. Устаревшие ночи оценены с другими настройками.</string>
     <string name="home_counter_found">найдено</string>
     <string name="home_counter_estimated">оценено</string>
     <string name="home_counter_skipped">пропущено</string>

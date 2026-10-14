@@ -97,7 +97,7 @@ jobs:
             [ -n "${!name:-}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Repository secrets not set: ${missing[*]} (README, \"Signing secrets\")"
+            echo "::error::Repository secrets not set: ${missing[*]} (docs/development.md, \"Signing secrets\")"
             exit 1
           fi
           umask 077
@@ -266,6 +266,7 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
           OUT_DIR: ${{ steps.apks.outputs.dir }}
           RELEASE_CERT: ${{ steps.apks.outputs.release_cert }}
+          DEBUG_CERT: ${{ steps.apks.outputs.debug_cert }}
         run: |
           set -euo pipefail
           notes="$RUNNER_TEMP/release-notes.md"
@@ -281,12 +282,14 @@ jobs:
           |---|---|
           | \`PulseStages-$VERSION_NAME.apk\` | Signed release build for everyday use. Later releases install over it as updates. |
           | \`PulseStages-$VERSION_NAME-debug.apk\` | Debug build for testing, with the demo mode. |
-          | \`SHA256SUMS.txt\` | SHA-256 checksums of both APKs: \`sha256sum -c SHA256SUMS.txt\` |
+          | \`SHA256SUMS.txt\` | SHA-256 checksums of both APKs: \`sha256sum -c --ignore-missing SHA256SUMS.txt\` |
 
           The two APKs are signed with different keys, so neither can update the other. To switch, uninstall first.
           The sessions PulseStages wrote stay in Health Connect; grant its permissions again after the reinstall.
 
           Release signing certificate SHA-256: \`$RELEASE_CERT\`
+
+          Debug signing certificate SHA-256: \`$DEBUG_CERT\` (a later debug APK installs over an earlier one only if this value is the same)
           EOF
           } > "$notes"
 

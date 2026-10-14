@@ -29,7 +29,7 @@
     <string name="cd_app_icon">Значок: %1$s</string>
     <string name="cd_filter_selected">Выбрано</string>
     <string name="format_duration_hours_minutes">%1$d ч %2$02d мин</string>
-    <string name="format_percent">%1$d %%</string>
+    <string name="format_percent">%1$d\u00A0%%</string>
     <string name="format_bpm">%1$d уд/мин</string>
     <string name="format_seconds">%1$d с</string>
     <string name="format_value_unit">%1$s %2$s</string>
@@ -107,7 +107,7 @@
     <string name="nights_empty_title">Ночей пока нет</string>
     <string name="nights_empty_body">Ночи появятся здесь, когда PulseStages прочитает сессии сна из Health Connect и оценит их стадии.</string>
     <string name="nights_time_range">%1$s–%2$s · %3$s</string>
-    <string name="nights_stage_share">%1$s %2$s</string>
+    <string name="nights_stage_share">%1$s\u00A0%2$s</string>
     <string name="nights_quality">Уверенность %1$s · покрытие %2$s</string>
     <string name="night_detail_title">Ночь</string>
     <string name="night_not_found_title">Ночь не найдена</string>

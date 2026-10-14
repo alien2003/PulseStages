@@ -11,7 +11,7 @@ name: Release
 # tag. With dry_run unchecked on a v* tag, it publishes that tag's release like a tag push.
 #
 # Repository secrets: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD (release key, required) and
-# DEBUG_KEYSTORE_BASE64 (optional fixed debug key). See README, "GitHub: CI and releases".
+# DEBUG_KEYSTORE_BASE64 (optional fixed debug key). See docs/development.md, "Releases".
 
 on:
   push:

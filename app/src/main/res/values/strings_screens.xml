@@ -65,7 +65,7 @@
     <string name="home_model_label">Model</string>
 
     <string name="home_counters_title">Source sessions</string>
-    <string name="home_counters_hint">Sleep sessions of the enabled sources in the app\'s records. Stale nights were estimated with other settings.</string>
+    <string name="home_counters_hint">Sleep sessions of other apps in the app\'s records, including those of sources disabled later. Stale nights were estimated with other settings.</string>
     <string name="home_counter_found">found</string>
     <string name="home_counter_estimated">estimated</string>
     <string name="home_counter_skipped">skipped</string>

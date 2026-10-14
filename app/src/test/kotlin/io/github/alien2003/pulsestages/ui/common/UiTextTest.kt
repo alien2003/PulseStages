@@ -23,7 +23,7 @@ class UiTextTest {
 
     @Test
     fun `a text with arguments is formatted, nested texts first`() {
-        assertEquals("23 %", UiText.of(R.string.format_percent, 23).resolve(resources))
+        assertEquals("23\u00A0%", UiText.of(R.string.format_percent, 23).resolve(resources))
         assertEquals("42 %", UiText.of(R.string.format_value_unit, "42", UiText.of(R.string.unit_percent)).resolve(resources))
     }
 

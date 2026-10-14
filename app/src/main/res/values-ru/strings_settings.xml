@@ -4,7 +4,7 @@
     <string name="set_src_hr_sources_title">Пульс и шаги от</string>
     <string name="set_src_hr_sources_hint">Приложение, записавшее сессию сна, или любое приложение, пишущее пульс и шаги.</string>
     <string name="set_src_min_session_title">Минимальная длина сессии</string>
-    <string name="set_src_min_session_hint">Более короткие сессии (после объединения фрагментов) считаются дрёмой и пропускаются.</string>
+    <string name="set_src_min_session_hint">Более короткие сессии (после объединения фрагментов) не обрабатываются; более длинные сессии короче порога дневного сна обрабатываются как дневной сон.</string>
     <string name="set_src_merge_gap_title">Разрыв для объединения</string>
     <string name="set_src_merge_gap_hint">Фрагменты одной ночи от одного приложения с меньшим разрывом объединяются; разрыв записывается как бодрствование.</string>
     <string name="set_src_backfill_days_title">Глубина истории</string>
@@ -48,7 +48,7 @@
     <string name="set_pre_rules_min_coverage_title">Покрытие для правил</string>
     <string name="set_pre_rules_min_coverage_hint">Между этим значением и минимальным покрытием используется оценщик по правилам; ниже — ночь пропускается.</string>
     <string name="set_pre_min_session_title">Порог сессии в оценщике</string>
-    <string name="set_pre_min_session_hint">Более короткие сессии не оцениваются; 0 = выключено (дрёма отсекается настройкой источника).</string>
+    <string name="set_pre_min_session_hint">Более короткие сессии не оцениваются; 0 = выключено (сессии короче минимальной длины сессии источников и так не обрабатываются).</string>
     <string name="set_fea_norm_low_title">Нижний перцентиль нормировки</string>
     <string name="set_fea_norm_low_hint">hrNorm = (hr − P_низ) / (P_верх − P_низ) за ночь.</string>
     <string name="set_fea_norm_high_title">Верхний перцентиль нормировки</string>
@@ -197,7 +197,7 @@
     <string name="set_post_calibration_iterations_title">Итерации калибровки</string>
     <string name="set_post_calibration_iterations_hint">Максимальное число итераций калибровки.</string>
     <string name="set_per_enabled_title">Личная модель</string>
-    <string name="set_per_enabled_hint">Калибровка по эталонным ночам и адаптация к вашим ночам раз в несколько недель.</string>
+    <string name="set_per_enabled_hint">Использовать личную модель, которую «Калибровать» на вкладке «Сравнение» подбирает по эталонным ночам. С HMM — также адаптация к вашим ночам раз в несколько недель.</string>
     <string name="set_per_em_every_title">Адаптировать каждые</string>
     <string name="set_per_em_every_hint">Адаптация по всем ночам (EM) запускается после стольких новых оценённых ночей.</string>
     <string name="set_per_em_prior_title">Сила приора адаптации</string>

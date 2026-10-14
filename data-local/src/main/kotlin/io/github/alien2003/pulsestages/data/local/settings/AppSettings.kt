@@ -50,7 +50,10 @@ data class SourceSettings(
     val manualPackages: List<String> = emptyList(),
     /** Origin of heart rate and steps. */
     val hrSources: HrSourcesMode = HrSourcesMode.SAME_AS_SLEEP,
-    /** Sessions shorter than this (after merging fragments) are naps and skipped. */
+    /**
+     * Sessions shorter than this (after merging fragments) are ignored; longer ones below `napMode.maxSessionMin` are
+     * processed as naps.
+     */
     val minSessionMin: Int = 90,
     /** Fragments of one night from one source with a smaller gap are merged. */
     val mergeGapMin: Int = 30,
