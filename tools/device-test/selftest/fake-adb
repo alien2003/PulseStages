@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# A fake adb for run-selftest.sh: answers the calls run-device-tests.sh makes, keeps the phone's state in
+# $FAKE_STATE and logs every call to $FAKE_STATE/calls.log. Knobs (environment):
+#   FAKE_READ_STDIN=1        read stdin like `adb shell` does (a reader in a background process group would stop)
+#   FAKE_SLEEP_CLASS, FAKE_SLEEP   the test class whose instrumentation takes FAKE_SLEEP seconds
+#   FAKE_CLEANUP_FAILS=N     the first N cleanup instrumentations fail
+#   FAKE_FAIL_RESTORE=1      `settings put` fails
+#   FAKE_LOCK=locked|unknown the lock screen as `dumpsys window policy` shows it (default: unlocked)
+#   FAKE_ACTIVE_UNTIL=EPOCH  one of the app's jobs is active until then
+state="${FAKE_STATE:?}"
+printf '%s %s\n' "$(date +%T)" "$*" >>"$state/calls.log"
+if [[ -n "${FAKE_READ_STDIN:-}" ]]; then
+  python3 -I -c 'import os, threading, time
+threading.Thread(target=lambda: os.read(0, 1024), daemon=True).start()
+time.sleep(0.2)'
+fi
+args=("$@")
+[[ "${args[0]}" == "-s" ]] && args=("${args[@]:2}")
+readonly APP="io.github.alien2003.pulsestages"
+
+instrument() {
+  local rest="$1" cls run fail=0 count
+  touch "$state/force-stopped"
+  rm -f "$state/rearmed"
+  cls="$(sed -n 's/.*-e class [^ ]*\.\([A-Za-z0-9]*\) .*/\1/p' <<<"$rest")"
+  run="$(sed -n 's/.*-e e2eRunId \([^ ]*\) .*/\1/p' <<<"$rest")"
+  printf '%s' "$run" >"$state/run-id"
+  printf '%s %s\n' "$cls" "$rest" >>"$state/instrumentations.log"
+  echo "INSTRUMENTATION_STATUS: class=$cls"
+  echo "INSTRUMENTATION_STATUS_CODE: 1"
+  echo "INSTRUMENTATION_STATUS: e2e=progress of $cls"
+  echo "INSTRUMENTATION_STATUS_CODE: 2"
+  if [[ -n "${FAKE_SLEEP_CLASS:-}" && "$cls" == "$FAKE_SLEEP_CLASS" ]]; then
+    sleep "${FAKE_SLEEP:-20}"
+  fi
+  if [[ "$cls" == CleanupE2eTest && -n "${FAKE_CLEANUP_FAILS:-}" ]]; then
+    count="$(cat "$state/cleanup-failures" 2>/dev/null || echo 0)"
+    if ((count < FAKE_CLEANUP_FAILS)); then
+      fail=1
+      echo $((count + 1)) >"$state/cleanup-failures"
+    fi
+  fi
+  if ((fail)); then
+    printf 'INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: no read could verify the cleanup\n'
+    printf 'INSTRUMENTATION_STATUS_CODE: -2\nINSTRUMENTATION_RESULT: stream=\nFAILURES!!!\nINSTRUMENTATION_CODE: -1\n'
+  else
+    printf 'INSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\nOK (1 test)\nINSTRUMENTATION_CODE: -1\n'
+  fi
+}
+
+job_dump() {
+  echo "Registered 2 jobs:"
+  if [[ ! -f "$state/force-stopped" || -f "$state/rearmed" ]]; then
+    echo "  JOB #u0a250/12: 7d0f1c3 $APP/androidx.work.impl.background.systemjob.SystemJobService"
+    echo "  JOB #u0a250/13: 7d0f1c4 $APP/androidx.work.impl.background.systemjob.SystemJobService"
+  fi
+  echo "  Pending queue:"
+  echo "  Active jobs:"
+  if [[ -n "${FAKE_ACTIVE_UNTIL:-}" ]] && (($(date +%s) < FAKE_ACTIVE_UNTIL)); then
+    echo "    Slot #0: JOB #u0a250/12: 7d0f1c3 $APP/androidx.work.impl.background.systemjob.SystemJobService"
+  fi
+  echo "  Done."
+}
+
+case "${args[0]}" in
+  devices) printf 'List of devices attached\r\nFAKE123\tdevice\r\n\r\n' ;;
+  install) touch "$state/installed" && printf 'Performing Streamed Install\nSuccess\n' ;;
+  uninstall) rm -f "$state/installed" && echo "Success" ;;
+  logcat) echo "a logcat line" ;;
+  pull)
+    if [[ "${args[1]}" == *base.apk ]]; then
+      cp "$FAKE_APK" "${args[2]}"
+    else
+      mkdir -p "${args[2]}/e2e/status"
+      now=$(($(date +%s) * 1000))
+      run="$(cat "$state/run-id" 2>/dev/null)"
+      printf '%s\t300\t%s\tx\n%s\t200\t%s\tx\n%s\t999\tanother-run\tx\n' "$now" "$run" "$((now - 120000))" "$run" "$((now - 600000))" \
+        >"${args[2]}/e2e/read-ledger.tsv"
+    fi
+    ;;
+  shell)
+    rest="${args[*]:1}"
+    case "$rest" in
+      "getprop "*) echo "X" ;;
+      "dumpsys package $APP") printf '  versionCode=10099 minSdk=28 targetSdk=36\r\n  versionName=0.1.0\r\n' ;;
+      "pm path $APP") printf 'package:/data/app/~~x==/%s-y==/base.apk\r\n' "$APP" ;;
+      "pm list instrumentation")
+        [[ -f "$state/installed" ]] && echo "instrumentation:$APP.test/$APP.e2e.E2eRunner (target=$APP)"
+        ;;
+      "pm list packages $APP.test") [[ -f "$state/installed" ]] && echo "package:$APP.test" ;;
+      "dumpsys power") echo "  mWakefulness=Awake" ;;
+      "dumpsys window policy")
+        case "${FAKE_LOCK:-unlocked}" in
+          unlocked) printf '    KeyguardServiceDelegate\n      showing=false\n' ;;
+          locked) printf '    KeyguardServiceDelegate\n      showing=true\n' ;;
+        esac
+        ;;
+      "dumpsys activity activities") echo "  (nothing about the keyguard)" ;;
+      "dumpsys jobscheduler $APP") job_dump ;;
+      "date +%s") date +%s ;;
+      "date '+%m-%d %H:%M:%S.000'") date '+%m-%d %H:%M:%S.000' ;;
+      "settings get global stay_on_while_plugged_in") cat "$state/stay-on" 2>/dev/null || echo 0 ;;
+      "settings put global stay_on_while_plugged_in "*)
+        [[ -n "${FAKE_FAIL_RESTORE:-}" ]] && exit 1
+        echo "${rest##* }" >"$state/stay-on"
+        ;;
+      "settings delete global stay_on_while_plugged_in") rm -f "$state/stay-on" ;;
+      "svc power stayon usb") echo 2 >"$state/stay-on" ;;
+      "am force-stop $APP") touch "$state/force-stopped" ;;
+      "am start -W -n $APP/.MainActivity") touch "$state/rearmed" && echo "Status: ok" ;;
+      am\ instrument*) instrument "$rest" ;;
+      *) : ;;
+    esac
+    ;;
+  *) : ;;
+esac
+exit 0

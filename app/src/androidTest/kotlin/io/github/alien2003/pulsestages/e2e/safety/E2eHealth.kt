@@ -38,9 +38,20 @@ object E2eHealth {
         return SafetyGuardRepository(BackgroundRuleHealthRepository(platform, context.packageName, ProcessImportanceForegroundState))
     }
 
-    /** [guardedRepository] with every read charged to the run's [ReadBudget]. */
+    /** [guardedRepository] with every read charged to the run's [ReadBudget] ([ReadCharging.BUDGETED]). */
     fun budgetedRepository(
         logger: AppLogger,
         budget: ReadBudget = ReadBudget.shared(),
-    ): HealthRepository = BudgetedReadRepository(guardedRepository(logger), budget)
+    ): HealthRepository = BudgetedReadRepository(guardedRepository(logger), budget, ReadCharging.BUDGETED)
+
+    /** [guardedRepository] for reads earlier steps left room for: they wait for the window, never refused ([ReadCharging.RESERVED]). */
+    fun reservedRepository(logger: AppLogger): HealthRepository =
+        BudgetedReadRepository(guardedRepository(logger), ReadBudget.shared(), ReadCharging.RESERVED)
+
+    /**
+     * [guardedRepository] whose reads are only recorded, never held back or refused by the suite's budget
+     * ([ReadCharging.RECORDED]): the cleanup's, and the real write's while its test record exists.
+     */
+    fun recordedRepository(logger: AppLogger): HealthRepository =
+        BudgetedReadRepository(guardedRepository(logger), ReadBudget.shared(), ReadCharging.RECORDED)
 }

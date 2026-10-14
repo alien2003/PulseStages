@@ -4,8 +4,12 @@ import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
+import io.github.alien2003.pulsestages.data.local.sync.SyncStateStore
 import io.github.alien2003.pulsestages.e2e.E2e
+import io.github.alien2003.pulsestages.e2e.support.AppSettingsFile
+import io.github.alien2003.pulsestages.e2e.support.DemoFlag
 import kotlinx.serialization.Serializable
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -110,6 +114,35 @@ data class KeyEntry(
 )
 
 /**
+ * The app's local state that the suite must leave alone and can check without opening any of the app's stores: the
+ * bytes of the settings DataStore file, the bytes of the sync-state DataStore file (the Changes-API token and the run
+ * state: they change only when the app's own sync runs) and the debug build's demo-mode flag. Files are only read.
+ *
+ * @property settingsSha256 SHA-256 of `files/datastore/app_settings.json`, or null without the file.
+ * @property syncStateSha256 SHA-256 of `files/datastore/sync_state.preferences_pb`, or null without the file.
+ * @property demoFlag the persisted demo-mode flag.
+ */
+@Serializable
+data class LocalAppState(
+    val settingsSha256: String?,
+    val syncStateSha256: String?,
+    val demoFlag: DemoFlag,
+) {
+    /** Reading. */
+    companion object {
+        /** The state now. */
+        fun now(): LocalAppState =
+            LocalAppState(
+                settingsSha256 = AppSettingsFile.currentSha256(),
+                syncStateSha256 = fileSha256(File(E2e.app.filesDir, "datastore/${SyncStateStore.FILE_NAME}.preferences_pb")),
+                demoFlag = DemoFlag.read(),
+            )
+
+        private fun fileSha256(file: File): String? = file.takeIf { it.isFile }?.readBytes()?.let(::sha256)
+    }
+}
+
+/**
  * What Health Connect holds before or after the run, as far as the suite could possibly touch it, plus the context.
  *
  * @property runId id of the run.
@@ -125,7 +158,7 @@ data class KeyEntry(
  * @property otherSleep other apps' sleep sessions of all time, per package.
  * @property heartRate heart-rate records in [SnapshotWindow.seriesFromMs]..[SnapshotWindow.seriesToMs], per package.
  * @property steps steps records in the same range, per package.
- * @property work the app's WorkManager works.
+ * @property local the app's settings file, sync state and demo-mode flag.
  * @property readCallsCharged read calls of this run so far (after the snapshot).
  */
 @Serializable
@@ -143,7 +176,7 @@ data class SafetySnapshot(
     val otherSleep: Map<String, Fingerprint>,
     val heartRate: Map<String, Fingerprint>,
     val steps: Map<String, Fingerprint>,
-    val work: List<WorkEntry>,
+    val local: LocalAppState,
     val readCallsCharged: Int,
 ) {
     /** The app's own records outside the test namespace (the 8 real nights). */
@@ -153,7 +186,10 @@ data class SafetySnapshot(
     val testRecords: List<OwnRecord> get() = own.filter { it.isTestRecord }
 }
 
-/** Takes [SafetySnapshot]s. Read-only: own sessions through the guarded repository, everything else through [ReadOnlyHealthConnect]. */
+/**
+ * Takes [SafetySnapshot]s. Read-only: own sessions through the guarded [repository], every other record through
+ * [reader]; both charge their reads to the run's budget as they were built to ([ReadCharging]).
+ */
 class SafetySnapshots(
     private val repository: HealthRepository,
     private val reader: ReadOnlyHealthConnect = ReadOnlyHealthConnect(),
@@ -193,7 +229,7 @@ class SafetySnapshots(
             otherSleep = fingerprints(sleep.filter { it.packageName != ownPackage }),
             heartRate = fingerprints(heartRate),
             steps = fingerprints(steps),
-            work = WorkSnapshot.take(),
+            local = LocalAppState.now(),
             readCallsCharged = ReadBudget.shared().spent(),
         )
     }

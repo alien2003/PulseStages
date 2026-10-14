@@ -48,8 +48,11 @@ data class WorkEntry(
 )
 
 /**
- * Reads the app's WorkManager works. READ-ONLY: only `getWorkInfosForUniqueWork` and `getWorkInfosByTag` are called
- * (queries of WorkManager's database); nothing is enqueued, cancelled, updated or run.
+ * Reads the works of THIS PROCESS's WorkManager: in the suite that is the in-memory WorkManager of
+ * [io.github.alien2003.pulsestages.e2e.support.E2eWorkManager], into which the app's start-up code and screens enqueue
+ * (the app's real WorkManager database is never opened by the suite). The UI tour compares it before and after to see
+ * whether a screen asked for work. READ-ONLY: only `getWorkInfosForUniqueWork` and `getWorkInfosByTag` are called;
+ * nothing is enqueued, cancelled, updated or run.
  */
 object WorkSnapshot {
     /** Every unique work of the app ([WorkJob]) plus every other work carrying the app's tag (night recomputes). */

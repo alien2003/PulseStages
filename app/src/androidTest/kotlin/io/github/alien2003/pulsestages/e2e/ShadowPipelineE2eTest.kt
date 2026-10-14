@@ -27,7 +27,8 @@ import org.junit.runner.RunWith
 /**
  * The app's whole pipeline (backfill engine, Changes-API sync, recompute, the real SleepStager with the bundled model)
  * over the user's real Health Connect history, WITHOUT writing anything ([ShadowRun] has the scenarios):
- * - reads go to the real HealthConnectRepository (behind the safety guard, charged to the read budget, cached);
+ * - reads go to the real HealthConnectRepository (behind the safety guard, charged to the read budget, cached); the
+ *   step may not spend the share of the budget the later steps need (a hard cap: [ReadBudget.capThisProcess]);
  * - writes and deletes are captured by [io.github.alien2003.pulsestages.e2e.shadow.ShadowWriteRepository] and never
  *   forwarded;
  * - the ledger is an in-memory Room database of the app's database class, the DataStores are temporary files below
@@ -45,9 +46,14 @@ class ShadowPipelineE2eTest {
         runBlocking {
             val logger = E2eLogger()
             val budget = ReadBudget.shared()
+            budget.capThisProcess(budget.total - reserveForLaterSteps())
+            E2e.progress(
+                "shadow pipeline: at most ${budget.remaining()} read calls " +
+                    "(the rest of the run's ${budget.total} is kept for the later steps)",
+            )
             val reads = CachingReadRepository(E2eHealth.budgetedRepository(logger, budget))
             val models = BundledHybridModelProvider(AndroidModelAssetSource(E2e.app.assets), logger, Dispatchers.IO)
-            val run = ShadowRun(reads, models, logger, budget, reserveForLaterSteps())
+            val run = ShadowRun(reads, models, logger, budget)
             val forwardedBefore = SafetyGuardRepository.forwardedWrites.get()
             ShadowEnvironment.removeLeftovers()
             try {
@@ -86,16 +92,18 @@ class ShadowPipelineE2eTest {
         }
 
     /**
-     * Read calls kept for the steps after this one: the "after" snapshot (as large as the "before" one), the UI tour and
-     * the real write.
+     * Read calls kept for the steps after this one: the "after" snapshot (as large as the "before" one, with a margin
+     * for records added since), the real write (its preparation reads up to 8 nights), and the UI tour (its own two
+     * reads of the app's records and the room it leaves for the app's screens).
      */
     private fun reserveForLaterSteps(): Int {
         val snapshot = E2e.readJson<SafetySnapshot>(E2eFiles.SNAPSHOT_BEFORE)?.readCallsCharged ?: DEFAULT_SNAPSHOT_COST
-        return snapshot + UI_AND_WRITE_RESERVE
+        return snapshot + snapshot / SNAPSHOT_MARGIN_DIVISOR + UI_AND_WRITE_RESERVE
     }
 
     private companion object {
         const val DEFAULT_SNAPSHOT_COST = 400
+        const val SNAPSHOT_MARGIN_DIVISOR = 4
         const val UI_AND_WRITE_RESERVE = 900
         const val MAX_WARNINGS = 200
         const val MAX_SHOWN = 40

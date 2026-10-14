@@ -14,8 +14,9 @@ import org.junit.runner.RunWith
 
 /**
  * The verdict of the run: the "before" and "after" snapshots compared ([SnapshotComparison]): other apps' records
- * unchanged, the app's own `ps:` records byte-identical, no `ps-e2e:` record left. Reads only the two JSON files (no
- * Health Connect call). Writes `e2e/compare.json` and `e2e/compare.md`.
+ * unchanged, the app's own `ps:` records byte-identical, no `ps-e2e:` record left, the app's settings file, sync state
+ * and demo-mode flag unchanged. Reads only the two JSON files (no Health Connect call). Writes `e2e/compare.json` and
+ * `e2e/compare.md`.
  */
 @RunWith(AndroidJUnit4::class)
 class E2eCompareTest {
@@ -50,6 +51,13 @@ class E2eCompareTest {
             appendLine("|---|---|---|")
             appendLine("| The app's own sessions (outside `ps-e2e:`) | ${report.appRecordsBefore} | ${report.appRecordsAfter} |")
             appendLine("| Sessions of the suite (`ps-e2e:`) | ${before.testRecords.size} | ${after.testRecords.size} |")
+            appendLine(
+                "| The app's settings file (SHA-256) | ${short(before.local.settingsSha256)} | ${short(after.local.settingsSha256)} |",
+            )
+            appendLine(
+                "| The app's sync state (SHA-256) | ${short(before.local.syncStateSha256)} | ${short(after.local.syncStateSha256)} |",
+            )
+            appendLine("| Demo-mode flag | ${before.local.demoFlag} | ${after.local.demoFlag} |")
             (before.otherSleep.keys + after.otherSleep.keys).sorted().forEach { pkg ->
                 appendLine(
                     "| Sleep of `$pkg` (all history) | ${before.otherSleep[pkg]?.count ?: 0} | ${after.otherSleep[pkg]?.count ?: 0} |",
@@ -69,6 +77,8 @@ class E2eCompareTest {
             section("Hints", report.hints)
         }
 
+    private fun short(sha256: String?): String = sha256?.take(SHORT_HASH) ?: "no file"
+
     private fun StringBuilder.section(
         title: String,
         lines: List<String>,
@@ -77,5 +87,9 @@ class E2eCompareTest {
         appendLine()
         if (lines.isEmpty()) appendLine("None.") else lines.forEach { appendLine("- $it") }
         appendLine()
+    }
+
+    private companion object {
+        const val SHORT_HASH = 12
     }
 }

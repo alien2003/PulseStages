@@ -41,8 +41,9 @@ android {
         // The on-device end-to-end suite (src/androidTest) runs against the INSTALLED debug app without reinstalling it:
         // tools/device-test/run-device-tests.sh installs only the test APK (assembleDebugAndroidTest) and starts each
         // class with `am instrument` (tools/device-test/README.md). Never use connectedAndroidTest for it: that task
-        // installs the app APK as well.
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // installs the app APK as well. E2eRunner installs an in-memory WorkManager before the app's Application.onCreate
+        // runs in the test process, so that no worker of the app can run there.
+        testInstrumentationRunner = "io.github.alien2003.pulsestages.e2e.E2eRunner"
     }
 
     androidResources {
@@ -287,6 +288,8 @@ dependencies {
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext.junit)
+    // The in-memory WorkManager of the suite's processes (E2eWorkManager); the app keeps its own WorkManager.
+    androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }

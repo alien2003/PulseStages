@@ -18,8 +18,11 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   apps' records unchanged); the backfill, sync and recompute pipeline over the real history with every write captured
   in memory, with invariant, idempotency, recompute and policy checks and a per-session report; one test record in the
   `ps-e2e:` namespace that is upserted, versioned and deleted within a minute; a read-only tour of every screen with
-  screenshots; a schedule report. A safety guard refuses every write or delete outside `ps-e2e:`, the read budget keeps
-  the suite within Health Connect's quota, and a cleanup step that always runs removes every test record
+  screenshots, whose clicks an allow-list restricts to what writes nothing; the app's job schedule before and after. A
+  safety guard refuses every write or delete of the suite outside `ps-e2e:`, an in-memory WorkManager keeps the app's
+  own background work out of the test processes, the read budget keeps the suite within Health Connect's background
+  quota across runs, and a cleanup step that always runs removes every test record (first by the ids recorded before
+  the write, without a read) and puts back the demo-mode flag
   ([tools/device-test/README.md](tools/device-test/README.md)).
 
 ## [0.1.0] - 2026-10-14

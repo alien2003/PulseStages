@@ -23,6 +23,7 @@ import androidx.compose.ui.test.performScrollToNode
 import io.github.alien2003.pulsestages.data.hc.HealthPermissions
 import io.github.alien2003.pulsestages.e2e.E2e
 import io.github.alien2003.pulsestages.e2e.safety.OwnRecord
+import io.github.alien2003.pulsestages.e2e.support.DemoFlag
 import io.github.alien2003.pulsestages.ui.common.formatDate
 import io.github.alien2003.pulsestages.ui.common.localDateTime
 import io.github.alien2003.pulsestages.ui.common.resolve
@@ -31,7 +32,7 @@ import java.time.ZoneId
 
 /**
  * The read-only tour of every screen of the real app ([io.github.alien2003.pulsestages.e2e.ReadOnlyUiTourE2eTest]).
- * Every click goes through [SafeClicks]; texts come from the installed app ([AppText]).
+ * Every click goes through [SafeClicks] as one of the [Allowed] kinds; texts come from the installed app ([AppText]).
  */
 class UiTour(
     private val compose: ComposeTestRule,
@@ -65,10 +66,10 @@ class UiTour(
     fun rationale() {
         val privacy = compose.onNode(hasText(AppText.string("home_action_privacy")) and hasClickAction())
         privacy.performScrollTo()
-        SafeClicks.click(privacy)
+        click(privacy, Allowed.Label("home_action_privacy"))
         waitFor(hasText(AppText.string("rationale_intro")), "the privacy page")
         Screenshots.take("rationale")
-        SafeClicks.click(compose.onNode(hasContentDescription(AppText.string("action_close")) and hasClickAction()))
+        click(compose.onNode(hasContentDescription(AppText.string("action_close")) and hasClickAction()), Allowed.Label("action_close"))
         waitGone(hasText(AppText.string("rationale_intro")), "the privacy page closing")
         log += "rationale: opened and closed"
     }
@@ -88,7 +89,7 @@ class UiTour(
             val option =
                 hasText(AppText.string(name)) and hasClickAction() and
                     hasAnyAncestor(hasContentDescription(AppText.string("nights_filter_label")))
-            SafeClicks.click(compose.onNode(option))
+            click(compose.onNode(option), Allowed.FilterOption(name))
             compose.waitForIdle()
             Screenshots.take("nights-${name.substringAfterLast('_')}")
         }
@@ -100,7 +101,7 @@ class UiTour(
         val night = appRecords.maxByOrNull { it.startMs } ?: return
         val date = dateOf(night)
         val row = scrollListTo(hasText(date) and hasClickAction())
-        SafeClicks.click(row)
+        click(row, Allowed.NightRow(date))
         // Two sessions may share a date (a night and a nap): the detail shows one of them.
         val sameDate = appRecords.filter { dateOf(it) == date }.mapNotNull { it.clientRecordId }
         waitForAny(sameDate.map { hasText(it) }, "the night detail")
@@ -108,23 +109,24 @@ class UiTour(
         val inspect = hasText(AppText.string("night_epoch_inspect")) and hasClickAction()
         waitFor(inspect, "the re-estimate of the night", INSPECTION_TIMEOUT_MS)
         compose.onNode(inspect).performScrollTo()
-        SafeClicks.click(compose.onNode(inspect))
+        click(compose.onNode(inspect), Allowed.Label("night_epoch_inspect"))
         waitFor(hasText(AppText.string("night_epoch_posteriors")), "the epoch panel")
-        SafeClicks.click(compose.onNode(hasContentDescription(AppText.string("cd_next_epoch")) and hasClickAction()))
+        click(compose.onNode(hasContentDescription(AppText.string("cd_next_epoch")) and hasClickAction()), Allowed.Label("cd_next_epoch"))
         compose.waitForIdle()
         Screenshots.take("night-epoch")
-        SafeClicks.click(compose.onNode(hasText(AppText.string("action_close")) and hasClickAction()))
+        click(compose.onNode(hasText(AppText.string("action_close")) and hasClickAction()), Allowed.Label("action_close"))
         waitGone(hasText(AppText.string("night_epoch_posteriors")), "the epoch panel closing")
         val compare = compose.onNode(hasText(AppText.string("night_action_compare_rules")) and hasClickAction())
         compare.performScrollTo()
-        SafeClicks.click(compare)
+        click(compare, Allowed.Label("night_action_compare_rules"))
         waitFor(hasText(AppText.string("night_compare_title")), "the comparison with RULES", INSPECTION_TIMEOUT_MS)
         compose.onNode(hasText(AppText.string("night_compare_title"))).performScrollTo()
         Screenshots.take("night-compare-rules")
         val back = compose.onAllNodes(hasContentDescription(AppText.string("action_back")) and hasClickAction()).fetchSemanticsNodes()
         if (back.isNotEmpty()) {
-            SafeClicks.click(
+            click(
                 compose.onAllNodes(hasContentDescription(AppText.string("action_back")) and hasClickAction()).onFirst(),
+                Allowed.Label("action_back"),
             )
         }
         log += "night detail: epoch panel and comparison with RULES shown (${if (back.isEmpty()) "two panes" else "own screen"})"
@@ -158,13 +160,13 @@ class UiTour(
             val collapse = hasContentDescription(AppText.string("cd_collapse_section", title)) and hasClickAction()
             val expandedBefore = compose.onAllNodes(collapse).fetchSemanticsNodes().isNotEmpty()
             if (!expandedBefore) {
-                SafeClicks.click(compose.onNode(expand))
+                click(compose.onNode(expand), Allowed.SectionToggle(title))
                 waitFor(collapse, "group ${section.id} expanded")
             }
             grid.performScrollToIndex(index + 1)
             Screenshots.take("settings-${section.id}")
             if (!expandedBefore) {
-                SafeClicks.click(compose.onNode(collapse))
+                click(compose.onNode(collapse), Allowed.SectionToggle(title))
                 waitFor(expand, "group ${section.id} collapsed")
             }
         }
@@ -176,14 +178,14 @@ class UiTour(
         Screenshots.take("settings-about")
     }
 
-    /** Demo mode on (Nights shows synthetic nights) and back to [previous]. */
+    /** Demo mode on (Nights shows synthetic nights) and back to [previous] (the persisted flag is restored by the test). */
     fun demoMode(previous: DemoFlag) {
         val row = { isToggleable() and hasText(AppText.string("demo_mode_title"), substring = true) }
         val grid = { compose.onNode(hasScrollToIndexAction()) }
         tab("tab_settings")
         grid().performScrollToIndex(SettingsCatalog.sections.size + 1)
         if (previous.enabled) compose.onNode(row()).assertIsOn() else compose.onNode(row()).assertIsOff()
-        SafeClicks.click(compose.onNode(row()), allowToggle = true)
+        click(compose.onNode(row()), Allowed.DemoSwitch)
         if (previous.enabled) compose.onNode(row()).assertIsOff() else compose.onNode(row()).assertIsOn()
         tab("tab_nights")
         val banner = hasText(AppText.string("demo_banner"))
@@ -191,7 +193,7 @@ class UiTour(
         Screenshots.take(if (previous.enabled) "nights-real" else "nights-demo")
         tab("tab_settings")
         grid().performScrollToIndex(SettingsCatalog.sections.size + 1)
-        SafeClicks.click(compose.onNode(row()), allowToggle = true)
+        click(compose.onNode(row()), Allowed.DemoSwitch)
         if (previous.enabled) compose.onNode(row()).assertIsOn() else compose.onNode(row()).assertIsOff()
         log += "demo mode: switched to ${!previous.enabled} and back to ${previous.enabled}"
     }
@@ -209,21 +211,27 @@ class UiTour(
         shot: String,
     ) {
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
-        SafeClicks.click(compose.onAllNodes(hasText(AppText.string(name)) and hasClickAction()).onFirst())
+        click(compose.onAllNodes(hasText(AppText.string(name)) and hasClickAction()).onFirst(), Allowed.Label(name))
         waitFor(loaded, "the $shot screen")
         val progress = SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo.Indeterminate)
         runCatching { compose.waitUntil(LOAD_TIMEOUT_MS) { count(progress) == 0 } }
         Screenshots.take(shot)
-        SafeClicks.click(compose.onNode(hasContentDescription(AppText.string("action_back")) and hasClickAction()))
+        click(compose.onNode(hasContentDescription(AppText.string("action_back")) and hasClickAction()), Allowed.Label("action_back"))
         waitFor(hasText(AppText.string("settings_actions_title")), "the settings again")
         log += "$shot: loaded"
     }
 
     private fun tab(name: String) {
         val tab = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and hasText(AppText.string(name))
-        SafeClicks.click(compose.onNode(tab))
+        click(compose.onNode(tab), Allowed.Tab(name))
         compose.waitForIdle()
     }
+
+    /** Every click of the tour: through [SafeClicks] only. */
+    private fun click(
+        target: SemanticsNodeInteraction,
+        allowed: Allowed,
+    ) = SafeClicks.click(compose, target, allowed)
 
     /** Scrolls the lazy list that contains [matcher] (in two panes there may be two lists) to it. */
     private fun scrollListTo(matcher: SemanticsMatcher): SemanticsNodeInteraction {

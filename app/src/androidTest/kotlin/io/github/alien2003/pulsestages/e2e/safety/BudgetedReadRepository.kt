@@ -17,16 +17,19 @@ import io.github.alien2003.pulsestages.data.hc.WriteResult
 import kotlin.math.ceil
 
 /**
- * Charges every read of [delegate] (the guarded real repository) to [budget]: one call before it (waiting for room in
- * the 15-minute window, refused when the run's budget is used up), then the further pages the result implies. The
- * repository pages internally, so the pages are estimated from the result: sleep sessions exactly, heart rate and
- * steps with [PADDING_FACTOR] for the 24 hours of left padding the repository reads and drops. Permission, feature and
- * availability checks are no data reads and are not charged. Writes and deletes go to [delegate] (the guard) unchanged.
+ * Charges every read of [delegate] (the guarded real repository) to [budget] as [charging] says: one call before it
+ * (a budgeted call waits for room in the 15-minute window and is refused when the run's budget is used up; a recorded
+ * one never waits), then the further pages the result implies. The repository pages internally, so the pages are
+ * estimated from the result: sleep sessions exactly, heart rate and steps with [PADDING_FACTOR] for the 24 hours of
+ * left padding the repository reads and drops. Permission, feature and availability checks are no data reads and are
+ * not charged, nor are the read-backs inside [writeEstimatedSession] (the app's VerifiedUpsert). Writes and deletes go
+ * to [delegate] (the guard) unchanged.
  */
 @Suppress("TooManyFunctions") // The wide HealthRepository boundary.
 class BudgetedReadRepository(
     private val delegate: HealthRepository,
     private val budget: ReadBudget,
+    private val charging: ReadCharging,
 ) : HealthRepository {
     override fun availability(): HcAvailability = delegate.availability()
 
@@ -112,7 +115,7 @@ class BudgetedReadRepository(
         pagesOf: (T) -> Int,
         call: suspend () -> T,
     ): T {
-        budget.acquire(1, operation)
+        budget.acquire(1, operation, charging)
         val result =
             try {
                 call()

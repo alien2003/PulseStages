@@ -35,8 +35,10 @@ data class RealWriteStep(
 
 /**
  * The upserts and the delete of [io.github.alien2003.pulsestages.e2e.RealWriteE2eTest] on ONE record with a fresh
- * test-namespace id; every write goes through [repository] (the guarded real repository) or the guarded plain insert.
- * Everything is prepared in the constructor, before the first write.
+ * test-namespace id; every write goes through [repository] (the guarded real repository, whose reads the suite's budget
+ * never holds back: [io.github.alien2003.pulsestages.e2e.safety.E2eHealth.recordedRepository]) or the guarded plain
+ * insert. Everything is prepared in the constructor, before the first write. A failed read is not retried for long
+ * (the repository's own retries take about 30 s): the test's `finally` deletes the record first.
  */
 class RealWriteSequence(
     private val repository: HealthRepository,

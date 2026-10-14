@@ -31,7 +31,7 @@ data class OriginDiff(
  * @property passed no failure.
  * @property failures what makes the comparison fail.
  * @property warnings what is reported but does not fail it.
- * @property hints explanations of the failures (e.g. the app's own scheduled work ran during the run).
+ * @property hints explanations of the failures.
  * @property appRecordsBefore the app's own records (outside the test namespace) before.
  * @property appRecordsAfter the same after.
  * @property testRecordsAfter records of the suite (`ps-e2e:`) left after the run.
@@ -54,6 +54,7 @@ data class ComparisonReport(
  * - the app's own records outside the test namespace must be identical (same ids, versions, lastModifiedTime, start,
  *   end, zone offsets, stages, title, notes) and none may be added or removed;
  * - no record of the suite (`ps-e2e:`) may be left;
+ * - the app's settings file, its sync state and the demo-mode flag must be unchanged ([LocalAppState]);
  * - other apps' records that existed before must all still exist with the same lastModifiedTime (sleep of all time,
  *   heart rate and steps of the snapshot window); records other apps ADDED during the run are reported as warnings,
  *   since PulseStages cannot write in another app's name (and holds no write permission for heart rate or steps).
@@ -67,6 +68,7 @@ object SnapshotComparison {
         val failures = mutableListOf<String>()
         val warnings = mutableListOf<String>()
         compareOwn(before, after, failures, warnings)
+        compareLocal(before.local, after.local, failures)
         val origins =
             diffs("sleep", before.otherSleep, after.otherSleep) +
                 diffs("heartRate", before.heartRate, after.heartRate) +
@@ -86,7 +88,7 @@ object SnapshotComparison {
             passed = failures.isEmpty(),
             failures = failures,
             warnings = warnings,
-            hints = hints(before, after, failures),
+            hints = hints(failures),
             appRecordsBefore = before.appRecords.size,
             appRecordsAfter = after.appRecords.size,
             testRecordsAfter = after.testRecords.size,
@@ -161,22 +163,26 @@ object SnapshotComparison {
             )
         }
 
-    /** Explanations: did the app's own scheduled work run between the snapshots? */
-    private fun hints(
-        before: SafetySnapshot,
-        after: SafetySnapshot,
-        failures: List<String>,
-    ): List<String> {
-        if (failures.isEmpty()) return emptyList()
-        val beforeById = before.work.associateBy { it.id }
-        val ran =
-            after.work.filter { entry ->
-                val old = beforeById[entry.id]
-                old == null || old.nextScheduleTimeMillis != entry.nextScheduleTimeMillis || old.runAttemptCount != entry.runAttemptCount ||
-                    old.state != entry.state
-            }
-        return ran.map {
-            "WorkManager work ${it.uniqueName ?: it.tags} (${it.id}) changed state or schedule during the run: it may have run"
-        }
+    private fun compareLocal(
+        before: LocalAppState,
+        after: LocalAppState,
+        failures: MutableList<String>,
+    ) {
+        if (before.settingsSha256 != after.settingsSha256) failures += "the app's settings file changed during the run"
+        if (before.syncStateSha256 != after.syncStateSha256) failures += "the app's sync state changed during the run"
+        if (before.demoFlag != after.demoFlag) failures += "the demo-mode flag is ${after.demoFlag}, it was ${before.demoFlag}"
     }
+
+    /** Explanations of the failures. */
+    private fun hints(failures: List<String>): List<String> =
+        if (failures.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(
+                "The app's own background work cannot run inside the suite's processes (their WorkManager is an in-memory " +
+                    "one), and the app's jobs are cancelled by every instrumentation start until the runner opens the app " +
+                    "at the end. A change of the app's records or local state therefore points at the suite, or at the app " +
+                    "opened by hand during the run.",
+            )
+        }
 }

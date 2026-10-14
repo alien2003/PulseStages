@@ -2,49 +2,13 @@ package io.github.alien2003.pulsestages.e2e.ui
 
 import android.app.KeyguardManager
 import android.app.UiAutomation
-import android.content.Context
 import android.graphics.Bitmap
 import android.os.PowerManager
-import androidx.core.content.edit
-import io.github.alien2003.pulsestages.demo.DemoModeStore
+import android.os.SystemClock
 import io.github.alien2003.pulsestages.e2e.E2e
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import java.io.FileOutputStream
-
-/**
- * The debug build's demo-mode switch as it is persisted ([DemoModeStore], its own preferences file). The UI tour
- * switches it with the real switch in Settings and back; [restore] puts back the exact previous value in a `finally`
- * (removing the key when there was none), so the next start of the app reads what it read before the run.
- *
- * @property present the key existed.
- * @property enabled its value (false when absent, as the app reads it).
- */
-data class DemoFlag(
-    val present: Boolean,
-    val enabled: Boolean,
-) {
-    /** Reading and restoring. */
-    companion object {
-        /** The key DemoModeStore stores the switch under. */
-        private const val KEY = "enabled"
-
-        private val preferences get() = E2e.app.getSharedPreferences(DemoModeStore.PREFERENCES, Context.MODE_PRIVATE)
-
-        /** The persisted value now. */
-        fun read(): DemoFlag {
-            val prefs = preferences
-            return DemoFlag(prefs.contains(KEY), prefs.getBoolean(KEY, false))
-        }
-
-        /** Writes [previous] back exactly (synchronously). */
-        fun restore(previous: DemoFlag) {
-            preferences.edit(commit = true) {
-                if (previous.present) putBoolean(KEY, previous.enabled) else remove(KEY)
-            }
-        }
-    }
-}
 
 /** Screenshots of the whole screen (UiAutomation) into `e2e/ui/`. */
 object Screenshots {
@@ -75,10 +39,36 @@ object Screenshots {
 
 /** What the UI tour needs from the phone. */
 object UiPreconditions {
-    /** Fails with a clear message unless the screen is on and the phone unlocked (the runner waits for that). */
-    fun requireUnlockedScreen() {
+    /** Instrumentation argument: how long to wait for the phone to be unlocked (the runner's --unlock-timeout). */
+    const val ARG_UNLOCK_TIMEOUT_SEC: String = "e2eUnlockTimeoutSec"
+
+    private const val DEFAULT_UNLOCK_TIMEOUT_SEC = 300
+    private const val POLL_MS = 2_000L
+    private const val ANNOUNCE_EVERY_MS = 20_000L
+    private const val SECOND_MS = 1_000L
+
+    /**
+     * Returns once the screen is on and the phone unlocked; until then asks for it (streamed to the runner) for up to
+     * `-e e2eUnlockTimeoutSec` seconds, then fails with a clear message. The suite never unlocks the phone itself.
+     */
+    fun awaitUnlockedScreen() {
         val power = E2e.app.getSystemService(PowerManager::class.java)
         val keyguard = E2e.app.getSystemService(KeyguardManager::class.java)
+        val timeoutMs = E2e.intArg(ARG_UNLOCK_TIMEOUT_SEC, DEFAULT_UNLOCK_TIMEOUT_SEC).coerceAtLeast(0) * SECOND_MS
+        val started = SystemClock.elapsedRealtime()
+        var announcedAt = Long.MIN_VALUE
+        while (!power.isInteractive || keyguard.isKeyguardLocked) {
+            val waited = SystemClock.elapsedRealtime() - started
+            if (waited >= timeoutMs) break
+            if (announcedAt == Long.MIN_VALUE || waited - announcedAt >= ANNOUNCE_EVERY_MS) {
+                announcedAt = waited
+                E2e.progress(
+                    "the phone is locked or its screen is off: UNLOCK IT NOW (PIN, pattern, fingerprint or face) and leave it on " +
+                        "(waiting ${(timeoutMs - waited) / SECOND_MS} s more)",
+                )
+            }
+            SystemClock.sleep(POLL_MS)
+        }
         assertTrue("the screen is off: unlock the phone and keep it on", power.isInteractive)
         assertFalse("the phone is locked: unlock it (PIN, pattern, fingerprint or face) and leave it on", keyguard.isKeyguardLocked)
     }

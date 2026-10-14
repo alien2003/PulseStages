@@ -297,11 +297,14 @@ Enable USB debugging on the phone, connect it and accept the prompt. Then, in a 
 `app/src/androidTest` holds an end-to-end suite that runs against the debug build **installed** on a phone and its real
 Health Connect data, without reinstalling the app and without leaving anything in Health Connect: safety snapshots
 before and after, the whole pipeline over the real history with every write captured in memory, one short-lived test
-record in the `ps-e2e:` namespace, and a read-only tour of every screen.
+record in the `ps-e2e:` namespace, and a read-only tour of every screen. Its instrumentation (`E2eRunner`) replaces
+WorkManager in the test process by an in-memory one before the app's `Application.onCreate` runs, so none of the app's
+workers can run there.
 `mise exec -- tools/device-test/run-device-tests.sh` builds and installs only the test APK and runs it;
 [tools/device-test/README.md](../tools/device-test/README.md) lists what it tests, every Health Connect call it can
 make, its safety guarantees and what you have to do on the phone. Do not use `connectedAndroidTest` for it: that task
-installs the app APK as well.
+installs the app APK as well. `tools/device-test/selftest/run-selftest.sh` checks the runner itself against a fake
+adb, without a phone.
 
 ## Continuous integration
 

@@ -10,7 +10,8 @@ import javax.xml.parsers.DocumentBuilderFactory
  * The on-device UI tour (src/androidTest, `e2e/ui/`) looks up the installed app's texts by resource NAME at run time,
  * including the labels of the actions it must never press. This checks at build time that every such name exists as a
  * string of the debug build (main + debug resources), so a renamed string cannot silently weaken the tour or its
- * refusal list: the names are the snake_case string literals of the tour's sources.
+ * refusal list: the names are the snake_case string literals of the tour's sources. It also checks that the refusal
+ * list covers every writing action and that the allow-list of what the tour may press holds none of them.
  */
 class E2eResourceNamesTest {
     private val sources: List<File> =
@@ -61,7 +62,35 @@ class E2eResourceNamesTest {
         )
     }
 
+    @Test
+    fun theAllowListHoldsNoWritingAction() {
+        val clicks = File("src/androidTest/kotlin/io/github/alien2003/pulsestages/e2e/ui/SafeClicks.kt").readText()
+        val allowed = ALLOW_LISTS.flatMap { list -> namesIn(clicks, "val $list: Set<String> =\\s*setOf\\(([^)]*)\\)") }
+        assertTrue(allowed.size >= 15, "the allow-list of SafeClicks was not found: $allowed")
+        val forbidden = namesIn(clicks, "val FORBIDDEN: List<String> =\\s*listOf\\(([^)]*)\\)")
+        assertTrue(forbidden.size > 30, "the deny-list of SafeClicks was not found: $forbidden")
+        val writing = allowed.filter { name -> name in forbidden || WRITING_ACTIONS.any { it.matches(name) } }
+        assertTrue(writing.isEmpty(), "SafeClicks allows clicks on actions that write, delete, schedule or export: $writing")
+    }
+
+    /** The resource names in the first group of [pattern] in [source]. */
+    private fun namesIn(
+        source: String,
+        pattern: String,
+    ): List<String> {
+        val block =
+            Regex(pattern)
+                .find(source)
+                ?.groupValues
+                ?.get(1)
+                .orEmpty()
+        return NAME.findAll(block).map { it.groupValues[1] }.toList()
+    }
+
     private companion object {
+        /** The allow-lists of SafeClicks: tabs, labels and the Nights filter's options. */
+        val ALLOW_LISTS = listOf("TABS", "LABELS", "FILTER_OPTIONS")
+
         /** A string literal that is a resource name: snake_case with at least one underscore. */
         val NAME = Regex("\"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\"")
 

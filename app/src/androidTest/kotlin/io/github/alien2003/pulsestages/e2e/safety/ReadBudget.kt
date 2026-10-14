@@ -7,16 +7,36 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
+ * How a read is charged to the [ReadBudget].
+ * - [BUDGETED]: waits for room in the 15-minute window and is refused once the run's (or this step's) budget is spent;
+ *   every read of the snapshots before the run, the shadow pipeline and the preparation of the real write.
+ * - [RESERVED]: waits for room in the window but is never refused; for reads whose cost earlier steps left over for
+ *   them (the "after" snapshot, the checks after the real write and the UI tour). The shadow step's cap keeps that room.
+ * - [RECORDED]: neither waits nor is refused, only recorded; for the cleanup (it must never be held back by the suite's
+ *   own budget) and for the verification reads while the test record exists (nothing may wait while it lives).
+ */
+enum class ReadCharging {
+    BUDGETED,
+    RESERVED,
+    RECORDED,
+}
+
+/**
  * Keeps the suite's Health Connect reads within a share of the quota of the app (the instrumentation runs as the app,
- * so its reads count against the app's quota: AOSP defaults 2000 reads per 15 min and 16000 per day in the foreground,
- * half of that in the background, docs/health-connect.md §7.2). Every real read call of the suite is charged here:
+ * so its reads count against the app's quota). The defaults assume the BACKGROUND quota, the lower one (AOSP defaults
+ * 1000 reads per 15 min and 8000 per day in the background, twice that in the foreground; docs/health-connect.md §7.2):
+ * an instrumentation without a visible activity may well be counted as a background caller. Every real read call of
+ * the suite is charged here ([ReadCharging] says how):
  * - at most [per15Min] calls in any 15-minute window: a call that would exceed it waits (the wait is streamed to the
  *   runner as progress);
- * - at most [total] calls in the whole run: a call beyond it is refused with [HealthDataException.QuotaExceeded] (the
- *   pipeline under test treats that like a real rate limit and stops the run, which the shadow test then reports).
+ * - at most [limit] calls in the whole run ([total], or less for one step with [capThisProcess]): a budgeted call
+ *   beyond it is refused with [HealthDataException.QuotaExceeded] (the pipeline under test treats that like a real
+ *   rate limit and stops, which the shadow test then reports).
  *
  * The charges are appended to `e2e/read-ledger.tsv`, so the windows span the separate instrumentation processes of one
- * run. Reads made by the app's own screens during the UI tour are not seen here; the UI tour waits for headroom first.
+ * run; the runner keeps the totals of earlier runs on this phone and passes a smaller [total] (and waits 15 minutes)
+ * when they were recent. Reads made by the app's own screens during the UI tour are not seen here: the UI tour waits
+ * for room for them first and charges that room afterwards.
  */
 class ReadBudget private constructor(
     private val ledger: File,
@@ -36,21 +56,29 @@ class ReadBudget private constructor(
     private val platformErrors = AtomicInteger(0)
     private val refusals = AtomicInteger(0)
 
+    @Volatile
+    private var processCap: Int = Int.MAX_VALUE
+
     /** Real rate-limit errors Health Connect returned to the suite. */
     val platformQuotaErrors: Int get() = platformErrors.get()
 
-    /** Calls refused because [total] was reached. */
+    /** Calls refused because [limit] was reached. */
     val refusedCalls: Int get() = refusals.get()
 
+    /** Calls a budgeted read may bring this run's total up to: [total], or the cap of this step. */
+    val limit: Int get() = minOf(total, processCap)
+
     init {
-        if (ledger.isFile) {
-            ledger.readLines().forEach { line ->
-                val parts = line.split('\t')
-                val at = parts.getOrNull(0)?.toLongOrNull()
-                val cost = parts.getOrNull(1)?.toIntOrNull()
-                if (at != null && cost != null) entries += Entry(at, cost, parts.getOrNull(2).orEmpty())
-            }
-        }
+        readLedger(ledger).forEach { entries += Entry(it.atMs, it.cost, it.runId) }
+    }
+
+    /**
+     * Caps the budgeted reads of this process (one step) at [maxSpent] calls of the run in all, so that the steps
+     * after it keep their share: the shadow pipeline may not read into what the "after" snapshot, the real write and
+     * the UI tour need.
+     */
+    fun capThisProcess(maxSpent: Int) {
+        processCap = maxSpent.coerceAtLeast(0)
     }
 
     /** Calls charged in this run so far. */
@@ -60,22 +88,24 @@ class ReadBudget private constructor(
     fun spentInWindow(nowMs: Long = System.currentTimeMillis()): Int =
         synchronized(entries) { entries.filter { it.atMs > nowMs - WINDOW_MS }.sumOf { it.cost } }
 
-    /** Calls still allowed in this run. */
-    fun remaining(): Int = (total - spent()).coerceAtLeast(0)
+    /** Budgeted calls still allowed in this run (and step). */
+    fun remaining(): Int = (limit - spent()).coerceAtLeast(0)
 
     /**
-     * Waits until [cost] more calls fit into the 15-minute window, then charges them for [who]. Throws
-     * [HealthDataException.QuotaExceeded] when the run's [total] is used up.
+     * Charges [cost] calls for [who] as [charging] says: a budgeted call is refused with
+     * [HealthDataException.QuotaExceeded] when the [limit] is reached; budgeted and reserved calls wait until they fit
+     * into the 15-minute window; recorded calls are only recorded.
      */
     suspend fun acquire(
         cost: Int,
         who: String,
+        charging: ReadCharging = ReadCharging.BUDGETED,
     ) {
-        if (spent() + cost > total) {
+        if (charging == ReadCharging.BUDGETED && spent() + cost > limit) {
             refusals.incrementAndGet()
-            throw HealthDataException.QuotaExceeded("e2e read budget of $total calls for this run is used up ($who)")
+            throw HealthDataException.QuotaExceeded("e2e read budget of $limit calls for this run is used up ($who)")
         }
-        awaitWindow(cost, who)
+        if (charging != ReadCharging.RECORDED) awaitWindow(cost, who)
         charge(cost, who)
     }
 
@@ -88,8 +118,11 @@ class ReadBudget private constructor(
         val now = System.currentTimeMillis()
         synchronized(entries) {
             entries += Entry(now, cost, E2e.runId)
-            ledger.parentFile?.mkdirs()
-            ledger.appendText("$now\t$cost\t${E2e.runId}\t$who\n")
+            // The ledger is bookkeeping: a failed append must never fail a read (least of all the cleanup's).
+            runCatching {
+                ledger.parentFile?.mkdirs()
+                ledger.appendText("$now\t$cost\t${E2e.runId}\t$who\n")
+            }
         }
     }
 
@@ -138,7 +171,7 @@ class ReadBudget private constructor(
         }
     }
 
-    /** Defaults and the process-wide instance. */
+    /** Defaults, the ledger file and the process-wide instance. */
     companion object {
         /** Instrumentation argument overriding [per15Min]. */
         const val ARG_PER_15_MIN: String = "e2eReadsPer15Min"
@@ -146,13 +179,17 @@ class ReadBudget private constructor(
         /** Instrumentation argument overriding [total]. */
         const val ARG_TOTAL: String = "e2eReadBudget"
 
-        /** 75 % of the foreground 15-minute read quota (2000). */
-        const val DEFAULT_PER_15_MIN: Int = 1500
+        /** 60 % of the background 15-minute read quota (1000), 30 % of the foreground one (2000). */
+        const val DEFAULT_PER_15_MIN: Int = 600
 
-        /** 37.5 % of the foreground daily read quota (16000), 75 % of the background one (8000). */
-        const val DEFAULT_TOTAL: Int = 6000
+        /** Half of the background daily read quota (8000), a quarter of the foreground one (16000). */
+        const val DEFAULT_TOTAL: Int = 4000
+
+        /** File name of the ledger inside the e2e directory; kept (pruned to a day) when a run starts. */
+        const val LEDGER_FILE: String = "read-ledger.tsv"
 
         private const val WINDOW_MS = 15L * 60 * 1000
+        private const val DAY_MS = 24L * 60 * 60 * 1000
         private const val SAFETY_MARGIN_MS = 2_000L
         private const val SECOND_MS = 1_000L
         private const val MAX_SINGLE_WAIT_MS = 60_000L
@@ -164,10 +201,36 @@ class ReadBudget private constructor(
         fun shared(): ReadBudget =
             instance ?: synchronized(this) {
                 instance ?: ReadBudget(
-                    ledger = E2e.file("read-ledger.tsv"),
+                    ledger = E2e.file(LEDGER_FILE),
                     per15Min = E2e.intArg(ARG_PER_15_MIN, DEFAULT_PER_15_MIN).coerceAtLeast(1),
                     total = E2e.intArg(ARG_TOTAL, DEFAULT_TOTAL).coerceAtLeast(1),
                 ).also { instance = it }
+            }
+
+        /** Drops the ledger's entries older than a day (a new run keeps the recent windows of an earlier one). */
+        fun pruneLedger(nowMs: Long = System.currentTimeMillis()) {
+            val file = File(E2e.outDir, LEDGER_FILE)
+            if (!file.isFile) return
+            val kept = file.readLines().filter { line -> line.substringBefore('\t').toLongOrNull()?.let { it > nowMs - DAY_MS } == true }
+            if (kept.isEmpty()) file.delete() else file.writeText(kept.joinToString("\n", postfix = "\n"))
+        }
+
+        private class LedgerLine(
+            val atMs: Long,
+            val cost: Int,
+            val runId: String,
+        )
+
+        private fun readLedger(file: File): List<LedgerLine> =
+            if (!file.isFile) {
+                emptyList()
+            } else {
+                file.readLines().mapNotNull { line ->
+                    val parts = line.split('\t')
+                    val at = parts.getOrNull(0)?.toLongOrNull()
+                    val cost = parts.getOrNull(1)?.toIntOrNull()
+                    if (at != null && cost != null) LedgerLine(at, cost, parts.getOrNull(2).orEmpty()) else null
+                }
             }
     }
 }

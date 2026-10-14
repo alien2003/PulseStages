@@ -33,12 +33,13 @@ data class RecordKey(
 
 /**
  * Direct, READ-ONLY access to Health Connect for the safety fingerprints: the only client method it calls is
- * `readRecords` (any origin, ascending, 1000 records per page, every page charged to [budget]). It reads sleep
- * sessions, heart rate and steps, keeps only their [RecordKey]s and never holds a write or delete method. Rate-limit
- * errors are retried with long waits, so a snapshot taken right after a busy phase still completes.
+ * `readRecords` (any origin, ascending, 1000 records per page, every page charged to [budget] as [charging] says). It
+ * reads sleep sessions, heart rate and steps, keeps only their [RecordKey]s and never holds a write or delete method.
+ * Rate-limit errors are retried with long waits, so a snapshot taken right after a busy phase still completes.
  */
 class ReadOnlyHealthConnect(
     private val budget: ReadBudget = ReadBudget.shared(),
+    private val charging: ReadCharging = ReadCharging.BUDGETED,
 ) {
     private val client: HealthConnectClient by lazy { HealthConnectClient.getOrCreate(E2e.app.applicationContext) }
 
@@ -70,7 +71,7 @@ class ReadOnlyHealthConnect(
         var pageToken: String? = null
         do {
             val request = ReadRecordsRequest(type, filter, ascendingOrder = true, pageSize = PAGE_SIZE, pageToken = pageToken)
-            budget.acquire(1, "snapshot ${type.simpleName}")
+            budget.acquire(1, "snapshot ${type.simpleName}", charging)
             val response = read(type.simpleName.orEmpty()) { client.readRecords(request) }
             response.records.mapTo(keys) {
                 RecordKey(it.metadata.dataOrigin.packageName, it.metadata.id, it.metadata.lastModifiedTime.toEpochMilli())

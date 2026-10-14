@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import org.junit.AssumptionViolatedException
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
+import org.junit.runners.model.Statement
 
 /**
  * Outcome of one test class as the runner summarises it (`e2e/status/<class>.json`).
@@ -24,8 +25,25 @@ data class TestStatus(
     val finishedAtMs: Long,
 )
 
-/** Writes the outcome of every test to `e2e/status/<class>.json` (the runner prints them in its summary). */
+/**
+ * Writes the outcome of every test to `e2e/status/<class>.json` (the runner prints them in its summary), and fails
+ * every test before its body runs unless this process's WorkManager is the suite's in-memory one ([E2eWorkManager]).
+ */
 class E2eStatusRule : TestWatcher() {
+    override fun apply(
+        base: Statement,
+        description: Description,
+    ): Statement =
+        super.apply(
+            object : Statement() {
+                override fun evaluate() {
+                    E2eWorkManager.requireInstalled()
+                    base.evaluate()
+                }
+            },
+            description,
+        )
+
     override fun succeeded(description: Description) = write(description, "PASSED", null)
 
     override fun failed(

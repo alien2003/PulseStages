@@ -43,7 +43,6 @@ class ShadowRun(
     private val hybridModels: HybridModelProvider,
     private val logger: E2eLogger,
     private val budget: ReadBudget,
-    private val reserveForLaterSteps: Int,
 ) {
     /** The census, once taken. */
     var census: Census? = null
@@ -73,7 +72,8 @@ class ShadowRun(
         file.problem?.let { general += "the app's settings file could not be decoded, the defaults are used: $it" }
         val now = System.currentTimeMillis()
         val granted = reads.grantedPermissions()
-        val available = budget.remaining() - reserveForLaterSteps
+        // The budget of this step: the caller capped it, so that the later steps keep their share.
+        val available = budget.remaining()
         val modelId = hybridModels.hybridModel()?.modelId
         val census = ShadowCensus.take(reads, file, granted, available, now, modelId).also { census = it }
         E2e.progress(
