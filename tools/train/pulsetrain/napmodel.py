@@ -1266,6 +1266,11 @@ def final_model(inp: Inputs, cli: AlgoCli, exp_dir: Path, base_run: Path, out_di
     sel = dict(base_summary["selection"])
     sel["napModel"] = {"note": note + (f"; nap decoder {canonical_json(nap_defaults['hybrid'])}"
                                        if "hybrid" in nap_defaults else "")}
+    if "choice" in result:
+        ch = result["choice"]
+        sel["napModel"]["decoderNote"] = (
+            f"most frequent inner-CV choice of the pre-registered nap-model experiment: {ch['thetaCount']} of "
+            f"{ch['foldsOfClassifier']} outer folds of the nap {ch['classifier'].upper()}, docs/prereg/prereg-nap-model.md")
     sel["napOutputPolicy"] = {"note": f"rule (ii) of the pre-registered nap-model experiment on {adopted}: "
                                       f"{policy} (accuracy margin over all LIGHT "
                                       f"{s['policy']['accMarginWorse']:+.3f}, 4-class kappa "

@@ -130,8 +130,9 @@ bias-033541ae --allow-other-build` reproduced `bias/results.jsonl` and `decision
 are never committed: when a worktree is removed, move its `out/bias-base`, `out/bias-final`, `out/prereg-bias.md` and
 `out/commands.log` next to the other runs of the main checkout's `tools/train/out`, since `defaults --run bias-final`
 needs `bias-final` (likewise `out/naps`, `out/naps-final`, `out/naps-verify`, `out/naps-verify-merge`, `out/naps-rerun`,
-`out/naps-posthoc` and `out/prereg-naps.md` of the nap experiment: `defaults --run naps-final` generates the current
-`TrainedDefaults.kt`).
+`out/naps-posthoc` and `out/prereg-naps.md` of the nap experiment, and `out/nap-model`, `out/nap-model-final`,
+`out/nap-model-verify` and `out/prereg-nap-model.md` of the nap model: `defaults --run nap-model-final` generates the
+current `TrainedDefaults.kt`).
 
 Nap experiment (pre-registered: `docs/prereg/prereg-naps.md`, a verbatim copy of `tools/train/out/prereg-naps.md`
 with SHA-256 in `docs/prereg/prereg-naps.md.sha256` and the timestamped log `out/naps/commands.log` as
@@ -184,6 +185,48 @@ candidates, tabulates flags, stage shares of both variants, the REM excess and b
 vs chunk-pooled), checks the final b_short fit against the fold fits and, with `--rerun`, compares a re-run of `naps`
 with the stored run file by file (`--no-decode` skips the algo-cli part).
 
+Dedicated nap model (pre-registered: `docs/prereg/prereg-nap-model.md`, a verbatim copy of
+`tools/train/out/prereg-nap-model.md` with SHA-256 in `docs/prereg/prereg-nap-model.md.sha256` and the timestamped
+main log `out/commands.log` as `docs/prereg/commands-nap-model.log`, checked by `tests/test_prereg.py`; committed with
+its analysis code before the first run; ALGORITHM.md section 13.12):
+
+```sh
+mise exec -- ./gradlew :algo-cli:installDist                                   # the build of that commit
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py nap-model --out-run nap-model --jobs 16
+mise exec -- python -I tools/train/train.py nap-model-report --out-run nap-model   # re-render it (no algo-cli)
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py nap-model-final --exp nap-model --out-run nap-model-final \
+    --install-model                                                            # N1 adopted: the bundle's nap section
+mise exec -- python -I tools/train/train.py defaults --run nap-model-final --write  # NAP_HYBRID_*, NAP_OUTPUT_POLICY
+mise exec -- ./gradlew :algo-cli:installDist
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py nap-model-verify --exp nap-model --final nap-model-final \
+    --out-run nap-model-verify                                                 # nights unchanged with the new build
+```
+
+`nap-model` (`pulsetrain/napmodel.py`) reads `bias-base` (outer fold night bundles, groups, the selection sets and
+inner folds of its per-group selection), `bias-base/bias` (b_g), `naps` (b_short_g(180), the stored C-180 proxies) and
+`naps-posthoc` (150 / 170-min proxies), all read only. It cuts nap proxies v2 from every night of both headline variants:
+onset proxies of 30, 60, 90, 120, 150 and 170 min (`naps.nap_proxy`) and ends-in-wake windows (from the end of a wake
+bout of >= 2 min to the start of the next wake bout of >= 5 min, with up to 5 min of the opening bout before and the first
+5 min of the closing awakening after it, 30-179 min, up to 30 min of context before and nothing after the end; at most 3
+non-overlapping windows per night in a SHA-256 order shared by the two variants). Before any fit it checks that the
+current default at fold level (N0: night fold bundle + b_g + b_short_g(180)) reproduces `bias-base/bias` candidate B on
+every night and `naps` / `naps-posthoc` C-180 on every onset proxy, and that the Python cut gives exactly the features of
+`algo-cli features --nap-proxies`. Then, per (variant, outer group), the nested inner CV fits logistic regression (C by
+inner log-loss) and an MLP 2 x 32 on the inner training subjects' proxies (rows of both variants, instantaneous first;
+statistics from the evaluated variant), scores the 32-point decoder grid as `napMode.hybrid` patches (mean per-subject
+kappa of the inner held-out Walch subjects) and fits the nap stageLogBias with `bias.fit_stage_bias` on the inner
+out-of-fold decodes; the outer LOSO nap model of every subject goes into the `nap` section of its N0 fold bundle (N1; N2
+without the nap b), decoded together with the subject's whole nights, which must stay identical to candidate B. RULES,
+HMM-table, "all LIGHT" and a sleep / wake scoring of every candidate are reported; rule (i) (model) and rule (ii) (output
+policy) are applied on Walch, worse variant, both kinds pooled, with paired per-subject bootstrap CIs.
+`nap-model-final` fits the final nap model (the most frequent classifier and decoder over the outer folds) on all
+subjects and its nap b on the LOSO out-of-fold proxies of the Walch subjects, adds it as the `nap` section of
+`naps-final`'s bundle and writes `trained_defaults.json` with `napMode.hybrid` and `napMode.outputPolicy` (with N0 kept:
+the output policy only). `nap-model-verify` checks with the new build that the adopted candidate's fold bundles
+reproduce candidate B on every night (default parameters except the night decoder of each group) and its proxy decodes,
+that the installed bundle decodes every night exactly as the previous one (metrics and per-epoch CSV) and that it is
+accepted on every proxy.
+
 Provenance: every nap run records `meta.code` in its `summary.json` (SHA-256 of `train.py` and each `pulsetrain/*.py`,
 one digest over them, the git commit and the hashed files that differ from it) next to the algo-cli fingerprint and
 the pre-registration digest. Commit a pre-registration, with the analysis code it names, before the first run: the
@@ -204,8 +247,8 @@ every phase). Rebuild algo-cli only between runs and log the rebuild in `tools/t
 (`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`,
 `emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it), nap mode (`napMode.maxSessionMin` —
 180 unless the run chose it, a legacy `hybrid.shortSessionMaxMin` of an earlier run read as it; `napMode.estimator` —
-the night's estimator unless chosen; the nap decoder overrides `napMode.hybrid.*` — null = the night's values unless
-chosen) and HMM (`emissions`, `meanBouts`, `transitions`) defaults from it. The HMM
+the night's estimator unless chosen; `napMode.outputPolicy` — STAGES unless chosen; the nap decoder overrides
+`napMode.hybrid.*` — null = the night's values unless chosen, a chosen weight is written as a `const val`) and HMM (`emissions`, `meanBouts`, `transitions`) defaults from it. The HMM
 fields hold the supervised estimates only when HMM-trained beat the physiology table by the selection rule;
 otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` / `TransitionWeights()`, and `HmmParams.PHYSIOLOGY`
 always gives the specification's table.
@@ -325,7 +368,13 @@ bias/{summary.json,report.md,decisions.json,results.jsonl}   train.py bias (stag
 `results.jsonl` (per decoded session and kind), `summary.json`, `report.md`, `algocli.log`, `run.log`; its
 `commands.log` holds the pre-registration and the START / RESULT lines. `train.py naps-posthoc` writes
 `out/<out-run>/` (default `naps-posthoc`): `summary.json`, `report.md`, `results.jsonl` (the new decodes),
-`algocli.log`.
+`algocli.log`. `train.py nap-model` writes `out/<out-run>/` (default `nap-model`): `proxies/` (the proxy sessions per
+variant, `counts.json`), `features/`, `gate.json`, `inner/<variant>/<group>/selection.json` (every grid point of both
+classifiers, C log-losses, the nap-bias fixed point), `selections.json`, `outer/<variant>/nap/<subject>.json` (the LOSO
+nap models, no b), `folds.json`, `results.jsonl` (every decoded session of N0, N1, N2, RULES and HMM-table, the N0 / N1
+/ N2 nights included), `summary.json`, `report.md`, `algocli.log`, `run.log`; `nap-model-final` writes
+`out/<out-run>/{final/hybrid_model.json, final/result.json, trained_defaults.json, summary.json}`; `nap-model-verify`
+writes `out/<out-run>/summary.json`.
 
 ### algo-cli interface (verified against the real launcher in PART B)
 
@@ -372,8 +421,8 @@ Checked on real night files with the installDist launcher; `tests/fake_algo_cli.
 
 Raw downloads (`data/raw/`) and everything derived from them (`data/nights/`, `out/`, models in progress) stay local
 and are never committed — only the scripts, `requirements.txt`, the tests and the links / citations in DATASETS.md
-are (the final model is committed as an app asset; the stage-proportion and nap pre-registrations and their command
-logs, which hold no data but aggregate numbers, are committed under `docs/prereg/`). Downloaded files are treated as untrusted input: nothing from
+are (the final model is committed as an app asset; the stage-proportion, nap and nap-model pre-registrations and their
+command logs, which hold no data but aggregate numbers, are committed under `docs/prereg/`). Downloaded files are treated as untrusted input: nothing from
 them is executed, and every script that reads them is run with `python -I` (isolated mode: no current directory or
 user site-packages on `sys.path`).
 
@@ -383,7 +432,8 @@ user site-packages on `sys.path`).
 download.py            dataset download + checksum verification
 prepare.py             night-file generation (all variants), summary.csv, manifest.json
 train.py               training / LOSO CLI (run | report | final | defaults | compare | sensitivity | bias | bias-report |
-                       bias-final | naps | naps-report | naps-final | naps-verify | naps-posthoc)
+                       bias-final | naps | naps-report | naps-final | naps-verify | naps-posthoc | nap-model |
+                       nap-model-report | nap-model-final | nap-model-verify)
 pulsetrain/ohealth.py  2-min HR resampling, session windows, label mapping, coverage proxy
 pulsetrain/pedometer.py  accelerometer step detector
 pulsetrain/walch.py    sleep-accel readers;  pulsetrain/bidsleep.py  BIDSleep readers
@@ -399,5 +449,6 @@ pulsetrain/robustness.py   post-hoc: cross-run comparisons, session-boundary sen
 pulsetrain/bias.py     pre-registered stage-proportion experiment (prior exponent, proportion matching) + its final model
 pulsetrain/naps.py     pre-registered nap-proxy experiment (short-session bias) + its final model and implementation check
 pulsetrain/naps_posthoc.py  post-hoc analyses of the nap experiment (reporting only)
+pulsetrain/napmodel.py pre-registered dedicated nap model (nap proxies v2, LOSO, rules) + its nap section and checks
 tests/                 pytest (synthetic data only; tests/fake_algo_cli.py stands in for algo-cli)
 ```

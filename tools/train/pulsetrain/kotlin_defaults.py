@@ -164,7 +164,8 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
         why = (f"chosen in run {run}, with the duration model" if (sel.get("napModel") or {}).get("decoderNote")
                else f"chosen in run {run}") if v is not None else same
         L += _kdoc(f"Nap mode: {what} of the hybrid decoder for naps ({why}).", "    ")
-        L.append(f"    val {name}: Double? = {text}")
+        # a chosen value is a constant (detekt: MayBeConst, MagicNumber); null = the night's value
+        L.append(f"    const val {name}: Double = {text}" if v is not None else f"    val {name}: Double? = null")
         L.append("")
     return L
 

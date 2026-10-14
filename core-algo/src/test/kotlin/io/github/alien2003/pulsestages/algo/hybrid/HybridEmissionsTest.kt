@@ -7,6 +7,7 @@ import io.github.alien2003.pulsestages.algo.model.TimeSpan
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 import io.github.alien2003.pulsestages.algo.night.PreparedNight
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapHybridParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -126,7 +127,11 @@ class HybridEmissionsTest {
         for ((input, threshold, expected) in cases) {
             val params =
                 AlgoParams().let {
-                    it.copy(hybrid = it.hybrid.copy(emissionWeight = 0.8), napMode = it.napMode.copy(maxSessionMin = threshold))
+                    it.copy(
+                        hybrid = it.hybrid.copy(emissionWeight = 0.8),
+                        // no nap decoder overrides: naps take the night's emission weight checked by assertRow
+                        napMode = it.napMode.copy(maxSessionMin = threshold, hybrid = NapHybridParams()),
+                    )
                 }
             val prepared = NightPreparer.prepare(input, params)
             val rows = HybridEmissions(prepared, bundle, DenseNetwork(bundle), null).withOffsets(zero)

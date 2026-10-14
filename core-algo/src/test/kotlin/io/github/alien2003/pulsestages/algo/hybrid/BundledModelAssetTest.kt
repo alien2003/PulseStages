@@ -8,6 +8,7 @@ import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -52,10 +53,27 @@ class BundledModelAssetTest {
     }
 
     @Test
-    fun `a nap runs with the bundled model and the default short-session threshold`() {
+    fun `the nap model, when the bundle has one, matches this build's features`() {
+        val nap = model.nap ?: return
+        assertNull(model.napCompatibilityProblem())
+        assertEquals(HybridFeatureExtractor.FEATURE_SET_VERSION, nap.featureSetVersion)
+        assertEquals(HybridFeatureExtractor.FEATURE_NAMES, nap.featureNames)
+        assertEquals(HybridFeatureExtractor.FEATURE_NAMES.size, nap.standardization.mean.size)
+        assertTrue(nap.classPriors.all { it > 0 } && abs(nap.classPriors.sum() - 1) < 1e-6)
+        // The nap model's own proportion-matching log-bias (ALGORITHM.md section 13.12), when present: centred, finite.
+        nap.stageLogBias?.let { bias ->
+            assertEquals(SleepStage.COUNT, bias.size)
+            assertTrue(bias.all { it.isFinite() } && abs(bias.sum()) < 1e-6, "$bias")
+        }
+        assertTrue(checkNotNull(nap.training?.dataset).isNotBlank())
+    }
+
+    @Test
+    fun `a nap runs with the bundled model and the default nap parameters`() {
         val night = SyntheticNightGenerator(SEED).generate()
         val start = night.input.sessionStartMs
-        val defaults = AlgoParams()
+        // The stages are what is checked here; the default output policy decides only what is written for them.
+        val defaults = AlgoParams().let { it.copy(napMode = it.napMode.copy(outputPolicy = NapOutputPolicy.STAGES)) }
         for (minutes in listOf(30L, 60L, 90L, 179L)) {
             val nap =
                 night.input.copy(

@@ -39,6 +39,9 @@ class NapModeTest {
     private val stager = SleepStager(model)
     private val night: NightInput = SyntheticNightGenerator(31).generate().input
 
+    /** The defaults without nap decoder overrides (the trained defaults may set them): every nap value inherited. */
+    private val noNapOverrides: AlgoParams = AlgoParams().let { it.copy(napMode = it.napMode.copy(hybrid = NapHybridParams())) }
+
     /** The first [minutes] of [night] (nothing after the end). */
     private fun nap(minutes: Long): NightInput {
         val end = night.sessionStartMs + minutes * MINUTE_MS
@@ -120,7 +123,7 @@ class NapModeTest {
 
     @Test
     fun `post-processing overrides change naps only`() {
-        val base = AlgoParams()
+        val base = noNapOverrides
         // Every epoch below a posterior of 1 becomes LIGHT: the nap is all LIGHT (no forced epochs in the first hours).
         val override = NapPostprocessParams(lowConfidenceThreshold = 1.0, lowConfidencePolicy = LowConfidencePolicy.LIGHT)
         val params = base.copy(napMode = base.napMode.copy(post = override))
@@ -149,7 +152,7 @@ class NapModeTest {
 
     @Test
     fun `hybrid decoder overrides change naps only`() {
-        val base = AlgoParams()
+        val base = noNapOverrides
         val geometric =
             base.copy(
                 napMode = base.napMode.copy(hybrid = NapHybridParams(durationModel = DurationModel.GEOMETRIC, emissionWeight = 1.0)),

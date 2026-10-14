@@ -51,7 +51,7 @@
     <string name="night_detail_mode">Processed as</string>
     <string name="session_mode_night">Night</string>
     <string name="session_mode_nap">Nap</string>
-    <string name="night_detail_nap_rough">Nap estimates are rough: on test data only about half of the stages of a nap matched the sleep lab, and a short nap is often no better than calling everything light sleep. Take the stages as a rough guide.</string>
+    <string name="night_detail_nap_rough">Nap estimates are rough: on test data about 6 in 10 of the 30-second epochs of a nap matched the sleep lab, against about 5 in 10 for calling everything light sleep. Take the stages as a rough guide.</string>
     <string name="night_detail_nap_sleep_wake">Written to Health Connect as asleep / awake only; the stages shown here are the app\'s estimate.</string>
     <string name="not_estimated_nap_skipped">Naps are not estimated (Settings, Naps).</string>
     <!-- Home and Compare -->

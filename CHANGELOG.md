@@ -12,6 +12,19 @@ releases").
 
 ### Changed
 
+- **Naps get their own model.** The bundled model (`pulsestages-walch+bidsleep-mlp-nap-model-final`) now has a nap
+  model: a classifier with its own bout lengths, transitions and stage correction, trained on nap-length pieces of the
+  validation nights (the first 30–170 min, and pieces that end with an awakening). It decodes every nap, i.e. every
+  session shorter than the nap threshold (180 min), including short nights of 90–180 min under the default source
+  filter. Chosen by a pre-registered leave-one-subject-out test (ALGORITHM.md §13.12, `docs/prereg/prereg-nap-model.md`,
+  committed before the test ran): on the PSG nap pieces accuracy 0.50 → 0.61, summed stage-share error 70 → 53 points,
+  κ 0.17 → 0.36 compared with the previous night model plus short-session correction, and better than calling
+  everything light sleep. Nap estimates remain rough (README, "Naps"). The nap decoder settings ("Duration model of naps",
+  "Emission weight of naps", "Time-of-night prior of naps") now default to the validated values (explicit, 0.5, 0: the
+  same as nights, but no longer following a change of the night settings). "Written for a nap" stays **Stages** by
+  default, now as the outcome of the same pre-registered test. **Nights are estimated exactly as before** (checked
+  night by night and per epoch against the previous bundle). Because the bundle and the defaults changed, every
+  estimate's params hash changes and the app offers to recompute.
 - **Nights and naps are two processing modes** (ALGORITHM.md §18, README "Naps"). One threshold, Settings → **Naps**
   → "Nap threshold" (`napMode.maxSessionMin`, 180 min; 0 = no naps), decides whether a session is a nap or a night;
   it replaces the three 180-min thresholds `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and

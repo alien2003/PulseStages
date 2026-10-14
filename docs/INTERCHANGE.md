@@ -208,7 +208,9 @@ initial stage and time prior build the HSMM / HMM, with the nap decoder paramete
 and never apply to the nap model. A nap section whose `featureSetVersion` / `featureNames` differ from this build makes
 the naps (only) fall back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. `tools/train/pulsetrain/bundle.py` builds it
 (`nap_section(model)` from a bundle trained on nap-length sessions, `with_nap_model(bundle, nap)`); with
-`--fold-models` each fold bundle carries its own fold's nap section.
+`--fold-models` each fold bundle carries its own fold's nap section. The shipped bundle has one: the nap MLP of the
+pre-registered nap-model experiment (`tools/train/pulsetrain/napmodel.py`, ALGORITHM.md section 13.12) with its own
+`stageLogBias` and a `training` block describing the nap proxies it was trained on.
 
 Validation (`HybridModel.parse`, HybridModelException on failure): `schemaVersion` 1; `classOrder` exactly
 `["AWAKE","LIGHT","DEEP","REM"]` (every probability vector is in this order); distinct `featureNames`;

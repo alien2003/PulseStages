@@ -31,9 +31,9 @@ enum class NapOutputPolicy {
  * A nap is never compared with the nadir baseline (no elevated-HR check) and never counts for it, and is estimated
  * with [estimator], the bundle's nap sub-model when the bundle has one (otherwise its main model with the short-session
  * bias `stageLogBiasShort`), the night's post-processing and decoder parameters with the overrides of [post] and
- * [hybrid], and written as [outputPolicy] says. Every override is null by default (= the night's value), so until a
- * nap model is trained a nap differs from a night only where the pre-registered nap experiment (ALGORITHM.md section
- * 13.11) and the baseline rule decided it.
+ * [hybrid], and written as [outputPolicy] says. The post-processing overrides are null by default (= the night's
+ * value); the decoder overrides and the output policy default to the values of the pre-registered nap-model experiment
+ * (ALGORITHM.md section 13.12) in [TrainedDefaults].
  *
  * @property maxSessionMin sessions shorter than this many minutes are naps; 0 disables the nap mode (every session is a
  *   night). Replaces the three earlier thresholds `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and
@@ -115,7 +115,8 @@ data class NapPostprocessParams(
 
 /**
  * Decoder overrides of the hybrid estimator for naps. A null value means "the night's value" (`AlgoParams.hybrid`); see
- * [applyTo]. The defaults come from [TrainedDefaults] (null until a nap model's decoder is chosen by validation).
+ * [applyTo]. The defaults come from [TrainedDefaults]: the decoder chosen by the nested cross-validation of the nap-model
+ * experiment (ALGORITHM.md section 13.12), or null when a run chose none.
  *
  * @property durationModel duration model of naps, or null for `hybrid.durationModel`.
  * @property emissionWeight exponent of the scaled likelihoods of naps, or null for `hybrid.emissionWeight`.

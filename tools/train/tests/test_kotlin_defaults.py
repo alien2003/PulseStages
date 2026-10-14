@@ -134,6 +134,7 @@ def test_nap_mode_defaults_are_rendered():
     for name in ("NAP_HYBRID_EMISSION_WEIGHT", "NAP_HYBRID_TIME_PRIOR_WEIGHT"):
         assert f"val {name}: Double? = null" in src
     assert "val NAP_HYBRID_DURATION_MODEL: DurationModel? = null" in src
+    assert "val NAP_OUTPUT_POLICY: NapOutputPolicy = NapOutputPolicy.STAGES" in src
     assert "HYBRID_SHORT_SESSION_MAX_MIN" not in src
     # the nap experiment's runs stored the threshold as hybrid.shortSessionMaxMin: read as napMode.maxSessionMin
     sel = dict(SELECTION, shortSessionMaxMin={"note": "candidate C-180"})
@@ -147,9 +148,21 @@ def test_nap_mode_defaults_are_rendered():
     assert "const val NAP_MAX_SESSION_MIN: Double = 120.0" in chosen and "nap model run" in _flat(chosen)
     assert "val NAP_ESTIMATOR: EstimatorType = EstimatorType.RULES" in chosen
     assert "val NAP_HYBRID_DURATION_MODEL: DurationModel? = DurationModel.GEOMETRIC" in chosen
-    assert "val NAP_HYBRID_EMISSION_WEIGHT: Double? = 0.3" in chosen
-    assert "val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double? = 1.0" in chosen
+    assert "const val NAP_HYBRID_EMISSION_WEIGHT: Double = 0.3" in chosen
+    assert "const val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double = 1.0" in chosen
     assert max(len(line) for line in chosen.splitlines()) <= 140
+    # the nap-model experiment chooses the output policy (rule (ii)) and explains the nap decoder
+    sel = dict(SELECTION, napOutputPolicy={"note": "rule (ii): SLEEP_WAKE"}, napModel={"decoderNote": "most frequent"})
+    pol = render({"estimator": "HYBRID", "hybrid": HYBRID, "napMode": dict(nap, outputPolicy="SLEEP_WAKE")}, sel, "r",
+                 "2026", "x")
+    assert "val NAP_OUTPUT_POLICY: NapOutputPolicy = NapOutputPolicy.SLEEP_WAKE" in pol
+    assert "rule (ii): SLEEP_WAKE" in _flat(pol) and "most frequent" in _flat(pol)
+    kt = (kotlin_defaults.REPO_ROOT / "core-algo/src/main/kotlin/io/github/alien2003/pulsestages/algo/params/"
+          "NapModeParams.kt").read_text()
+    enum = kt.split("enum class NapOutputPolicy", 1)[1].split("}", 1)[0]
+    assert [x for x in kotlin_defaults.NAP_OUTPUT_POLICIES if f"    {x}," in enum] == list(
+        kotlin_defaults.NAP_OUTPUT_POLICIES)
+    assert "val outputPolicy: NapOutputPolicy = TrainedDefaults.NAP_OUTPUT_POLICY" in kt
     # the Kotlin side has exactly these fields
     assert {"maxSessionMin", "estimator", "hybrid"} <= set(data_class_fields("NapModeParams"))
     assert data_class_fields("NapHybridParams") == ["durationModel", "emissionWeight", "timePriorWeight"]
@@ -163,6 +176,7 @@ def test_nap_mode_defaults_are_rendered():
     ({"hybrid": {"durationModel": "SEMI"}}, "napMode.hybrid.durationModel"),
     ({"hybrid": {"emissionWeight": -0.5}}, "napMode.hybrid.emissionWeight"),
     ({"post": {}}, "napMode.post"),
+    ({"outputPolicy": "NOTHING"}, "napMode.outputPolicy"),
 ])
 def test_invalid_nap_defaults(nap, msg):
     with pytest.raises(DefaultsError, match=msg):

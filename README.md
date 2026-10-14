@@ -90,18 +90,14 @@ section is the authoritative source; if it differs from this paragraph, it wins.
 ### Naps
 
 PulseStages can estimate daytime naps if you lower "Minimum session length" (`minSessionMin`, 90 min by default) to
-30 min, but treat the result as a rough sketch, not a stage breakdown. No public dataset has labelled naps, so it was
-tested on the first 30–180 minutes of the 31 lab nights: about half of the 30-second epochs matched polysomnography,
-and for a 30-minute nap the result was no better than calling the whole nap light sleep. Sessions shorter than 3 hours
-now get their own stage correction, which removes most of the false REM sleep the night-trained model put into naps.
-Sessions of 3 hours or more are decoded exactly as before. With the default settings, short nights of 90 minutes to
-3 hours also get the nap correction. The planned test covered sessions up to 2 hours; a later check at 150 and 170
-minutes found no clear improvement there (the correction then shows too little REM). In the planned test about 4 in
-5 naps were marked low-confidence, mostly because their stage shares looked implausible for a night. Sessions shorter
-than 3 hours no longer get that check, so now only a too-small heart-rate range marks a nap (about 1 in 3 to 2 in 5 of
-the tested naps of up to 2 hours, and 3 in 5 to 3 in 4 of the 30-minute ones). The estimate itself is unchanged, so an
-unmarked nap is still only a rough sketch. Details:
-[ALGORITHM.md §13.11](ALGORITHM.md#1311-daytime-naps-nap-proxies-and-a-short-session-bias-pre-registered-adopted).
+30 min. No public dataset has labelled naps, so a separate nap model was trained and tested, in a pre-registered test,
+on nap-length pieces of the 31 sleep-lab nights: about 6 in 10 of the 30-second epochs matched polysomnography,
+against 5 in 10 for the earlier night-model approach and for simply calling the whole nap light sleep. Treat a nap's
+stages as a rough sketch: deep sleep tends to be over-called in the first hour, and the test pieces were night sleep,
+with only 11 that end with an awakening as a real nap does. Because the nap model beat the light-sleep reference by the
+pre-registered margin, the default for naps is **Stages**: a nap is written to Health Connect with its estimated
+stages, like a night; choose **Asleep / awake** to write only sleep and awakenings, or **Nothing** to skip naps.
+Details: [ALGORITHM.md §13.12](ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted).
 
 **Nights and naps are two processing modes.** One setting decides which is which: Settings → **Naps** → "Nap
 threshold" (`napMode.maxSessionMin`, 180 min). A session shorter than that is a nap, a longer one a night; 0 turns
@@ -109,10 +105,11 @@ naps off. Sessions shorter than "Minimum session length" of the sources are stil
 
 - is never compared with your heart-rate baseline and never counts for it (no "elevated heart rate" for naps);
 - gets no stage-share check unless "Check the stage shares of naps" is on;
-- is estimated with "Estimator for naps" (HYBRID), and with the nap values of the minimum bouts, the uncertain-epoch
-  settings and the hybrid decoder. Each of these is empty by default, which means "same as nights";
-- is decoded with a nap model when the model bundle has one. The bundled model has none yet, so naps are decoded by
-  the night model with the short-session correction above, exactly as before the two modes;
+- is estimated with "Estimator for naps" (HYBRID), and with the nap values of the minimum bouts and the
+  uncertain-epoch settings (empty by default, which means "same as nights") and of the hybrid decoder (set by the
+  nap-model validation; empty = same as nights);
+- is decoded with the bundle's nap model. With the default settings this also applies to short nights of 90 minutes
+  to 3 hours; nights of 3 hours or more are decoded exactly as before;
 - is written as "Written for a nap" says: **Stages** (like a night, the default), **Asleep / awake** (only AWAKE and
   SLEEPING in Health Connect; the app still shows its stage estimate) or **Nothing** (not estimated, nothing written;
   an earlier output of the nap is removed when it is processed again);
@@ -326,7 +323,7 @@ Android 14+ it uses an `activity-alias` with `android.intent.action.VIEW_PERMISS
   - does not count for the heart-rate baseline and is never marked "elevated heart rate";
   - gets no sanity check of the stage shares (unless `napMode.post.checkProportions`), so a nap without deep sleep is
     not flagged as implausible;
-  - uses the short-session correction of the bundled model, or the bundle's nap model when it has one;
+  - is decoded by the bundle's nap model (see [Naps](#naps));
   - is written with all stages, as asleep / awake only, or not at all (`napMode.outputPolicy`).
 - A nap that ends less than `mergeGapMin` before the night is merged into the night (the gap is AWAKE).
 
@@ -1000,10 +997,11 @@ The full list is in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
 - **Training data.** The model was trained on Apple Watch heart rate from healthy adults (Walch: 29 ± 9 years). OPPO's
   2-minute values may be computed differently. Older people, sleep disorders, beta blockers, arrhythmias and athletes are not
   represented.
-- **Naps.** No dataset has labelled naps. On nap-length segments of the validation nights the estimate is rough
-  (about half the epochs right; ALGORITHM.md §13.11). The low-confidence flag no longer marks most naps (the
-  stage-share check skips sessions under 3 hours), so its absence says little. Short nights under 3 hours get the nap
-  correction too; the planned test covered only sessions up to 2 hours.
+- **Naps.** No dataset has labelled naps. On nap-length pieces of the validation nights the nap model gets about 6 in
+  10 epochs right (ALGORITHM.md §13.12), better than calling everything light sleep but still rough, and only 11 of
+  the Walch test pieces end with an awakening as a real nap does. The low-confidence flag marks only naps with a
+  too-small heart-rate range, so its absence says little. Short nights under 3 hours are decoded by the nap model too;
+  it was tested on the first 150 and 170 minutes of long nights, not on real short nights.
 - **Session boundaries.** The validation used session boundaries derived from PSG. Real OHealth boundaries come from
   the watch, and a late start or early end costs about 0.01–0.04 κ.
 - **Untested on real data.** The elevated-heart-rate rule and personalization could not be validated on the datasets.

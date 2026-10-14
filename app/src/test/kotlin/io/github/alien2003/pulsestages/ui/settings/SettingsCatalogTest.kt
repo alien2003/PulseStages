@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.ui.settings
 
+import io.github.alien2003.pulsestages.algo.params.TrainedDefaults
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
 import io.github.alien2003.pulsestages.data.local.settings.SettingsJson
 import kotlinx.serialization.json.JsonArray
@@ -111,12 +112,18 @@ class SettingsCatalogTest {
         }
 
     @Test
-    fun `the nap overrides are empty by default and inherit the night's values`() {
+    fun `the nap overrides are empty by default, except the trained nap decoder, and inherit the night's values`() {
         val overrides = SettingsCatalog.specsByPath.values.filterIsInstance<OptionalDoubleSpec>()
         assertTrue(overrides.size >= 9, "every numeric nap override has an optional field: ${overrides.map { it.path }}")
+        // The nap decoder defaults come from the pre-registered nap-model experiment (TrainedDefaults); null = nights'.
+        val trained: Map<String, Double?> =
+            mapOf(
+                "algo.napMode.hybrid.emissionWeight" to TrainedDefaults.NAP_HYBRID_EMISSION_WEIGHT,
+                "algo.napMode.hybrid.timePriorWeight" to TrainedDefaults.NAP_HYBRID_TIME_PRIOR_WEIGHT,
+            )
         overrides.forEach { spec ->
             assertTrue(spec.path.startsWith("algo.napMode."), spec.path)
-            assertEquals(null, spec.read(defaults), spec.path)
+            assertEquals(trained[spec.path], spec.read(defaults), spec.path)
             val night = spec.path.removePrefix("algo.napMode.").substringBefore('.')
             assertTrue(night == "post" || night == "hybrid", spec.path)
         }
@@ -134,8 +141,12 @@ class SettingsCatalogTest {
             choices.map { it.path }.toSet(),
         )
         assertEquals(
-            SAME_AS_NIGHTS_KEY,
+            TrainedDefaults.NAP_HYBRID_DURATION_MODEL?.name ?: SAME_AS_NIGHTS_KEY,
             checkNotNull(SettingsCatalog.spec("algo.napMode.hybrid.durationModel") as ChoiceSpec).read(defaults),
+        )
+        assertEquals(
+            TrainedDefaults.NAP_OUTPUT_POLICY.name,
+            checkNotNull(SettingsCatalog.spec("algo.napMode.outputPolicy") as ChoiceSpec).read(defaults),
         )
         assertTrue(SettingsCatalog.spec("algo.features.baselineMinSessionMin") == null, "the old thresholds are gone")
         assertTrue(SettingsCatalog.spec("algo.hybrid.shortSessionMaxMin") == null)

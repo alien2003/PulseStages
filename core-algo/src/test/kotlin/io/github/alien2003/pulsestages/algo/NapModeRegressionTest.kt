@@ -8,6 +8,8 @@ import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
 import io.github.alien2003.pulsestages.algo.params.LowConfidencePolicy
+import io.github.alien2003.pulsestages.algo.params.NapHybridParams
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticOptions
 import io.github.alien2003.pulsestages.algo.testing.NapModels
@@ -28,7 +30,9 @@ import java.io.File
  * (`features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`, `post.proportionsMinSessionMin`, all set to the same
  * value) onto `napMode.maxSessionMin`, and an estimator variant sets the estimator of both modes (before the modes,
  * `estimator` applied to every session). The params hash is not compared: the parameters changed shape, so every hash
- * changed by design; the bundle fingerprint is compared and must be the one the old build computed.
+ * changed by design; the bundle fingerprint is compared and must be the one the old build computed. The parameters are
+ * the defaults of the recording build ([PREVIOUS_DEFAULTS]: no nap decoder overrides, every stage written), so a later
+ * trained nap default (TrainedDefaults `NAP_HYBRID_*`, `NAP_OUTPUT_POLICY`) does not change what is proved here.
  */
 class NapModeRegressionTest {
     private val bundled: HybridModel by lazy {
@@ -44,7 +48,7 @@ class NapModeRegressionTest {
     )
 
     private fun cases(): List<Case> {
-        val base = AlgoParams()
+        val base = PREVIOUS_DEFAULTS
         val stager = SleepStager(bundled)
         return listOf(
             Case("bundled/default", stager, base),
@@ -155,7 +159,7 @@ class NapModeRegressionTest {
     fun `a nap section changes the naps only, every night decodes as recorded`() {
         val nap = NapModels.from(SyntheticHybridModels.default)
         val withNap = bundled.copy(nap = nap)
-        val case = Case("bundled/default", SleepStager(withNap), AlgoParams())
+        val case = Case("bundled/default", SleepStager(withNap), PREVIOUS_DEFAULTS)
         val expected = recorded().filter { it.startsWith("${case.name}\t") }.associate { line -> line.split('\t').let { it[1] to it[2] } }
         var naps = 0
         var changedNaps = 0
@@ -174,7 +178,7 @@ class NapModeRegressionTest {
     @Test
     fun `a nap section with the main model's components and its short-session bias decodes like no nap section`() {
         val same = bundled.copy(nap = NapModels.from(bundled, stageLogBias = bundled.stageLogBiasShort))
-        val case = Case("bundled/default", SleepStager(same), AlgoParams())
+        val case = Case("bundled/default", SleepStager(same), PREVIOUS_DEFAULTS)
         val expected = recorded().filter { it.startsWith("${case.name}\t") }.associate { line -> line.split('\t').let { it[1] to it[2] } }
         for ((id, input) in sessions()) assertEquals(expected.getValue(id), digest(case, input), id)
         assertTrue(same.fingerprint() != bundled.fingerprint(), "the nap section is part of the fingerprint")
@@ -194,6 +198,10 @@ class NapModeRegressionTest {
         val NIGHT_SEEDS = 501L..506L
         val PROXY_MINUTES = listOf(30, 60, 90, 120, 150, 179, 180, 181)
         val SESSION_MINUTES = listOf(45, 120, 179, 180, 181)
+
+        /** The defaults of the recording build: today's defaults without nap decoder overrides, naps written as STAGES. */
+        val PREVIOUS_DEFAULTS: AlgoParams =
+            AlgoParams().let { it.copy(napMode = it.napMode.copy(outputPolicy = NapOutputPolicy.STAGES, hybrid = NapHybridParams())) }
 
         /**
          * The single nap threshold [minutes] in this build's parameters. The recording build (before the modes) set its
