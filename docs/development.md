@@ -227,6 +227,10 @@ not enforced there.
   | `EndToEndWiringTest` | The ViewModels through the real graph with only Health Connect replaced by the in-memory fake |
   | `ScreenshotsTest`, `SettingsRenderTest`, `HomeRenderTest`, `NightsRenderTest`, `OtherScreensRenderTest` | Every screen rendered on the JVM in its main states; any exception, and any text that still shows a format placeholder, fails them |
 
+- On a phone: the end-to-end suite in `app/src/androidTest` (JUnit 4, androidx.test, Compose ui-test), run with
+  `tools/device-test/run-device-tests.sh` against the installed app ([Running on a phone](#on-device-end-to-end-suite)).
+  `./gradlew :app:assembleDebugAndroidTest` only builds its APK.
+
 - Database changes: bump the Room version, commit the exported schema under `data-local/schemas/`, add the migration
   and extend `LedgerMigrationTest`.
 - Algorithm code: `NapModeRegressionTest` (`:core-algo`) makes 767 estimates (synthetic sessions under several
@@ -287,6 +291,17 @@ Enable USB debugging on the phone, connect it and accept the prompt. Then, in a 
   `~/.android/debug.keystore`, so it can only update a published debug APK signed with the same key
   ([Signing secrets](#signing-secrets)).
 - Demo mode for screenshots: Settings → **Debug build** → **Demo mode** (debug builds only, [SCREENSHOTS.md](SCREENSHOTS.md)).
+
+### On-device end-to-end suite
+
+`app/src/androidTest` holds an end-to-end suite that runs against the debug build **installed** on a phone and its real
+Health Connect data, without reinstalling the app and without leaving anything in Health Connect: safety snapshots
+before and after, the whole pipeline over the real history with every write captured in memory, one short-lived test
+record in the `ps-e2e:` namespace, and a read-only tour of every screen.
+`mise exec -- tools/device-test/run-device-tests.sh` builds and installs only the test APK and runs it;
+[tools/device-test/README.md](../tools/device-test/README.md) lists what it tests, every Health Connect call it can
+make, its safety guarantees and what you have to do on the phone. Do not use `connectedAndroidTest` for it: that task
+installs the app APK as well.
 
 ## Continuous integration
 

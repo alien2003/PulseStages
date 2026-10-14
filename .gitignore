@@ -35,3 +35,6 @@ __pycache__/
 Thumbs.db
 *.swp
 .worktrees/
+
+# On-device E2E reports pulled by tools/device-test/run-device-tests.sh
+tools/device-test/out/

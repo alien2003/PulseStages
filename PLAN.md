@@ -171,7 +171,9 @@ Gradle 9.8.1 · AGP 9.4.1 (built-in Kotlin) · Kotlin 2.4.21 · KSP 2.3.12 · Hi
 Room 2.8.5 · WorkManager 2.12.0 · DataStore 1.2.1 · Compose BOM 2026.09.00 (material3 1.4.0, adaptive 1.3.0) ·
 navigation-compose 2.10.2 · activity-compose 1.13.0 · lifecycle 2.11.0 · core-ktx 1.19.1 ·
 **connect-client 1.1.0** (only stable; 1.2.0-alpha06 is the newest pre-release) · kotlinx-coroutines 1.11.0 ·
-kotlinx-serialization 1.11.0 · JUnit 5.14.4 · ktlint 1.8.0 via org.jlleitschuh.gradle.ktlint 14.2.0 · detekt 1.23.8.
+kotlinx-serialization 1.11.0 · JUnit 5.14.4 · ktlint 1.8.0 via org.jlleitschuh.gradle.ktlint 14.2.0 · detekt 1.23.8 ·
+on-device suite (`app/src/androidTest`, JUnit 4.13.2): androidx.test runner 1.7.0, rules 1.7.0, core 1.7.0, ext-junit
+1.3.0 (verified 2026-10-14), Compose ui-test-junit4 from the BOM.
 
 Sources: `https://dl.google.com/android/maven2/<group>/<artifact>/maven-metadata.xml`,
 `https://repo1.maven.org/maven2/...`, `https://plugins.gradle.org/m2/...`, `https://services.gradle.org/versions/current`.

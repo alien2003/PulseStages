@@ -38,6 +38,11 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = appVersionCode
         versionName = appVersionName
+        // The on-device end-to-end suite (src/androidTest) runs against the INSTALLED debug app without reinstalling it:
+        // tools/device-test/run-device-tests.sh installs only the test APK (assembleDebugAndroidTest) and starts each
+        // class with `am instrument` (tools/device-test/README.md). Never use connectedAndroidTest for it: that task
+        // installs the app APK as well.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     androidResources {
@@ -186,10 +191,14 @@ val moduleStrings =
         },
     )
 
+val e2eUiSources = fileTree("src/androidTest") { include("**/e2e/ui/*.kt") }
+
 tasks.withType<Test>().configureEach {
     dependsOn(prepareRobolectricDependencies)
     inputs.files(prepareRobolectricDependencies).withPropertyName("robolectricDependencies").withNormalizer(ClasspathNormalizer::class.java)
     inputs.files(moduleStrings).withPropertyName("moduleStrings").withPathSensitivity(PathSensitivity.RELATIVE)
+    // E2eResourceNamesTest checks the resource names of the on-device suite's UI tour.
+    inputs.files(e2eUiSources).withPropertyName("e2eUiSources").withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
     systemProperty("pulsestages.screenshots.dir", screenshotDir)
@@ -270,4 +279,14 @@ dependencies {
     testImplementation(libs.androidx.work.testing)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
+
+    // The on-device end-to-end suite (src/androidTest, JUnit 4): only the test APK carries these; nothing is added to
+    // the app (its merged manifest, and MergedManifestTest, stay unchanged).
+    androidTestImplementation(libs.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }

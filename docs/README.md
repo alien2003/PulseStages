@@ -31,6 +31,7 @@ Russian.
 | [Contributing](../CONTRIBUTING.md) | Bug reports with logs, proposals, pull requests, commit style, tests, translations, changing algorithm defaults |
 | [Security policy](../SECURITY.md) | Supported versions, private vulnerability reporting, scope, the no-network design, signing key policy, verifying downloads |
 | [Screenshots and demo mode](SCREENSHOTS.md) | How the README screenshots are rendered from synthetic data, and the demo mode of debug builds |
+| [On-device end-to-end suite](../tools/device-test/README.md) | Testing the installed app on a phone with real Health Connect data without polluting it: what is tested, every Health Connect call, the safety guarantees, how to run it and what to do on the phone |
 
 ## Training and validation
 

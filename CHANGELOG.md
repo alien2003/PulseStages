@@ -10,6 +10,18 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+### Added
+
+- **On-device end-to-end suite** (`app/src/androidTest`, `tools/device-test/run-device-tests.sh`). Runs against the
+  debug build installed on a phone and its real Health Connect data without reinstalling the app: snapshots of
+  everything the suite could touch before and after the run (the app's own records must stay byte-identical, other
+  apps' records unchanged); the backfill, sync and recompute pipeline over the real history with every write captured
+  in memory, with invariant, idempotency, recompute and policy checks and a per-session report; one test record in the
+  `ps-e2e:` namespace that is upserted, versioned and deleted within a minute; a read-only tour of every screen with
+  screenshots; a schedule report. A safety guard refuses every write or delete outside `ps-e2e:`, the read budget keeps
+  the suite within Health Connect's quota, and a cleanup step that always runs removes every test record
+  ([tools/device-test/README.md](tools/device-test/README.md)).
+
 ## [0.1.0] - 2026-10-14
 
 First release. PulseStages estimates sleep stages (awake, light, deep, REM) from the heart rate that OHealth (OPPO
