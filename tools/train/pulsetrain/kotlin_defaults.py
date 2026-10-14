@@ -9,8 +9,13 @@
 - ``HYBRID_PRIOR_EXPONENT``: ``hybrid.priorExponent`` of the patch when a run chose it (the pre-registered
   stage-proportion experiment, :mod:`pulsetrain.bias`; ``selection.priorExponent.note`` explains the choice),
   else 1.0;
-- ``HYBRID_SHORT_SESSION_MAX_MIN``: ``hybrid.shortSessionMaxMin`` of the patch when a run chose it (the
-  pre-registered nap experiment, :mod:`pulsetrain.naps`; ``selection.shortSessionMaxMin.note``), else 0.0 (off);
+- ``NAP_MAX_SESSION_MIN``: ``napMode.maxSessionMin`` of the patch when a run chose it (``selection.napMode.note``);
+  runs made before the two processing modes stored the same threshold as ``hybrid.shortSessionMaxMin`` (the
+  pre-registered nap experiment, :mod:`pulsetrain.naps`; ``selection.shortSessionMaxMin.note``), which is read as
+  ``napMode.maxSessionMin``; else 180.0, the nap threshold the baseline and sanity-check rules used before the modes;
+- ``NAP_ESTIMATOR``: ``napMode.estimator`` of the patch, else the run's ``estimator``;
+- ``NAP_HYBRID_DURATION_MODEL``, ``NAP_HYBRID_EMISSION_WEIGHT``, ``NAP_HYBRID_TIME_PRIOR_WEIGHT``: the nap decoder
+  overrides ``napMode.hybrid.*`` of the patch, else ``null`` (naps use the night's decoder parameters);
 - ``HMM_EMISSIONS``, ``HMM_MEAN_BOUTS``, ``HMM_TRANSITIONS``, ``HMM_TIME_PRIOR``: the supervised MLE estimates when
   the trained HMM scored higher than the physiology table and passed the validity gate (``report.hmm_validity``),
   otherwise references to the specification's defaults (``EmissionTable.PHYSIOLOGY``, ``MeanBouts()``,
@@ -35,6 +40,7 @@ KOTLIN_PATH = (REPO_ROOT / "core-algo" / "src" / "main" / "kotlin" / "io" / "git
                / "algo" / "params" / "TrainedDefaults.kt")
 ESTIMATORS = ("RULES", "HMM", "HYBRID")
 DURATION_MODELS = ("EXPLICIT", "GEOMETRIC")
+DEFAULT_NAP_MAX_SESSION_MIN = 180.0     # the threshold of the baseline / sanity-check rules before the modes
 STATE_ORDER = ("awake", "light", "deep", "rem")       # EmissionTable constructor order
 
 
@@ -86,6 +92,65 @@ def _emission_table(em: Mapping) -> list[str]:
         out.append("                ),")
     out.append("        )")
     return out
+
+
+def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
+    """The ``NAP_*`` constants (see the module docstring)."""
+    hyb = defaults.get("hybrid") or {}
+    nap = defaults.get("napMode") or {}
+    unknown = sorted(set(nap) - {"maxSessionMin", "estimator", "hybrid"})
+    if unknown:
+        raise DefaultsError(f"napMode.{unknown[0]} is not a trained default")
+    if "maxSessionMin" in nap and "shortSessionMaxMin" in hyb:
+        raise DefaultsError("napMode.maxSessionMin and the legacy hybrid.shortSessionMaxMin are both given")
+    if "maxSessionMin" in nap:
+        threshold, key = nap["maxSessionMin"], "napMode.maxSessionMin"
+        why = str((sel.get("napMode") or {}).get("note") or f"chosen in run {run}")
+    elif "shortSessionMaxMin" in hyb:
+        threshold, key = hyb["shortSessionMaxMin"], "hybrid.shortSessionMaxMin"
+        why = (str((sel.get("shortSessionMaxMin") or {}).get("note") or f"chosen in run {run}")
+               + "; the run stored it as hybrid.shortSessionMaxMin, which the nap threshold replaced")
+    else:
+        threshold, key = DEFAULT_NAP_MAX_SESSION_MIN, "napMode.maxSessionMin"
+        why = ("not part of this run's selection: the threshold that the baseline and sanity-check rules used before "
+               "the two modes")
+    value = _num(threshold, key)
+    if not 0 <= float(threshold) <= 720:
+        raise DefaultsError(f"{key} must be in 0..720")
+    L = _kdoc(f"Nap mode: sessions shorter than this many minutes are naps, 0 = every session is a night ({why}).",
+              "    ")
+    L.append(f"    const val NAP_MAX_SESSION_MIN: Double = {value}")
+    L.append("")
+    nap_est = nap.get("estimator", est)
+    if nap_est not in ESTIMATORS:
+        raise DefaultsError(f"napMode.estimator must be one of {ESTIMATORS}, got {nap_est!r}")
+    why = "chosen in run " + run if "estimator" in nap else "not part of this run's selection: the night's estimator"
+    L += _kdoc(f"Nap mode: the estimator of naps ({why}).", "    ")
+    L.append(f"    val NAP_ESTIMATOR: EstimatorType = EstimatorType.{nap_est}")
+    L.append("")
+    nh = nap.get("hybrid") or {}
+    unknown = sorted(set(nh) - {"durationModel", "emissionWeight", "timePriorWeight"})
+    if unknown:
+        raise DefaultsError(f"napMode.hybrid.{unknown[0]} is not a trained default")
+    same = "null = the night's value; this run chose no nap decoder"
+    if nh.get("durationModel") is not None and nh["durationModel"] not in DURATION_MODELS:
+        raise DefaultsError(f"napMode.hybrid.durationModel must be one of {DURATION_MODELS}")
+    dm = f"DurationModel.{nh['durationModel']}" if nh.get("durationModel") is not None else "null"
+    why = f"chosen in run {run}" if dm != "null" else same
+    L += _kdoc(f"Nap mode: duration model of the hybrid decoder for naps ({why}).", "    ")
+    L.append(f"    val NAP_HYBRID_DURATION_MODEL: DurationModel? = {dm}")
+    L.append("")
+    for k, name, what in (("emissionWeight", "NAP_HYBRID_EMISSION_WEIGHT", "exponent of the scaled likelihoods"),
+                          ("timePriorWeight", "NAP_HYBRID_TIME_PRIOR_WEIGHT", "weight of the time-of-night prior")):
+        v = nh.get(k)
+        if v is not None and not float(v) >= 0:
+            raise DefaultsError(f"napMode.hybrid.{k} must be >= 0")
+        text = _num(v, f"napMode.hybrid.{k}") if v is not None else "null"
+        why = f"chosen in run {run}" if v is not None else same
+        L += _kdoc(f"Nap mode: {what} of the hybrid decoder for naps ({why}).", "    ")
+        L.append(f"    val {name}: Double? = {text}")
+        L.append("")
+    return L
 
 
 def render(defaults: Mapping, selection: Mapping, run: str, created_at: str, dataset: str) -> str:
@@ -150,17 +215,7 @@ def render(defaults: Mapping, selection: Mapping, run: str, created_at: str, dat
                f"({why}).", "    ")
     L.append(f"    const val HYBRID_PRIOR_EXPONENT: Double = {beta}")
     L.append("")
-    if "shortSessionMaxMin" in hyb:
-        short = _num(hyb["shortSessionMaxMin"], "shortSessionMaxMin")
-        if not float(hyb["shortSessionMaxMin"]) >= 0:
-            raise DefaultsError("hybrid.shortSessionMaxMin must be >= 0")
-        why = str((sel.get("shortSessionMaxMin") or {}).get("note") or f"chosen in run {run}")
-    else:
-        short, why = "0.0", "not part of this run's selection: 0 = off, every session uses the bundle's stageLogBias"
-    L += _kdoc(f"Hybrid decoder: sessions shorter than this many minutes use the bundle's stageLogBiasShort instead "
-               f"of stageLogBias ({why}).", "    ")
-    L.append(f"    const val HYBRID_SHORT_SESSION_MAX_MIN: Double = {short}")
-    L.append("")
+    L += _nap_mode(defaults, sel, run, est)
     if trained_hmm:
         h = defaults["hmm"]
         pool = hmm_sel.get("trainedPool", "?")

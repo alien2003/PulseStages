@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.model.WarningCode
@@ -77,6 +78,15 @@ fun NotEstimatedReason.labelRes(): Int =
         NotEstimatedReason.NO_HR_DATA -> R.string.not_estimated_no_hr
         NotEstimatedReason.LOW_COVERAGE -> R.string.not_estimated_low_coverage
         NotEstimatedReason.SESSION_TOO_SHORT -> R.string.not_estimated_too_short
+        NotEstimatedReason.NAP_SKIPPED -> R.string.not_estimated_nap_skipped
+    }
+
+/** Localized name of a processing mode (night or nap). */
+@StringRes
+fun SessionMode.labelRes(): Int =
+    when (this) {
+        SessionMode.NIGHT -> R.string.session_mode_night
+        SessionMode.NAP -> R.string.session_mode_nap
     }
 
 /** Localized reason why nothing could be read from Health Connect. */

@@ -5,10 +5,13 @@ import io.github.alien2003.pulsestages.algo.metrics.EpochLabels
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 
 /**
- * `features --nights <dir|file> --out <features.csv> [--params <json>]`: one row per session epoch with
- * night_id, subject, epoch, start_ms, has_data, label (majority reference stage, see EpochLabels; empty if none), the
- * hybrid features in [HybridFeatureExtractor.FEATURE_NAMES] order, then the HMM base features not already among them:
- * cyclePhase (empty where undefined) and steps (hrNorm, hrVar, hrSlope and t are the identical hybrid columns).
+ * `features --nights <dir|file> --out <features.csv> [--params <json>] [--nap-proxies <minutes,...>]`: one row per
+ * session epoch with night_id, subject, epoch, start_ms, has_data, label (majority reference stage, see EpochLabels;
+ * empty if none), the hybrid features in [HybridFeatureExtractor.FEATURE_NAMES] order, then the HMM base features not
+ * already among them: cyclePhase (empty where undefined) and steps (hrNorm, hrVar, hrSlope and t are the identical
+ * hybrid columns). `--nap-proxies` adds the rows of the nap proxies of every night ([NapProxies], night id
+ * `<night id>-nap<L>`), the training rows of a bundle's nap model; the features are the same for nights and naps (a nap
+ * model must declare the same feature set).
  */
 internal object FeaturesCommand {
     /** Columns before the features. */
@@ -25,8 +28,9 @@ internal object FeaturesCommand {
         args: List<String>,
         out: Appendable,
     ): Int {
-        val options = Options("features", args, setOf("nights", "out", "params"))
-        val nights = NightFiles.read(options.requiredPath("nights"))
+        val options = Options("features", args, setOf("nights", "out", "params", "nap-proxies"))
+        val read = NightFiles.read(options.requiredPath("nights"))
+        val nights = options["nap-proxies"]?.let { NapProxies.withProxies(read, NapProxies.parseLengths(it)) } ?: read
         val params = ParamsFiles.load(options.path("params"))
         val target = options.requiredPath("out")
         var rows = 0

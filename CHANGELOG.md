@@ -12,41 +12,67 @@ releases").
 
 ### Changed
 
+- **Nights and naps are two processing modes** (ALGORITHM.md §18, README "Naps"). One threshold, Settings → **Naps**
+  → "Nap threshold" (`napMode.maxSessionMin`, 180 min; 0 = no naps), decides whether a session is a nap or a night;
+  it replaces the three 180-min thresholds `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and
+  `post.proportionsMinSessionMin` of the entries below (a settings file with the old keys loads with them ignored).
+  The source setting "Minimum session length" stays the minimum below which sessions are ignored. A nap gets its own
+  estimator ("Estimator for naps", HYBRID), what is written for it ("Written for a nap": **Stages**, as before;
+  **Asleep / awake**, only AWAKE and SLEEPING in Health Connect; **Nothing**, not estimated and not written), and its
+  own values of the minimum bouts, the stage-share corridors and whether they are checked (off), the uncertain-epoch
+  threshold and policy, and the hybrid decoder (duration model, emission and time-prior weights); empty = the
+  value of nights. The model bundle may carry a nap model (`nap` section, docs/INTERCHANGE.md) that decodes naps
+  instead of the main model; the bundled model has none, so naps are decoded as before. **With the default settings
+  every night and nap is estimated exactly as before** (checked on synthetic sessions against the previous build, and
+  on the validation nights and nap segments: byte-identical output). Calibration on reference nights and the
+  unsupervised adaptation use nights only.
+- **Nights list**: a **Nap** badge and a filter (All / Nights / Naps). **Night detail** says whether the session was
+  processed as a night or a nap, and for a nap that its stages are rough. **Home** counts written nights and naps
+  apart. **Compare** shows kappa and accuracy of nights and naps apart when the reference sessions include naps.
+- The notes of every written session have `"mode"` (`NIGHT` / `NAP`); the CSV export has a last column `mode`;
+  `algo-cli evaluate` reports metrics by mode (`byMode`), evaluates nap proxies (`--nap-proxies 30,60,90,120`) and
+  takes fold bundles with nap sections (`--fold-models`); `--estimator` sets the estimator of nights and naps.
+- The ledger database moves to schema version 2 (the mode of every session, and whether a nap was written as asleep /
+  awake only). The migration keeps every row; rows of sessions shorter than 180 min become naps.
 - **Demo mode** (debug builds only) is a switch in Settings → "Debug build" instead of a second launcher icon
   ("PulseStages demo"). The Nights list, the night detail and Compare follow it at once, without a restart
   (background estimation and the Home actions keep working with the real data); every build has a single launcher
   icon. The switch is a per-device debug convenience in its own preferences file, not a setting (not exported, not
   part of the params hash). `ReleaseApkTest` checks that the minified release APK has no demo class, resource or text.
-- **Naps and the elevated-heart-rate baseline**: sessions shorter than `baselineMinSessionMin` (new, Settings →
-  Features, 180 min; 0 = as before) no longer enter the rolling nadir baseline and are never compared with it, so
-  estimated daytime naps neither inflate the baseline of the nights nor get flagged "elevated heart rate" themselves.
-  Their nadir is still stored; the baseline query counts only long enough sessions, so a changed threshold applies to
-  the whole history.
-- **Naps and the stage-share checks**: the sanity check and the proportion calibration run only for sessions of at
-  least `proportionsMinSessionMin` (new, Settings → Post-processing, 180 min; 0 = as before); naps no longer get
-  `SANITY_DEEP_LOW` and a low-confidence flag for having no deep sleep.
-- **Naps get their own stage correction.** Sessions shorter than 180 min (`hybrid.shortSessionMaxMin`, new setting
-  "Short-session (nap) threshold"; 0 = off) are decoded with the bundle's new short-session log-bias
-  `stageLogBiasShort` instead of the whole-night `stageLogBias`. Chosen by a pre-registered evaluation on nap-length
-  segments of the validation nights (ALGORITHM.md §13.11): accuracy 0.41 → 0.49, summed stage-share error 93 → 72
-  points, most of the false REM in naps removed. Sessions of 180 min or more are decoded exactly as before; with the
-  default "Minimum session length" (90 min), short nights of 90–180 min also get the short-session correction. The
-  pre-registered evaluation covered sessions up to 120 min; a post-hoc check at 150 and 170 min found no clear gain
-  (share error better on one sampling variant, worse on the other; too little REM). Nap estimates remain rough
-  (README, "Naps"). In the evaluation about 4 in 5 naps were flagged low-confidence, mostly by the stage-share sanity
-  check; since that check now skips sessions shorter than 180 min (above), only a too-small heart-rate range flags a
-  nap (about 1 in 3 to 2 in 5 of the evaluated 30–120-min naps; the stages are the same). New bundle
-  `pulsestages-walch+bidsleep-mlp-naps-final` (same classifier); because the bundle and AlgoParams changed, earlier
-  estimates get a new params hash and are offered for recomputation, and the classifier part of a personal
+- **Naps and the elevated-heart-rate baseline**: naps, sessions shorter than the nap threshold (180 min, now
+  `napMode.maxSessionMin`, above; 0 = as before) no longer enter the rolling nadir baseline and are never compared with
+  it, so estimated daytime naps neither inflate the baseline of the nights nor get flagged "elevated heart rate"
+  themselves. Their nadir is still stored; the baseline query counts only long enough sessions, so a changed threshold
+  applies to the whole history.
+- **Naps and the stage-share checks**: the sanity check and the proportion calibration run only for nights (sessions
+  of at least the nap threshold, 180 min; 0 = as before; for naps with "Check the stage shares of naps"); naps no
+  longer get `SANITY_DEEP_LOW` and a low-confidence flag for having no deep sleep.
+- **Naps get their own stage correction.** Sessions shorter than 180 min (the nap threshold; 0 = off) are decoded with
+  the bundle's new short-session log-bias `stageLogBiasShort` instead of the whole-night `stageLogBias`. Chosen by a
+  pre-registered evaluation on nap-length segments of the validation nights (ALGORITHM.md §13.11): accuracy 0.41 → 0.49,
+  summed stage-share error 93 → 72 points, most of the false REM in naps removed. Sessions of 180 min or more are
+  decoded exactly as before; with the default "Minimum session length" (90 min), short nights of 90–180 min also get the
+  short-session correction. The pre-registered evaluation covered sessions up to 120 min; a post-hoc check at 150 and
+  170 min found no clear gain (share error better on one sampling variant, worse on the other; too little REM). Nap
+  estimates remain rough (README, "Naps"). In the evaluation about 4 in 5 naps were flagged low-confidence, mostly by
+  the stage-share sanity check; since that check now skips sessions shorter than 180 min (above), only a too-small
+  heart-rate range flags a nap (about 1 in 3 to 2 in 5 of the evaluated 30–120-min naps; the stages are the same). New
+  bundle `pulsestages-walch+bidsleep-mlp-naps-final` (same classifier); because the bundle and AlgoParams changed,
+  earlier estimates get a new params hash and are offered for recomputation, and the classifier part of a personal
   calibration fitted for the previous bundle is ignored until you calibrate again.
 - **Source priority**: a session lying mostly inside a longer session of another app while covering at most half of
   it (e.g. a 40-min fragment) is a piece of that night and no longer replaces it, whatever the priority — as long as
   that longer session is used itself; a piece of a session that lost to another night is weighed by priority as before.
-- `baselineMinSessionMin` and `proportionsMinSessionMin` are part of the params hash: nights estimated before are
+- The nap mode (`napMode`, including the nap threshold) is part of the params hash: nights estimated before are
   offered for recomputation.
 
 ### Added
 
+- Tests of the two processing modes at every layer: the mode boundaries and the one threshold, the nap overrides and
+  output policies, the nap model of the bundle (parsing, validation, fingerprint, fallback), the ledger migration
+  against the exported schemas, the pipeline (SLEEP_WAKE stages, SKIP, recompute), the UI state of the badge, filter
+  and counters, render tests of the Naps group, the badge and the filter, and a regression test that compares 767
+  estimates with the ones recorded on the build before the two modes.
 - Render tests of every Settings group (every field, option, the HMM tables and the About card) and of every other
   screen in its main states, in English and Russian, at font scale 2 and in a wide window; a test that resolves every
   text of the settings catalog; a scan of every string with `%` for invalid format patterns.

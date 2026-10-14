@@ -36,6 +36,7 @@ object SettingsCatalog {
             scheduleSection,
             writeSection,
             estimatorSection,
+            napsSection,
             preprocessSection,
             featuresSection,
             rulesSection,

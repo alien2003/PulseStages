@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Настройки: группа «Дневной сон» (AlgoParams.napMode) -->
+    <string name="settings_section_naps">Дневной сон</string>
+    <string name="settings_section_naps_summary">Сессии короче порога дневного сна: как они оцениваются и записываются</string>
+    <string name="set_nap_max_session_title">Порог дневного сна</string>
+    <string name="set_nap_max_session_hint">Сессии короче этого — дневной сон, длиннее — ночи. Дневной сон никогда не сравнивается с базовой линией пульса и не входит в неё, проверка долей стадий его пропускает. 0 — дневного сна нет: каждая сессия считается ночью. Сессии короче минимальной длины сессии источников не обрабатываются вовсе.</string>
+    <string name="set_nap_output_title">Что записывать для дневного сна</string>
+    <string name="set_nap_output_hint">Стадии: как для ночи. Сон / бодрствование: только сон и пробуждения (оценка стадий дневного сна грубая). Ничего: дневной сон не оценивается и ничего не записывается; записанная ранее сессия дневного сна удаляется при пересчёте.</string>
+    <string name="option_nap_output_stages">Стадии</string>
+    <string name="option_nap_output_sleep_wake">Сон / бодрствование</string>
+    <string name="option_nap_output_skip">Ничего</string>
+    <string name="set_nap_estimator_title">Оценщик дневного сна</string>
+    <string name="set_nap_estimator_hint">Оценщик для дневного сна; оценщик ночей задаётся в разделе «Алгоритм».</string>
+    <string name="settings_sub_nap_post">Постобработка дневного сна</string>
+    <string name="settings_sub_nap_hybrid">Гибридный декодер для дневного сна</string>
+    <string name="set_nap_check_proportions_title">Проверять доли стадий дневного сна</string>
+    <string name="set_nap_check_proportions_hint">Применять проверку правдоподобия (и калибровку долей, если она включена) и к дневному сну. По умолчанию выключено: диапазоны для целой ночи не описывают дневной сон, в котором часто вовсе нет глубокого сна или фазы REM.</string>
+    <string name="set_nap_min_deep_title">Минимальный эпизод DEEP в дневном сне</string>
+    <string name="set_nap_min_deep_hint">Более короткие эпизоды глубокого сна в дневном сне поглощаются соседом. Пусто — значение для ночей.</string>
+    <string name="set_nap_min_rem_title">Минимальный эпизод REM в дневном сне</string>
+    <string name="set_nap_min_rem_hint">Более короткие эпизоды REM в дневном сне поглощаются соседом. Пусто — значение для ночей.</string>
+    <string name="set_nap_min_awake_title">Минимальное пробуждение в дневном сне</string>
+    <string name="set_nap_min_awake_hint">Более короткие пробуждения внутри дневного сна поглощаются соседом. Пусто — значение для ночей.</string>
+    <string name="set_nap_sanity_deep_min_title">Минимальная доля DEEP в дневном сне</string>
+    <string name="set_nap_sanity_deep_min_hint">Дневной сон с меньшей долей глубокого сна помечается как низкая уверенность (только при проверке долей стадий дневного сна). Пусто — значение для ночей.</string>
+    <string name="set_nap_sanity_deep_max_title">Максимальная доля DEEP в дневном сне</string>
+    <string name="set_nap_sanity_deep_max_hint">Дневной сон с большей долей глубокого сна помечается как низкая уверенность (только при проверке долей стадий дневного сна). Пусто — значение для ночей.</string>
+    <string name="set_nap_sanity_rem_max_title">Максимальная доля REM в дневном сне</string>
+    <string name="set_nap_sanity_rem_max_hint">Дневной сон с большей долей REM помечается как низкая уверенность (только при проверке долей стадий дневного сна). Пусто — значение для ночей.</string>
+    <string name="set_nap_low_conf_threshold_title">Неуверенные эпохи дневного сна ниже</string>
+    <string name="set_nap_low_conf_threshold_hint">Эпохи дневного сна, у которых вероятность самой вероятной стадии ниже, считаются неуверенными. Пусто — значение для ночей.</string>
+    <string name="set_nap_low_conf_policy_title">Неуверенные эпохи дневного сна</string>
+    <string name="set_nap_low_conf_policy_hint">Оставить стадию декодера или записывать лёгкий сон для неуверенных эпох дневного сна.</string>
+    <string name="set_nap_duration_model_title">Модель длительностей дневного сна</string>
+    <string name="set_nap_duration_model_hint">Как гибридный декодер моделирует длительность эпизодов в дневном сне.</string>
+    <string name="set_nap_emission_weight_title">Вес выходов классификатора в дневном сне</string>
+    <string name="set_nap_emission_weight_hint">Насколько сильно учитывается выход классификатора в дневном сне. Пусто — значение для ночей.</string>
+    <string name="set_nap_time_prior_title">Априорное распределение по времени в дневном сне</string>
+    <string name="set_nap_time_prior_hint">Вес типичной стадии для этого времени от начала сессии в дневном сне. Пусто — значение для ночей.</string>
+    <string name="option_same_as_nights">Как для ночей</string>
+    <string name="settings_same_as_nights_value">Как для ночей: %1$s</string>
+    <!-- Список ночей и подробности ночи -->
+    <string name="nights_marker_nap">Дневной сон</string>
+    <string name="nights_filter_label">Показывать</string>
+    <string name="nights_filter_all">Все</string>
+    <string name="nights_filter_nights">Ночи</string>
+    <string name="nights_filter_naps">Дневной сон</string>
+    <string name="nights_filter_empty_nights">В списке нет ночей.</string>
+    <string name="nights_filter_empty_naps">В списке нет дневного сна. Сессии короче порога дневного сна появятся здесь, если они не короче минимальной длины сессии источников.</string>
+    <string name="night_detail_mode">Обработано как</string>
+    <string name="session_mode_night">Ночь</string>
+    <string name="session_mode_nap">Дневной сон</string>
+    <string name="night_detail_nap_rough">Оценка дневного сна грубая: на тестовых данных совпала с лабораторией сна лишь примерно половина стадий, а короткий дневной сон часто оценивается не лучше, чем если считать всё лёгким сном. Воспринимайте стадии как приблизительные.</string>
+    <string name="night_detail_nap_sleep_wake">В Health Connect записано только «сон / бодрствование»; здесь показаны стадии, оценённые приложением.</string>
+    <string name="not_estimated_nap_skipped">Дневной сон не оценивается (Настройки, «Дневной сон»).</string>
+    <!-- Главный экран и сравнение -->
+    <string name="home_counter_nights">ночей записано</string>
+    <string name="home_counter_naps">дневного сна записано</string>
+    <string name="compare_by_mode_title">Ночи и дневной сон отдельно</string>
+    <string name="compare_mode_metrics">%1$s: каппа %2$s, точность %3$s</string>
+</resources>

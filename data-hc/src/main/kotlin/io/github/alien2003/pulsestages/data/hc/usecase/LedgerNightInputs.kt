@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.usecase
 
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.pipeline.HealthAccessGuard
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightInputReader
@@ -30,12 +31,15 @@ class LedgerNightInputs
         /** The ledger night with [clientRecordId], or null. */
         suspend fun night(clientRecordId: String): EstimatedNightEntity? = ledger.nights.findByClientRecordId(clientRecordId)
 
-        /** Number of nights that currently have an output (WRITTEN). */
-        suspend fun writtenNightCount(): Int = ledger.nights.countWithStatus(NightStatus.WRITTEN)
+        /** Number of nights (not naps: [SessionMode.NIGHT] as recorded) that currently have an output (WRITTEN). */
+        suspend fun writtenNightCount(): Int = ledger.nights.countWithStatusAndMode(NightStatus.WRITTEN, SessionMode.NIGHT)
 
-        /** The latest [limit] WRITTEN nights, oldest first. */
+        /** The latest [limit] WRITTEN nights (not naps, [SessionMode.NIGHT] as recorded), oldest first. */
         suspend fun latestWrittenNights(limit: Int): List<EstimatedNightEntity> =
-            ledger.nights.findOverlapping(Long.MIN_VALUE, Long.MAX_VALUE, listOf(NightStatus.WRITTEN)).takeLast(limit.coerceAtLeast(0))
+            ledger.nights
+                .findOverlapping(Long.MIN_VALUE, Long.MAX_VALUE, listOf(NightStatus.WRITTEN))
+                .filter { it.mode == SessionMode.NIGHT }
+                .takeLast(limit.coerceAtLeast(0))
 
         /**
          * The estimation input of [night] with [settings] and the [granted] permissions. Throws

@@ -8,12 +8,15 @@ import io.github.alien2003.pulsestages.algo.metrics.NightScore
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
 import io.github.alien2003.pulsestages.algo.params.HmmParams
 import io.github.alien2003.pulsestages.algo.params.HybridParams
+import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
+import io.github.alien2003.pulsestages.algo.testing.NapModels
 import io.github.alien2003.pulsestages.algo.testing.SyntheticHybridModels
 import io.github.alien2003.pulsestages.cli.CliTestSupport.cli
 import io.github.alien2003.pulsestages.cli.CliTestSupport.ok
@@ -385,19 +388,151 @@ class EvaluateCommandTest {
     }
 
     @Test
-    fun `the short-session log-bias applies only to sessions shorter than shortSessionMaxMin`() {
+    fun `the short-session log-bias applies only to naps, sessions shorter than napMode maxSessionMin`() {
         val biased = dir.resolve("short-biased.json")
         Files.writeString(biased, SyntheticHybridModels.default.copy(stageLogBiasShort = listOf(0.0, 3.0, 0.0, 0.0)).toJson())
         assertTrue(records.all { it.input.sessionEndMs - it.input.sessionStartMs > 180 * 60_000L }, "whole nights")
         val grid = dir.resolve("short-grid.json")
-        Files.writeString(grid, """[{}, {"hybrid": {"shortSessionMaxMin": 0.0}}, {"hybrid": {"shortSessionMaxMin": 100000.0}}]""")
+        Files.writeString(grid, """[{}, {"napMode": {"maxSessionMin": 0.0}}, {"napMode": {"maxSessionMin": 720.0}}]""")
         val out = dir.resolve("short-grid-out.json")
         val input = arrayOf("--nights", nightsDir().toString(), "--model", biased.toString(), "--params", pinnedFile().toString())
         ok("evaluate", *input, "--param-grid", grid.toString(), "--out", out.toString())
         val blocks = checkNotNull(readJson(out)["grid"]).jsonArray.map { it.jsonObject }
-        assertEquals(180.0, blocks[0].obj("params").obj("hybrid").num("shortSessionMaxMin"), "the default is 180 min")
+        assertEquals(180.0, blocks[0].obj("params").obj("napMode").num("maxSessionMin"), "the default is 180 min")
         assertEquals(blocks[1].obj("pooled"), blocks[0].obj("pooled"), "nights are longer than the default threshold")
-        assertTrue(lightPredicted(blocks[2]) > lightPredicted(blocks[0]), "every session short: the LIGHT bias of +3 applies")
+        assertTrue(lightPredicted(blocks[2]) > lightPredicted(blocks[0]), "every session a nap: the LIGHT bias of +3 applies")
+        assertEquals(
+            6,
+            blocks[2]
+                .obj("byMode")
+                .obj("NAP")
+                .obj("nights")
+                .int("evaluated"),
+        )
+        assertEquals(
+            6,
+            blocks[0]
+                .obj("byMode")
+                .obj("NIGHT")
+                .obj("nights")
+                .int("evaluated"),
+        )
+    }
+
+    private fun JsonObject.int(key: String): Int = checkNotNull(this[key]).jsonPrimitive.int
+
+    @Test
+    fun `nap proxies are evaluated with the bundle's nap section and the metrics are split by mode`() {
+        val napSection = NapModels.from(MinimalBundles.logreg(), stageLogBias = listOf(0.0, 1.0, 0.0, -1.0))
+        val bundle = SyntheticHybridModels.default.copy(nap = napSection)
+        val model = Files.writeString(dir.resolve("nap-model.json"), bundle.toJson())
+        val out = dir.resolve("naps.json")
+        val perEpoch = dir.resolve("naps.csv")
+        val args =
+            arrayOf("--model", model.toString(), "--nap-proxies", "30,90", "--out", out.toString(), "--per-epoch", perEpoch.toString())
+        ok("evaluate", "--nights", nightsDir().toString(), *args)
+
+        val metrics = readJson(out)
+        assertEquals(18, metrics.obj("nights").int("total"))
+        val byMode = metrics.obj("byMode")
+        assertEquals(6, byMode.obj("NIGHT").obj("nights").int("evaluated"))
+        assertEquals(12, byMode.obj("NAP").obj("nights").int("evaluated"))
+        val perNight = checkNotNull(metrics["perNight"]).jsonArray.map { it.jsonObject }
+        val ids = perNight.map { checkNotNull(it["id"]).jsonPrimitive.content }
+        assertEquals(records.map { it.id } + records.map { "${it.id}-nap30" } + records.map { "${it.id}-nap90" }, ids)
+        assertEquals(List(6) { "NIGHT" } + List(12) { "NAP" }, perNight.map { checkNotNull(it["mode"]).jsonPrimitive.content })
+        // The pooled matrices of the modes add up to the whole, and NAP equals the library with the nap model.
+        val night = longMatrix(byMode.obj("NIGHT").obj("pooled"), "confusion")
+        val nap = longMatrix(byMode.obj("NAP").obj("pooled"), "confusion")
+        assertEquals(longMatrix(metrics.obj("pooled"), "confusion"), night.zip(nap) { a, b -> a.zip(b) { x, y -> x + y } })
+        assertNumber(proxyMatrix(SleepStager(bundle), listOf(30.0, 90.0)).kappa, byMode.obj("NAP").obj("pooled").num("kappa"), "NAP kappa")
+        val mainOnly = proxyMatrix(SleepStager(SyntheticHybridModels.default), listOf(30.0, 90.0))
+        assertTrue(mainOnly != proxyMatrix(SleepStager(bundle), listOf(30.0, 90.0)), "the nap section changes the naps")
+        val rows = Files.readAllLines(perEpoch).drop(1)
+        assertTrue(rows.any { it.contains("-nap30,") } && rows.any { it.contains("-nap90,") })
+    }
+
+    /** The pooled confusion matrix of the nap proxies of [lengths] of every night, estimated by [stager]. */
+    private fun proxyMatrix(
+        stager: SleepStager,
+        lengths: List<Double>,
+    ): ConfusionMatrix =
+        records.flatMap { r -> lengths.mapNotNull { NapProxies.cut(r, it) } }.fold(ConfusionMatrix.EMPTY) { acc, proxy ->
+            val estimate = (stager.run(proxy.input, AlgoParams()) as EstimationOutcome.Estimated).estimate
+            assertEquals(SessionMode.NAP, estimate.mode)
+            acc + IntervalScoring.score(proxy.labels, estimate.stages).confusion
+        }
+
+    @Test
+    fun `fold models with a nap section decode each subject's naps with that subject's nap model`() {
+        val folds = Files.createDirectories(dir.resolve("nap-folds"))
+        val withNap = SyntheticHybridModels.default.copy(nap = NapModels.from(MinimalBundles.logreg()))
+        for (subject in listOf("s0", "s1", "s2")) Files.writeString(folds.resolve("$subject.json"), withNap.toJson())
+        val nights = nightsDir().toString()
+        val out = dir.resolve("nap-folds.json")
+        ok("evaluate", "--nights", nights, "--fold-models", folds.toString(), "--nap-proxies", "60", "--out", out.toString())
+        val single = dir.resolve("nap-single.json")
+        val model = Files.writeString(dir.resolve("nap-single-model.json"), withNap.toJson())
+        ok("evaluate", "--nights", nights, "--model", model.toString(), "--nap-proxies", "60", "--out", single.toString())
+        assertEquals(readJson(single).obj("byMode"), readJson(out).obj("byMode"))
+        assertEquals(
+            6,
+            readJson(out)
+                .obj("byMode")
+                .obj("NAP")
+                .obj("estimatorsUsed")
+                .int("HYBRID"),
+        )
+        // Without the nap section in the fold bundle the same proxies decode differently.
+        for (subject in listOf("s0", "s1", "s2")) Files.writeString(folds.resolve("$subject.json"), SyntheticHybridModels.default.toJson())
+        val plain = dir.resolve("plain-folds.json")
+        ok("evaluate", "--nights", nights, "--fold-models", folds.toString(), "--nap-proxies", "60", "--out", plain.toString())
+        assertTrue(readJson(plain).obj("byMode").obj("NAP") != readJson(out).obj("byMode").obj("NAP"))
+        assertEquals(readJson(plain).obj("byMode").obj("NIGHT"), readJson(out).obj("byMode").obj("NIGHT"), "nights do not change")
+    }
+
+    @Test
+    fun `the estimator option sets the estimator of nights and naps`() {
+        val out = dir.resolve("rules-naps.json")
+        ok("evaluate", "--nights", nightsDir().toString(), "--estimator", "RULES", "--nap-proxies", "60", "--out", out.toString())
+        val metrics = readJson(out)
+        assertEquals("RULES", checkNotNull(metrics.obj("params").obj("napMode")["estimator"]).jsonPrimitive.content)
+        assertEquals(
+            6,
+            metrics
+                .obj("byMode")
+                .obj("NAP")
+                .obj("estimatorsUsed")
+                .int("RULES"),
+        )
+        assertEquals(
+            6,
+            metrics
+                .obj("byMode")
+                .obj("NIGHT")
+                .obj("estimatorsUsed")
+                .int("RULES"),
+        )
+    }
+
+    @Test
+    fun `a nap proxy is cut like tools train's nap_proxy`() {
+        val night = records.first()
+        val start = night.input.sessionStartMs
+        val end = start + 3_600_000L
+        val proxy = checkNotNull(NapProxies.cut(night, 60.0))
+        assertEquals("${night.id}-nap60", proxy.id)
+        assertEquals(night.subject, proxy.subject)
+        assertEquals(start, proxy.input.sessionStartMs)
+        assertEquals(end, proxy.input.sessionEndMs)
+        val context = start - 1_800_000L
+        assertEquals(night.input.heartRate.filter { it.timeMs in context..end }, proxy.input.heartRate)
+        assertEquals(night.input.steps.filter { it.endMs > context && it.endMs <= end }, proxy.input.steps)
+        assertEquals(night.labels.filter { it.startMs >= start && it.endMs <= end }, proxy.labels)
+        assertTrue(proxy.input.heartRate.isNotEmpty() && proxy.labels.isNotEmpty())
+        assertEquals("${night.id}-nap90.5", NapProxies.cut(night, 90.5)?.id)
+        assertEquals(null, NapProxies.cut(night, 24 * 60.0), "a night shorter than L gives no proxy")
+        assertEquals(listOf(30.0, 60.0), NapProxies.parseLengths("30, 60"))
     }
 
     @Test
@@ -442,5 +577,13 @@ class EvaluateCommandTest {
         assertEquals(ExitCodes.DATA_ERROR, cli("evaluate", "--nights", nights, "--out", out, "--model", model.toString()).code)
         val both = cli("evaluate", "--nights", nights, "--out", out, "--model", model.toString(), "--fold-models", dir.toString())
         assertEquals(ExitCodes.USAGE, both.code)
+        for (lengths in listOf("", "30,abc", "0", "-30", "30,30")) {
+            assertEquals(ExitCodes.USAGE, cli("evaluate", "--nights", nights, "--out", out, "--nap-proxies", lengths).code, lengths)
+        }
+        // The thresholds that napMode.maxSessionMin replaced are unknown keys now.
+        for (legacy in listOf("""{"hybrid": {"shortSessionMaxMin": 180}}""", """{"features": {"baselineMinSessionMin": 180}}""")) {
+            val file = Files.writeString(dir.resolve("legacy.json"), legacy)
+            assertEquals(ExitCodes.DATA_ERROR, cli("evaluate", "--nights", nights, "--out", out, "--params", file.toString()).code, legacy)
+        }
     }
 }

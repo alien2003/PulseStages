@@ -1,7 +1,11 @@
 package io.github.alien2003.pulsestages.ui.nights
 
 import androidx.lifecycle.SavedStateHandle
+import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
+import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
+import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
@@ -69,6 +73,79 @@ class NightsViewModelTest {
             assertTrue(nights.none { it.stale })
             clear(vm)
         }
+
+    @Test
+    fun `naps carry the badge and the filter shows all, nights or naps and survives in the saved state`() =
+        harnessTest(main, dir) { h ->
+            h.settings.set { it.copy(sources = it.sources.copy(minSessionMin = 30)) }
+            h.repository.addNight(OHEALTH, nightStart(2))
+            h.repository.addNight(OHEALTH, nightStart(1) + 16 * HOUR_MS, durationMs = 90 * MINUTE_MS)
+            h.sync.run(inBackground = false)
+            val saved = SavedStateHandle()
+            val vm = NightsViewModel(TestScreenSources(source(h)), h.logger, saved)
+
+            val all = vm.awaitLoaded { it.nights.size == 2 }
+            assertEquals(NightsFilter.ALL, all.filter)
+            assertEquals(listOf(true, false), all.nights.map { it.nap }, "newest first: the nap, then the night")
+            assertEquals(
+                SessionMode.NAP,
+                all.nights
+                    .first()
+                    .summary.mode,
+            )
+
+            vm.setFilter(NightsFilter.NAPS)
+            val naps = vm.awaitLoaded { it.filter == NightsFilter.NAPS }
+            assertEquals(listOf(true), naps.nights.map { it.nap })
+            assertEquals(2, naps.total)
+            vm.setFilter(NightsFilter.NIGHTS)
+            val nights = vm.awaitLoaded { it.filter == NightsFilter.NIGHTS }
+            assertEquals(listOf(false), nights.nights.map { it.nap })
+
+            // The filter is restored with the saved state (rotation, process death).
+            val restored = NightsViewModel(TestScreenSources(source(h)), h.logger, saved)
+            assertEquals(NightsFilter.NIGHTS, restored.awaitLoaded().filter)
+            clear(vm)
+            clear(restored)
+        }
+
+    @Test
+    fun `the filter accepts nights and naps by mode`() {
+        val night = NightListItem(summary(SessionMode.NIGHT), stale = false)
+        val nap = NightListItem(summary(SessionMode.NAP), stale = false)
+        assertEquals(listOf(true, true), listOf(night, nap).map(NightsFilter.ALL::accepts))
+        assertEquals(listOf(true, false), listOf(night, nap).map(NightsFilter.NIGHTS::accepts))
+        assertEquals(listOf(false, true), listOf(night, nap).map(NightsFilter.NAPS::accepts))
+    }
+
+    private fun summary(mode: SessionMode): NightSummary =
+        NightSummary(
+            id = 1,
+            clientRecordId = "ps:x",
+            sourcePackage = OHEALTH,
+            sessionStartMs = 0,
+            sessionEndMs = 60_000,
+            startZoneOffsetSec = 0,
+            endZoneOffsetSec = 0,
+            status = NightStatus.WRITTEN,
+            statusReason = null,
+            estimator = EstimatorType.HYBRID,
+            algoVersion = 1,
+            paramsHash = "h",
+            coverage = 1.0,
+            confidence = 0.5,
+            awakeMin = 0.0,
+            lightMin = 1.0,
+            deepMin = 0.0,
+            remMin = 0.0,
+            unknownMin = 0.0,
+            elevatedHr = false,
+            lowConfidence = false,
+            calibrated = false,
+            rulesFallback = false,
+            updatedAt = 0,
+            mode = mode,
+        )
 
     @Test
     fun `written nights become stale when the settings change, other nights never`() =

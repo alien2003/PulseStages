@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.algo.export
 import io.github.alien2003.pulsestages.algo.SleepStager
 import io.github.alien2003.pulsestages.algo.features.BaseFeatures
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
@@ -22,10 +23,25 @@ class CsvExporterTest {
 
         assertEquals(
             "epoch,start_ms,has_data,hr_raw,hr_smooth,hrNorm,hrVar,hrSlope,t,cyclePhase,steps,forcedAwake,spo2Drop,hrvVar,respVar," +
-                "p_awake,p_light,p_deep,p_rem,stage",
+                "p_awake,p_light,p_deep,p_rem,stage,mode",
             header,
         )
         assertEquals(BaseFeatures.NAMES, estimate.featureNames)
+    }
+
+    @Test
+    fun `the mode column says NAP on every row of a nap`() {
+        val nap = night.input.copy(sessionEndMs = night.input.sessionStartMs + 60 * 60_000L)
+        val napEstimate = SleepStager().estimateWith(EstimatorType.HMM, nap, AlgoParams())
+        val rows =
+            CsvExporter
+                .export(napEstimate)
+                .trimEnd('\n')
+                .split('\n')
+                .drop(1)
+
+        assertEquals(SessionMode.NAP, napEstimate.mode)
+        assertTrue(rows.isNotEmpty() && rows.all { it.endsWith(",NAP") })
     }
 
     @Test
@@ -58,7 +74,8 @@ class CsvExporterTest {
             assertEquals("", gapRow[header.indexOf("hrNorm")])
             assertEquals(epoch.hrRaw, dataRow[header.indexOf("hr_raw")].toDouble())
             assertEquals(epoch.posterior.deep, dataRow[header.indexOf("p_deep")].toDouble())
-            assertEquals(epoch.stage, SleepStage.valueOf(dataRow.last()))
+            assertEquals(epoch.stage, SleepStage.valueOf(dataRow[header.indexOf("stage")]))
+            assertTrue(rows.all { it.last() == SessionMode.NIGHT.name })
             assertTrue(rows.all { row -> row.none { it.contains(';') } })
         } finally {
             Locale.setDefault(previous)

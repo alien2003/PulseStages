@@ -26,13 +26,15 @@ cut from the PSG nights it raises accuracy from 0.41 to 0.49 and lowers the summ
 percentage points (worse variant); no length between 120 and 180 min was in the pre-registered evaluation. Nap
 estimates stay rough (κ ≈ 0.1–0.3; for a 30-min nap no better than calling everything light sleep). In the experiment
 about 4 in 5 nap proxies were flagged low-confidence, mostly by the stage-share sanity check; that check now skips
-sessions shorter than 180 min (`proportionsMinSessionMin`, section 8), so only a too-small heart-rate range flags a nap
-(33–41 % of the 30–120-min proxies, same stages); a nap without the flag is still a rough estimate. The output is an
-estimate, not a measurement.
+naps (section 8), so only a too-small heart-rate range flags a nap (33–41 % of the 30–120-min proxies, same stages); a
+nap without the flag is still a rough estimate. Nights and naps are two processing modes (section 18): a session
+shorter than `napMode.maxSessionMin` = 180 min is a nap, with its own estimator, post-processing and decoder overrides,
+an optional nap model in the bundle and an output policy (stages, asleep / awake only, or nothing); until a nap model is
+trained every default reproduces the decodes above exactly. The output is an estimate, not a measurement.
 
 Contents: 1 Estimate, not measurement · 2 Pipeline · 3 Preprocessing · 4 Features · 5 RULES · 6 HMM · 7 HYBRID · 8
 Post-processing · 9 Gates and confidence · 10 Personalization · 11 Parameters · 12 Validation protocol · 13 Results ·
-14 Published results · 15 Synthetic validation · 16 Limitations · 17 How to retrain
+14 Published results · 15 Synthetic validation · 16 Limitations · 17 How to retrain · 18 Night and nap modes
 
 ## 1. What the app computes, and why it is an estimate
 
@@ -69,10 +71,10 @@ Health Connect night ──► preprocessing ──► night statistics ──�
                                                                                                                  sanity) ──► hypnogram
 ```
 
-`SleepStager.run(input, params)` applies the coverage gates (section 9), prepares the night once (`NightPreparer`:
-preprocessing, statistics, base features), runs the configured estimator and the shared post-processing, and returns a
-`NightEstimate` (intervals covering the session exactly, per-epoch posteriors and features, coverage, confidence,
-warnings, `algoVersion` = 1, `paramsHash`).
+`SleepStager.run(input, params)` decides the session's mode (night or nap, section 18), applies the coverage gates
+(section 9), prepares the night once (`NightPreparer`: preprocessing, statistics, base features), runs the estimator of
+the mode and the shared post-processing, and returns a `NightEstimate` (intervals covering the session exactly,
+per-epoch posteriors and features, coverage, confidence, warnings, `mode`, `algoVersion` = 1, `paramsHash`).
 
 ## 3. Preprocessing (`preprocess/`)
 
@@ -131,15 +133,16 @@ likelihood is multiplied by `elevatedAwakeFactor` = 0.6 (note: < 1 *lowers* AWAK
 higher heart rate) and the night confidence by `elevatedConfidenceFactor` = 0.8. The open datasets have one night per
 subject (Walch) or no long-term context, so this rule is not exercised by the validation.
 
-**Naps and the baseline** (`baselineMinSessionMin` = 180 min, session length = end − start of the merged session,
-gaps included). A session shorter than that is a nap for the long-term context: its nadir does not enter the baseline
+**Naps and the baseline** (the nap threshold `napMode.maxSessionMin` = 180 min, section 18; session length = end −
+start of the merged session, gaps included; the threshold was `features.baselineMinSessionMin` before the two modes). A
+session shorter than that is a nap for the long-term context: its nadir does not enter the baseline
 (the app still stores it, and the baseline query of `NightBaselineDao` counts only rows whose `estimated_nights`
 session is long enough, so a changed threshold applies to the stored history without a recompute), and it gets no
 baseline itself, so it is never `ELEVATED_HR`: the app passes `baselineNadirBpm = null` for it (`NightInputReader`,
 used by the pipeline, the night detail, the reference comparison and personalization), and `NightPreparer` ignores a
 baseline given for a nap anyway. Reason: when naps are estimated (source setting `minSessionMin` lowered, e.g. to 30)
 a daytime nap's nadir is several bpm above a night's; counting it would raise the median (fewer correct flags on
-real nights), and comparing the nap with a nights' baseline would flag almost every nap. `baselineMinSessionMin` = 0
+real nights), and comparing the nap with a nights' baseline would flag almost every nap. `napMode.maxSessionMin` = 0
 restores the rule without naps (every session counts and is compared). A short real night (e.g. 2.5 h after a night
 shift) is treated as a nap too; lower the threshold if such nights matter more than daytime naps.
 
@@ -244,24 +247,25 @@ past the end of the table use the last row); forced epochs get −∞ for every 
 table estimated on the training nights (not a linear function of t).
 
 **Proportion matching** (`stageLogBias`). Dividing the posteriors by π favours the rare stages: without b the decoder
-predicts 25 % DEEP and 34 % REM on Walch where PSG has 14 % and 23 % (section 13.10). b is a per-stage constant added
-to the emission score of every epoch with heart-rate data, fitted by the training scripts (`tools/train/pulsetrain/
-bias.py`) so that the decoded stage shares of out-of-fold decodes match the true PSG shares: deterministic fixed point
-b ← b + η · ln(T_s / P_s(b)) (T = true, P = decoded shares over the scored 30-s chunks of the fit nights, b centred, η
-= 1 halved whenever a step does not reduce Σ_s |T_s − P_s|, at most 8 decodes through `algo-cli`). The shipped bundle
-carries **b = (+0.090, +0.216, −0.318, +0.012)** for AWAKE / LIGHT / DEEP / REM (fitted on the LOSO out-of-fold
-decodes of all 31 Walch subjects, both 2-minute variants, at the shipped decoder parameters; their decoded shares 6.2
-/ 56.7 / 14.4 / 22.7 % vs PSG 6.3 / 56.9 / 14.2 / 22.6 %): relative to LIGHT, the per-epoch DEEP likelihood is scaled
-by e^(−0.534) ≈ 0.59 and the REM likelihood by e^(−0.204) ≈ 0.82. b lives in the bundle, not in AlgoParams, because it
-is a statistic of the classifier it corrects (like `classPriors`); the app persists the full AlgoParams, so an
-AlgoParams vector would outlive its bundle. A bundle without `stageLogBias` keeps its earlier fingerprint. **Short
-sessions (naps)**: on sessions shorter than `hybrid.shortSessionMaxMin` = 180 min the bundle's `stageLogBiasShort` =
-(−0.094, +0.417, +0.270, −0.593) replaces b (relative to LIGHT: DEEP × 0.86, REM × 0.36), fitted by the same fixed
-point on the out-of-fold decodes of nap-length sessions cut from the Walch nights (section 13.11); a bundle without it
-keeps b on short sessions; `shortSessionMaxMin` = 0 turns the rule off. The rule is by length only, so short nights
-(90–180 min, estimated under the app's default source filter) get it as well. On epochs
-with HR data −w_e · β · log π_s is itself a per-stage constant, so changing β by d equals adding −w_e · d · log π_s to
-b (unit-tested, `HybridEmissionsTest`): a fitted b absorbs any β, and β stays 1.
+predicts 25 % DEEP and 34 % REM on Walch where PSG has 14 % and 23 % (section 13.10). b is a per-stage constant added to
+the emission score of every epoch with heart-rate data, fitted by the training scripts (`tools/train/pulsetrain/
+bias.py`) so that the decoded stage shares of out-of-fold decodes match the true PSG shares: deterministic fixed point b
+← b + η · ln(T_s / P_s(b)) (T = true, P = decoded shares over the scored 30-s chunks of the fit nights, b centred, η = 1
+halved whenever a step does not reduce Σ_s |T_s − P_s|, at most 8 decodes through `algo-cli`). The shipped bundle
+carries **b = (+0.090, +0.216, −0.318, +0.012)** for AWAKE / LIGHT / DEEP / REM (fitted on the LOSO out-of-fold decodes
+of all 31 Walch subjects, both 2-minute variants, at the shipped decoder parameters; their decoded shares 6.2 / 56.7 /
+14.4 / 22.7 % vs PSG 6.3 / 56.9 / 14.2 / 22.6 %): relative to LIGHT, the per-epoch DEEP likelihood is scaled by
+e^(−0.534) ≈ 0.59 and the REM likelihood by e^(−0.204) ≈ 0.82. b lives in the bundle, not in AlgoParams, because it is a
+statistic of the classifier it corrects (like `classPriors`); the app persists the full AlgoParams, so an AlgoParams
+vector would outlive its bundle. A bundle without `stageLogBias` keeps its earlier fingerprint. **Short sessions
+(naps)**: on naps — sessions shorter than `napMode.maxSessionMin` = 180 min, section 18 (`hybrid.shortSessionMaxMin`
+before the two modes) — the bundle's `stageLogBiasShort` = (−0.094, +0.417, +0.270, −0.593) replaces b (relative to
+LIGHT: DEEP × 0.86, REM × 0.36), fitted by the same fixed point on the out-of-fold decodes of nap-length sessions cut
+from the Walch nights (section 13.11); a bundle without it keeps b on short sessions; `napMode.maxSessionMin` = 0 turns
+the rule off (no naps). A bundle with a nap model (section 18) decodes naps with that model and its own b instead. The
+rule is by length only, so short nights (90–180 min, estimated under the app's default source filter) get it as well. On
+epochs with HR data −w_e · β · log π_s is itself a per-stage constant, so changing β by d equals adding −w_e · d · log
+π_s to b (unit-tested, `HybridEmissionsTest`): a fitted b absorbs any β, and β stays 1.
 
 **Explicit-duration decoder** (`durationModel` = EXPLICIT, HSMM). A path is a sequence of bouts; a bout of stage j
 lasting d epochs (1 ≤ d ≤ D, D = ⌊`maxBoutMin` / E_min⌋ = 120) scores log P_j(d) + Σ e_k(j); consecutive bouts i → j
@@ -312,10 +316,11 @@ min (AWAKE only inside sleep, i.e. with sleep epochs before and after it; LIGHT 
 relabelled to the neighbouring bout whose stage has the larger mean posterior over the short bout (the only scored
 neighbour at an edge; UNKNOWN gaps never absorb; bouts with forced epochs are never absorbed). A final partial epoch
 takes the label of the epoch before it. (4) **Sanity check** (coverage > `sanityMinCoverage` = 0.8 and a session of at
-least `proportionsMinSessionMin` = 180 min): DEEP > `sanityDeepMax` = 35 % (`SANITY_DEEP_HIGH`), REM > `sanityRemMax` =
+night, section 18; a nap only with `napMode.post.checkProportions`, and with its corridor overrides): DEEP >
+`sanityDeepMax` = 35 % (`SANITY_DEEP_HIGH`), REM > `sanityRemMax` =
 40 % (`SANITY_REM_HIGH`) or DEEP < `sanityDeepMin` = 3 % (`SANITY_DEEP_LOW`) of scored time → low-confidence,
 confidence × `sanityConfidenceFactor` = 0.7. (5) **Proportion calibration** (`calibrateProportions` = false by default;
-sessions of at least `proportionsMinSessionMin` only): per-stage log-prior offsets start at 0; up to
+nights only, naps with `napMode.post.checkProportions`): per-stage log-prior offsets start at 0; up to
 `calibrationMaxIterations` = 5 times, DEEP is raised / lowered by `calibrationStep` = 0.2 while outside [10 %, 25 %],
 REM likewise for [15 %, 30 %], AWAKE lowered while > 15 %; the night is re-decoded with the offsets and steps 1–4
 re-run (`PROPORTIONS_CALIBRATED`, `flags.calibrated`; RULES shifts its thresholds by 0.25 per unit offset instead).
@@ -323,10 +328,12 @@ re-run (`PROPORTIONS_CALIBRATED`, `flags.calibrated`; RULES shifts its threshold
 cover the session without gaps or overlaps and each is at least one epoch long.
 
 **Naps skip steps 4 and 5.** Both compare the stage shares with whole-night ranges. A 30–90-min nap often has no
-DEEP or no REM at all (or mostly DEEP after sleep loss), so on sessions shorter than `proportionsMinSessionMin` = 180
-min the sanity check would only add misleading `SANITY_*` low-confidence flags, and the calibration would push the nap
-towards a night's 10–25 % DEEP / 15–30 % REM. Shorter sessions are therefore neither checked nor calibrated (0 = every
-session, as before); the other steps are unchanged.
+DEEP or no REM at all (or mostly DEEP after sleep loss), so on naps (sessions shorter than `napMode.maxSessionMin` =
+180 min; `post.proportionsMinSessionMin` before the two modes) the sanity check would only add misleading `SANITY_*`
+low-confidence flags, and the calibration would push the nap towards a night's 10–25 % DEEP / 15–30 % REM. Naps are
+therefore neither checked nor calibrated unless `napMode.post.checkProportions` (then with the nap corridors of
+`napMode.post`); `napMode.maxSessionMin` = 0 checks every session, as before. The other steps run on naps with the
+nap overrides of `napMode.post` (minimum bouts, low-confidence threshold and policy; null = the night's value).
 
 ## 9. Coverage gates, fallbacks and confidence (`SleepStager`)
 
@@ -343,23 +350,23 @@ data × coverage × 0.8 (elevated night) × 0.7 (sanity check failed), clipped t
 **Naps** (the app's source setting `minSessionMin` lowered below 180 min, e.g. 30). What changes for a session shorter
 than 180 min, and what deliberately does not:
 
-- no elevated-HR comparison and no contribution to the nadir baseline (`baselineMinSessionMin`, section 4), no sanity
-  check or proportion calibration (`proportionsMinSessionMin`, section 8); so a nap's confidence is the mean posterior
-  × coverage only;
+- no elevated-HR comparison and no contribution to the nadir baseline (section 4), no sanity check or proportion
+  calibration unless `napMode.post.checkProportions` (section 8); so a nap's confidence is the mean posterior ×
+  coverage only (all three rules follow the one nap threshold `napMode.maxSessionMin`, section 18);
 - the coverage gates are unchanged: coverage is a share of the session epochs, so a 30-min nap with heart rate every 2
   min has the same coverage as a night, and a nap with sparse heart rate falls back to RULES or is not estimated like a
   night would be;
 - `LOW_HR_RANGE` stays: a short session often has P50 − P10 < 2 bpm, and its hrNorm is then genuinely unreliable;
   `CYCLE_PRIOR_DISABLED` (HMM only) is expected on sessions shorter than about two cycles and has no effect on the
   confidence;
-- the estimators run unchanged except for one HYBRID constant: on sessions shorter than `hybrid.shortSessionMaxMin` =
-  180 min the bundle's short-session bias `stageLogBiasShort` replaces b (section 7; pre-registered nap experiment,
-  section 13.11). The HYBRID classifier's elapsed / remaining-time features and the HSMM durations were learned on
-  whole nights, so a nap looks like the beginning and the end of a night at once; no real nap was in the validation
-  data, only nap proxies cut from the PSG nights (section 13.11), on which nap hypnograms are rough;
-- population EM (section 10; only when the HMM emissions are used, not with the default HYBRID bundle) pools the
-  latest written sessions, naps included, and counts them towards `emEveryNights`: a nap is on its own hrNorm scale
-  and weighs by its epoch count (a 45-min nap ≈ a tenth of a night); not changed;
+- the estimators run unchanged (with the estimator `napMode.estimator`, HYBRID by default) except for one HYBRID
+  constant: on naps the bundle's short-session bias `stageLogBiasShort` replaces b (section 7; pre-registered nap
+  experiment, section 13.11), or a nap model of the bundle replaces the main model (section 18). The HYBRID classifier's
+  elapsed / remaining-time features and the HSMM durations were learned on whole nights, so a nap looks like the
+  beginning and the end of a night at once; no real nap was in the validation data, only nap proxies cut from the PSG
+  nights (section 13.11), on which nap hypnograms are rough;
+- population EM and the calibration on reference nights (section 10) use nights only: a nap is on its own hrNorm
+  scale and is decoded differently, so naps neither take part nor count towards `emEveryNights`;
 - source selection (app, before the estimator; README "Which source sessions become nights"): fragments closer than
   `mergeGapMin` = 30 min are merged before the nap filter, so a nap ending less than 30 min before bedtime becomes the
   first fragment of the night (the gap is AWAKE) — unchanged, because it cannot be told apart from a night that the
@@ -371,18 +378,20 @@ than 180 min, and what deliberately does not:
 
 ## 10. Personalization (`personal/`)
 
-- **Calibration on reference nights** (nights with real stages from another source and heart rate): nights sorted by
-  start, the latest round(n · `calibrationHoldout`) = 30 % held out (at least one when n ≥ 2). On the training epochs
-  (HR data, a reference stage, not forced) the classifier bias deltas δ minimize J(δ) = (1/E_h) Σ_i CE(softmax(z_i +
-  δ), y_i) + λ ‖δ‖² (z_i = classifier logits, E_h = epochs per hour = 60, λ = `calibrationRegularization` = 10, i.e.
-  the regularization counts in hours of evidence; gradient descent from 0 with step 1/L, L = M/(2E_h) + 2λ); the HMM
-  means per state and dimension become μ = (Σx + κ μ_0)/(n + κ) with κ = λ E_h = 600 pseudo-epochs (elevated nights
-  excluded), kept only if the hrNorm order holds. Kappa before / after on the held-out nights is shown; the result is
-  stored in Room as the personal model ("reset to global" deactivates it; the row stays in Room, inactive).
-- **Without reference** (every `emEveryNights` = 30 new nights): unsupervised population EM over all usable nights
-  (coverage ≥ 0.6, not elevated), `emIterations` = 3 Baum–Welch iterations pooling the posteriors of the full HMM over
-  the nights and updating μ and σ with MAP shrinkage to the *global* table (τ = `personal.emPriorStrength` = 200),
-  with the same order constraint.
+- **Calibration on reference nights** (nights with real stages from another source and heart rate; reference sessions
+  that are naps, section 18, are left out): nights sorted by start, the latest round(n · `calibrationHoldout`) = 30 %
+  held out (at least one when n ≥ 2). On the training epochs (HR data, a reference stage, not forced) the classifier
+  bias deltas δ minimize J(δ) = (1/E_h) Σ_i CE(softmax(z_i + δ), y_i) + λ ‖δ‖² (z_i = classifier logits, E_h = epochs
+  per hour = 60, λ = `calibrationRegularization` = 10, i.e. the regularization counts in hours of evidence; gradient
+  descent from 0 with step 1/L, L = M/(2E_h) + 2λ); the HMM means per state and dimension become
+  μ = (Σx + κ μ_0)/(n + κ) with κ = λ E_h = 600 pseudo-epochs (elevated nights excluded), kept only if the hrNorm
+  order holds. Kappa before /
+  after on the held-out nights is shown; the result is stored in Room as the personal model ("reset to global"
+  deactivates it; the row stays in Room, inactive).
+- **Without reference** (every `emEveryNights` = 30 new nights; naps neither count nor take part): unsupervised
+  population EM over all usable nights (coverage ≥ 0.6, not elevated, not naps), `emIterations` = 3 Baum–Welch
+  iterations pooling the posteriors of the full HMM over the nights and updating μ and σ with MAP shrinkage to the
+  *global* table (τ = `personal.emPriorStrength` = 200), with the same order constraint.
 - The personal model applies only when `personal.enabled` (default true): δ is added to the classifier logits (only
   for the bundle it was fitted for) and μ/σ override the HMM table. Its fingerprint enters the params hash;
   `algoVersion` does not change.
@@ -416,7 +425,6 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | features | `varHalfWindowEpochs` / `slopeHalfWindowEpochs` | 3 / 2 | hrVar and hrSlope windows (± epochs) |
 | features | `cycleMinDistanceMin` / `cycleMinProminenceBpm` | 60 / 2.0 | ultradian minima search |
 | features | `baselineNights` / `elevatedNightPct` / `elevatedAwakeShift` / `elevatedConfidenceFactor` | 14 / 12 / 0.3 / 0.8 | elevated-HR night |
-| features | `baselineMinSessionMin` | 180 | shorter sessions (naps) neither enter the nadir baseline nor are compared with it (0 = every session) |
 | features | `useSpo2` / `spo2DropPct` / `spo2AwakeLightFactor` / `spo2MedianWindowMin` | true / 3.0 / 2.0 / 60 | SpO2 desaturations |
 | features | `useHrv` / `hrvWeight` / `hrvMaxDistanceMin` | true / 1.5 / 5 | RMSSD replaces hrVar |
 | features | `useRespiratoryRate` / `respiratoryRateWeight` / `respiratoryHalfWindowEpochs` | true / 0.5 / 5 | respiratory-rate variability |
@@ -441,11 +449,9 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | hybrid | `maxBoutMin` | 120 | maximum bout length of the HSMM (min) |
 | hybrid | `elevatedAwakeFactor` | 0.6 | AWAKE likelihood multiplier on elevated nights |
 | hybrid | `priorExponent` | **1.0** (pre-registered experiment, section 13.10: the share correction is the bundle's `stageLogBias`, β stays 1) | β of the scaled likelihood p(s \| x) / π_s^β |
-| hybrid | `shortSessionMaxMin` | **180** (pre-registered nap experiment, section 13.11; 0 = off, the value before it) | sessions shorter than this (min) use the bundle's `stageLogBiasShort` instead of `stageLogBias` |
 | post | `minDeepMin` / `minRemMin` / `minAwakeMin` | 5 / 5 / 2 | minimum bouts (min) |
 | post | `gapPolicy` | UNKNOWN | UNKNOWN / LIGHT / NEAREST for long gaps |
 | post | `sanityMinCoverage` / `sanityDeepMax` / `sanityRemMax` / `sanityDeepMin` / `sanityConfidenceFactor` | 0.8 / 0.35 / 0.40 / 0.03 / 0.7 | sanity check |
-| post | `proportionsMinSessionMin` | 180 | sanity check and proportion calibration only for sessions at least this long (0 = every session) |
 | post | `calibrateProportions` | false | soft proportion calibration |
 | post | `targetDeepMin` / `targetDeepMax` / `targetRemMin` / `targetRemMax` / `targetAwakeMax` | 0.10 / 0.25 / 0.15 / 0.30 / 0.15 | calibration corridors |
 | post | `calibrationStep` / `calibrationMaxIterations` | 0.2 / 5 | calibration step and iterations |
@@ -453,10 +459,19 @@ estimates failed the validity gate, so they are the specification's values (`Hmm
 | personal | `enabled` | true | apply the personal model |
 | personal | `emEveryNights` / `emPriorStrength` | 30 / 200 | population EM cadence and shrinkage |
 | personal | `calibrationRegularization` / `calibrationHoldout` | 10 / 0.3 | calibration strength (hours of evidence) and held-out share |
+| napMode | `maxSessionMin` | **180** (TrainedDefaults; the pre-registered nap experiment's threshold, section 13.11) | sessions shorter than this (min) are naps, longer ones nights; 0 = no naps (section 18). Replaces `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and `post.proportionsMinSessionMin` (all 180) |
+| napMode | `estimator` | HYBRID (TrainedDefaults) | estimator of naps |
+| napMode | `outputPolicy` | STAGES | STAGES / SLEEP_WAKE (only AWAKE and SLEEPING written) / SKIP (not estimated, nothing written) |
+| napMode.post | `checkProportions` | false | sanity check and proportion calibration of naps too |
+| napMode.post | `minDeepMin` / `minRemMin` / `minAwakeMin` | null (= the night's) | minimum bouts of naps (min) |
+| napMode.post | `sanityDeepMin` / `sanityDeepMax` / `sanityRemMax` | null (= the night's) | sanity corridors of naps (with `checkProportions`) |
+| napMode.post | `lowConfidenceThreshold` / `lowConfidencePolicy` | null (= the night's) | uncertain epochs of naps |
+| napMode.hybrid | `durationModel` / `emissionWeight` / `timePriorWeight` | null (= the night's; TrainedDefaults, until a nap decoder is validated) | hybrid decoder of naps |
 
 The model bundle itself (`assets/models/hybrid_model.json`: standardization, classifier weights, class priors, gamma
 durations, bout transitions, initial distribution, time prior, proportion-matching `stageLogBias`, short-session
-`stageLogBiasShort`) is not part of `AlgoParams`; its SHA-256 fingerprint enters the params hash.
+`stageLogBiasShort`, optional nap model `nap`) is not part of `AlgoParams`; its SHA-256 fingerprint enters the params
+hash.
 
 ## 12. Validation protocol
 
@@ -1257,15 +1272,15 @@ at 120 min against PSG 9.2 %; 1.4 % at 90 min on mean2min against 6.1 %). DEEP s
   `LOW_HR_RANGE` (P50 − P10 < 2 bpm in 30 min). No Walch proxy is NOT_ESTIMATED; on BIDSleep 1–3 of 253 per length
   (NO_HR_DATA, LOW_COVERAGE).
 - **Flags in the current build** (the stage-share checks run only on sessions of at least
-  `post.proportionsMinSessionMin` = 180 min, section 8; developed in parallel with this experiment and merged after
-  it). Sessions shorter than 180 min get no `SANITY_*` warning, so on them low-confidence is `LOW_HR_RANGE` alone.
-  `naps-verify` on the merged build (`out/naps-verify-merge`, build `713a0663…`, default parameters) reproduces A on
-  568 of 568 nights and C-180 on 2840 of 2840 proxies: the same confusion matrices and estimation status, the
-  `SANITY_*` codes of 1787 proxies shorter than 180 min dropped and nothing else different (180-min proxies
-  unchanged). Low-confidence with C-180 on Walch is then 58.1 / 74.2 % at 30 min, 32.3 / 45.2 % at 60, 25.8 / 25.8 %
-  at 90 and 16.1 / 19.4 % at 120 min, 33.1 / 41.1 % pooled over 30–120 min (instantaneous / mean2min; BIDSleep
-  40.4 / 45.5 %), and 35.5 / 64.5 % at 180 min as above. The flag therefore no longer marks most naps; the stages,
-  and so every accuracy and share error above, are the same.
+  `post.proportionsMinSessionMin` = 180 min, section 8 — now `napMode.maxSessionMin`, section 18; developed in parallel
+  with this experiment and merged after it). Sessions shorter than 180 min get no `SANITY_*` warning, so on them
+  low-confidence is `LOW_HR_RANGE` alone. `naps-verify` on the merged build (`out/naps-verify-merge`, build `713a0663…`,
+  default parameters) reproduces A on 568 of 568 nights and C-180 on 2840 of 2840 proxies: the same confusion matrices
+  and estimation status, the `SANITY_*` codes of 1787 proxies shorter than 180 min dropped and nothing else different
+  (180-min proxies unchanged). Low-confidence with C-180 on Walch is then 58.1 / 74.2 % at 30 min, 32.3 / 45.2 % at 60,
+  25.8 / 25.8 % at 90 and 16.1 / 19.4 % at 120 min, 33.1 / 41.1 % pooled over 30–120 min (instantaneous / mean2min;
+  BIDSleep 40.4 / 45.5 %), and 35.5 / 64.5 % at 180 min as above. The flag therefore no longer marks most naps; the
+  stages, and so every accuracy and share error above, are the same.
 - **BIDSleep (EEG headband, secondary;** its labels have 36 % N3 in the first 30 min of sleep, Walch 15 %): worse
   variant pooled A 0.363 / 101.0, B-120 0.362 / 101.0, B-180 0.359 / 102.2, C-120 0.424 / 87.0, C-180 0.434 / 87.8
   (accuracy / E); C-180 − A ΔE −9.9 [−12.2, −7.5] / −12.9 [−15.7, −10.1] pp, Δaccuracy +0.055 [0.044, 0.066] / +0.074
@@ -1300,16 +1315,19 @@ at 120 min against PSG 9.2 %; 1.4 % at 90 min on mean2min against 6.1 %). DEEP s
   the mean of the fold fits) would be a new, unvalidated choice for a future pre-registration. The validated numbers
   are the C-180 row above (b_short fitted per group, never on the evaluated subject).
 - **Implementation** (`:core-algo`): `hybrid.shortSessionMaxMin` = **180** (TrainedDefaults; 0 = off), bundle field
-  `stageLogBiasShort` (validated, in the fingerprint when present). Disclosed deviation from the pre-registration's
-  implementation note, which had "absent = no bias on short sessions (B)": a bundle *without* `stageLogBiasShort`
-  keeps its `stageLogBias` on short sessions (A), because B was the worst candidate; it changes no candidate result
-  and not the decision (the shipped bundle carries the field). Verified with the new build and its *default*
-  parameters (`train.py naps-verify`): fold bundles carrying b_g and b_short_g(180) reproduce A on 568 of 568 whole
-  nights and C-180 on 2840 of 2840 proxies session by session; the installed bundle
+  `stageLogBiasShort` (validated, in the fingerprint when present). Since the two processing modes (section 18) the
+  threshold is `napMode.maxSessionMin` (which also replaced `features.baselineMinSessionMin` and
+  `post.proportionsMinSessionMin`, all three 180); the numbers of this section are unchanged: with its defaults that
+  build decodes every night and proxy exactly as the build checked here (section 18, "No behaviour change"). Disclosed
+  deviation from the pre-registration's implementation note, which had "absent = no bias on short sessions (B)": a
+  bundle *without* `stageLogBiasShort` keeps its `stageLogBias` on short sessions (A), because B was the worst
+  candidate; it changes no candidate result and not the decision (the shipped bundle carries the field). Verified with
+  the new build and its *default* parameters (`train.py naps-verify`): fold bundles carrying b_g and b_short_g(180)
+  reproduce A on 568 of 568 whole nights and C-180 on 2840 of 2840 proxies session by session; the installed bundle
   (`pulsestages-walch+bidsleep-mlp-naps-final`, = `bias-final` + `stageLogBiasShort`) runs on every night and proxy
   (RULES only on low coverage, never the HMM fallback). The new bundle fingerprint and the new AlgoParams field change
-  the params hash of every estimate (offered for recomputation), and personal classifier deltas fitted for the
-  previous bundle are ignored (section 10) until the user calibrates again.
+  the params hash of every estimate (offered for recomputation), and personal classifier deltas fitted for the previous
+  bundle are ignored (section 10) until the user calibrates again.
 
 **Conclusion.** For naps the estimate is rough: with the adopted correction about half of the 30-s epochs agree with
 PSG (accuracy 0.39–0.62 depending on length and variant, κ ≈ 0.1–0.3), the summed share error is about twice that of a
@@ -1439,11 +1457,11 @@ real PSG κ in section 13.
   personalization work as specified. The HMM's cycle-phase prior and step factors were not estimated.
 - **No real nap validated.** Both datasets contain whole nights only. Naps (the source setting `minSessionMin`
   lowered, e.g. to 30) are estimated by models trained on nights (elapsed / remaining-time features, HSMM durations),
-  so their hypnograms carry no accuracy validated on real naps, only on the nap proxies of the next item; the nap
-  thresholds of 180 min of the long-term context and the stage-share checks (`baselineMinSessionMin`,
-  `proportionsMinSessionMin`, section 9) are a physiological choice (shorter than any regular night, longer than
-  typical naps), not fitted, whereas `hybrid.shortSessionMaxMin` = 180 was chosen over 120 by the pre-registered nap
-  experiment (section 13.11).
+  so their hypnograms carry no accuracy validated on real naps, only on the nap proxies of the next item; the one nap
+  threshold `napMode.maxSessionMin` = 180 (section 18) was chosen over 120 by the pre-registered nap experiment for the
+  short-session bias (section 13.11); for the long-term context and the stage-share checks, which follow the same
+  threshold, 180 min is a physiological choice (shorter than any regular night, longer than typical naps), not fitted.
+  Until a nap model is trained (section 18), naps are decoded by the night model with the short-session bias.
 - **Naps are only roughly estimated, and only on proxies.** No open dataset has labelled daytime naps; the nap
   experiment (section 13.11) cut the first 30–180 min of the labelled nights. On these proxies, with the adopted
   short-session bias, about half of the 30-s epochs agree with PSG (κ ≈ 0.1–0.3), the summed stage-share error is about
@@ -1458,8 +1476,9 @@ real PSG κ in section 13.
   source filter (90 min) already estimates sessions of 90–180 min, so short nights are decoded with b_short too. No
   length between 120 and 180 min was in the pre-registered evaluation; post hoc, at 150–170 min, b_short was better
   on one sampling variant and worse on the other in share error, slightly better in accuracy, and replaced the
-  default's REM excess with a REM deficit (2–4.5 % against 10–12 % PSG). With `hybrid.shortSessionMaxMin` = 120,
-  sessions of 2 h or more keep the whole-night b (b_short was validated on 30–120-min proxies only; 150–170 post hoc).
+  default's REM excess with a REM deficit (2–4.5 % against 10–12 % PSG). With `napMode.maxSessionMin` = 120, sessions
+  of 2 h or more are nights and keep the whole-night b (b_short was validated on 30–120-min proxies only; 150–170 post
+  hoc); the baseline and stage-share rules then follow the 120-min threshold too.
 - **Selection and seed optimism.** Configuration, classifier, BIDSleep step handling and the experiments were chosen
   by the same outer-LOSO score, and their differences are within the paired CIs; the shipped seed scored best of four
   (0.334 vs a mean of 0.317, without b). Read 0.32 as the expected κ of the procedure. The stage-proportion candidate
@@ -1513,16 +1532,18 @@ mise exec -- python -I tools/train/train.py bias-final --run bias-base --out-run
     --selection-from tools/train/out/loso-v2/summary.json --install-model
 mise exec -- python -I tools/train/train.py defaults --run bias-final --write   # TrainedDefaults.kt (beta = 1)
 # 6. naps (pre-registered, section 13.11; on the bias-base fold artefacts, no retraining): nap proxies, candidates,
-#    the final bundle with b_short, TrainedDefaults with shortSessionMaxMin; after rebuilding, the implementation check
+#    the final bundle with b_short, TrainedDefaults with the nap threshold; after rebuilding, the implementation check
 mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps --context-run loso-v2 --jobs 12
 mise exec -- python -I tools/train/train.py naps-report --out-run naps         # re-render its report (no algo-cli)
 mise exec -- python -I tools/train/train.py naps-final --exp naps --base-run bias-final --out-run naps-final \
     --install-model
-mise exec -- python -I tools/train/train.py defaults --run naps-final --write   # + HYBRID_SHORT_SESSION_MAX_MIN
+mise exec -- python -I tools/train/train.py defaults --run naps-final --write   # + NAP_MAX_SESSION_MIN (and NAP_*)
 mise exec -- ./gradlew :algo-cli:installDist
 mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify
 #    the same check on the build that also skips the sanity check below 180 min (post.proportionsMinSessionMin)
 mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify-merge
+#    and on the build with the two processing modes (napMode.maxSessionMin, section 18)
+mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify-modes
 #    audit follow-up (post hoc, reporting only): the experiment again with the committed code, compared file by file,
 #    proxies of 150 / 170 min, C-180 vs C-120, the rule with the context estimators, flags / shares / both kappas
 mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps-rerun --context-run loso-v2 --jobs 12
@@ -1537,33 +1558,123 @@ mise exec -- python -I -m pytest tools/train/tests -q
 `report.md` and `summary.json` (all numbers of section 13), `results.jsonl` (per night), `fold_selections.jsonl`
 (inner-CV choice, selection key and inner margin per outer fold), `commands.log` (every `algo-cli` call with exit code
 and duration), the fold bundles, `hmm-trained/<pool>/final.hmm-params.json` and the final model; `--install-model`
-copies the final bundle to `app/src/main/assets/models/hybrid_model.json`. `train.py report --run <run>` re-renders
-the report from the stored per-night results. Results do not depend on `--jobs` (fixed seeds, single-threaded BLAS).
-Wall times on a 24-core (8P + 16E) laptop CPU: step 1 32 min, each experiment / seed run 5–6 min, the sensitivity
-analysis ≈ 2 min; step 5 (from `bias-base/run.log`, `bias-base/bias/commands.log` and `tools/train/out/commands.log`):
-`bias-base` 6.4 min (385 s), `bias` 1.6 min (433 `algo-cli` calls, 09:16:57–09:18:30), `bias-final` ≈ 0.4 min
-(09:19:20–09:19:45, 17 `algo-cli` calls). `train.py bias` writes `<run>/bias/` (`summary.json`, `report.md`,
-`decisions.json` with every inner grid point and fixed-point trace, `results.jsonl`, `commands.log`; `--out-name`
-another directory); `train.py bias-report` re-renders its `summary.json` / `report.md` from `results.jsonl` and
-`decisions.json` without `algo-cli`; `bias-final` writes `out/<out-run>/` (`final/hybrid_model.json`,
-`trained_defaults.json`, `summary.json`). Both `bias` and `bias-final` refuse an `algo-cli` build other than the run's
-unless `--allow-other-build` is given (then logged and recorded in `summary.json` as `runAlgoCliSha256`; BASE must
-still reproduce the run night by night). The run directories are not committed: keep `tools/train/out/{bias-base,
-bias-final, naps, naps-final, naps-verify, naps-verify-merge, naps-rerun, naps-posthoc}` (and the worktrees'
-`commands.log` files) with
-the other runs; the pre-registration and that log are also committed under `docs/prereg/`. `train.py naps` writes
-`out/<out-run>/` (`repro/` — the night-level reproduction, `fits.json` — every b_short fit with its trace,
-`results.jsonl` — every decoded session per decoding kind, `summary.json`, `report.md`, `algocli.log`; `commands.log`
-holds the pre-registration and the START / RESULT lines, committed as `docs/prereg/commands-naps.log`); it reads
-`bias-base`, `bias-base/bias` and `loso-v2` without writing to them and fails unless A and BASE reproduce
-`bias-base/bias` night by night. `naps-final` writes `out/naps-final/{final/hybrid_model.json, trained_defaults.json, summary.json}` for
-`defaults`; `naps-verify` fails unless the current build with its default parameters reproduces A on the nights and
-the adopted candidate on the proxies (a build that runs the sanity check only from `post.proportionsMinSessionMin`,
-as its metrics report, must give the stored warnings without the `SANITY_*` codes of shorter sessions; the summary
-counts them and gives the build's low-confidence rates); `naps-posthoc` writes `out/naps-posthoc/{summary.json, report.md,
-results.jsonl}` (reporting only; it fails unless its re-decoded 120-min proxies equal the stored ones, with the same
-`SANITY_*` rule) and compares a
-re-run (`--rerun`) with the stored experiment file by file. Every nap run records `meta.code` (SHA-256 of `train.py`
+copies the final bundle to `app/src/main/assets/models/hybrid_model.json`. `train.py report --run <run>` re-renders the
+report from the stored per-night results. Results do not depend on `--jobs` (fixed seeds, single-threaded BLAS). Wall
+times on a 24-core (8P + 16E) laptop CPU: step 1 32 min, each experiment / seed run 5–6 min, the sensitivity analysis ≈
+2 min; step 5 (from `bias-base/run.log`, `bias-base/bias/commands.log` and `tools/train/out/commands.log`): `bias-base`
+6.4 min (385 s), `bias` 1.6 min (433 `algo-cli` calls, 09:16:57–09:18:30), `bias-final` ≈ 0.4 min (09:19:20–09:19:45, 17
+`algo-cli` calls). `train.py bias` writes `<run>/bias/` (`summary.json`, `report.md`, `decisions.json` with every inner
+grid point and fixed-point trace, `results.jsonl`, `commands.log`; `--out-name` another directory); `train.py
+bias-report` re-renders its `summary.json` / `report.md` from `results.jsonl` and `decisions.json` without `algo-cli`;
+`bias-final` writes `out/<out-run>/` (`final/hybrid_model.json`, `trained_defaults.json`, `summary.json`). Both `bias`
+and `bias-final` refuse an `algo-cli` build other than the run's unless `--allow-other-build` is given (then logged and
+recorded in `summary.json` as `runAlgoCliSha256`; BASE must still reproduce the run night by night). The run directories
+are not committed: keep `tools/train/out/{bias-base, bias-final, naps, naps-final, naps-verify, naps-verify-merge,
+naps-verify-modes, naps-rerun, naps-posthoc}` (and the worktrees' `commands.log` files) with the other runs; the
+pre-registration and that log are also committed under `docs/prereg/`. `train.py naps` writes `out/<out-run>/` (`repro/`
+— the night-level reproduction, `fits.json` — every b_short fit with its trace, `results.jsonl` — every decoded session
+per decoding kind, `summary.json`, `report.md`, `algocli.log`; `commands.log` holds the pre-registration and the START /
+RESULT lines, committed as `docs/prereg/commands-naps.log`); it reads `bias-base`, `bias-base/bias` and `loso-v2`
+without writing to them and fails unless A and BASE reproduce `bias-base/bias` night by night. `naps-final` writes
+`out/naps-final/{final/hybrid_model.json, trained_defaults.json, summary.json}` for `defaults`; `naps-verify` fails
+unless the current build with its default parameters reproduces A on the nights and the adopted candidate on the proxies
+(a build that runs the sanity check only from a threshold — `napMode.maxSessionMin` unless
+`napMode.post.checkProportions`, or `post.proportionsMinSessionMin` before the modes — as its metrics report, must give
+the stored warnings without the `SANITY_*` codes of shorter sessions; the summary counts them and gives the build's
+low-confidence rates); `naps-posthoc` writes `out/naps-posthoc/{summary.json, report.md, results.jsonl}` (reporting
+only; it fails unless its re-decoded 120-min proxies equal the stored ones, with the same `SANITY_*` rule) and compares
+a re-run (`--rerun`) with the stored experiment file by file. Every nap run records `meta.code` (SHA-256 of `train.py`
 and `pulsetrain/*.py`, git commit, modified files). The full per-subject nested selection (`--selection per-subject`,
 1504 inner-CV runs) was started once and stopped; the logged projection was more than 2.5 h for the nested selection
 alone.
+
+## 18. Night and nap modes (`napMode`)
+
+Every session is processed in one of two modes, `SessionMode.NIGHT` or `SessionMode.NAP`, decided once per merged
+session (`NightCandidates` in the app, `PreparedNight.mode` in `:core-algo`): a session strictly shorter than
+`napMode.maxSessionMin` = 180 min (end − start of the merged session, gaps between fragments included) is a nap, every
+longer one a night; `maxSessionMin` = 0 turns the nap mode off (every session is a night). The source setting
+`minSessionMin` (90 min by default) stays the global minimum: shorter sessions are not processed at all (ledger outcome
+`NAP`, reason "too short"), so naps between `minSessionMin` and `maxSessionMin` are estimated in the nap mode.
+
+**One threshold.** `napMode.maxSessionMin` replaces the three thresholds that each separated naps from nights before:
+`features.baselineMinSessionMin` (nadir baseline and elevated-HR check, section 4), `hybrid.shortSessionMaxMin`
+(short-session bias, section 7) and `post.proportionsMinSessionMin` (stage-share checks, section 8). All three were 180
+min by default, so the default behaviour is unchanged; settings saved or exported with the old keys load with those
+keys ignored (the new default applies; there is no migration, because no value other than the shared default was ever
+recommended). Its default is generated into `TrainedDefaults.NAP_MAX_SESSION_MIN` by `train.py defaults` (from the
+pre-registered nap experiment's threshold, section 13.11; the legacy key `hybrid.shortSessionMaxMin` of older
+`trained_defaults.json` files is read as `napMode.maxSessionMin`).
+
+**What the mode changes.** `AlgoParams.forMode(mode)` gives the effective parameters of a session: for a night the
+configured ones, for a nap the configured ones with `estimator = napMode.estimator`, `post = napMode.post` applied to
+`post` and `hybrid = napMode.hybrid` applied to `hybrid`. Every nap override is nullable and null by default, meaning
+"the night's value", so a parameter patch (such as a θ_g grid point or a user setting) moves naps and nights alike
+unless a nap override is set. The `paramsHash` of an estimate is computed from the configured parameters (both modes
+together), not from the effective ones.
+
+| | night | nap |
+|---|---|---|
+| nadir baseline, elevated-HR check | counts for the baseline; compared with it | never counts; never compared (no `ELEVATED_HR`) |
+| estimator | `estimator` (HYBRID) | `napMode.estimator` (HYBRID, `TrainedDefaults.NAP_ESTIMATOR`) |
+| HYBRID model | main model, `stageLogBias` | the bundle's `nap` model with its own `stageLogBias` when present; else the main model with `stageLogBiasShort` (or `stageLogBias` without it), exactly as before |
+| decoder (HYBRID) | `hybrid.durationModel` / `emissionWeight` / `timePriorWeight` | `napMode.hybrid.*` (null = the night's) |
+| minimum bouts, low-confidence threshold / policy | `post.*` | `napMode.post.*` (null = the night's) |
+| stage-share sanity check, proportion calibration | yes | only with `napMode.post.checkProportions` (false), then with the nap corridors `napMode.post.sanityDeepMin` / `sanityDeepMax` / `sanityRemMax` (null = the night's) |
+| personal HYBRID bias deltas, personal HMM table | applied | applied when decoded by the main model / the HMM (as before); never to a nap model |
+| reference calibration, population EM | take part, count towards `emEveryNights` | left out, do not count |
+| written to Health Connect | every stage | `napMode.outputPolicy`: STAGES (every stage), SLEEP_WAKE (AWAKE and SLEEPING only) or SKIP (nothing) |
+
+Coverage gates (section 9), preprocessing and base features are the same in both modes. With SKIP the session is
+`NOT_ESTIMATED` with reason `NAP_SKIPPED` ("nap of X min (shorter than napMode.maxSessionMin = Y min) and naps are not
+estimated (napMode.outputPolicy = SKIP)"), checked right after the too-short gate and before any data is read; an
+output written for the nap earlier is deleted when the nap is processed again. With SLEEP_WAKE the estimate is
+computed as with STAGES, then AWAKE is written as `STAGE_TYPE_AWAKE` and LIGHT, DEEP, REM and UNKNOWN (data gaps) as
+Health Connect's generic `STAGE_TYPE_SLEEPING` (the source session already says the whole span was sleep), adjacent
+equal types merged; the ledger keeps the estimated stages and minutes (`sleepWakeOnly` = true), so the Night detail
+still shows them. Details: `docs/INTERCHANGE.md` section 5.
+
+**Nap model in the bundle.** `HybridModel.nap` (`NapSubModel`, optional) is a complete second set of HYBRID components:
+`featureSetVersion`, `featureNames`, `standardization`, `classifier`, `classPriors`, `durations`, `boutTransitions`,
+`initialStage`, `timePrior`, optional `stageLogBias` and `training`; it shares the bundle's `schemaVersion`,
+`classOrder` and `modelId`. It is validated like the main model (messages prefixed `nap.`), enters the canonical JSON
+and so the fingerprint when present, and is left out of it when absent, so a bundle without a nap section keeps its
+fingerprint (the shipped bundle's is unchanged). A nap section whose feature set does not match the build makes naps,
+and only naps, fall back to the HMM with `HYBRID_MODEL_UNAVAILABLE`; nights keep the main model. The nap logits are
+cached under their own key. `tools/train/pulsetrain/bundle.py` builds the section (`nap_section`, `with_nap_model`);
+`algo-cli evaluate` / `features` accept such bundles, and with `--fold-models` every fold bundle carries its own fold's
+nap section, so the per-subject evaluation stays out-of-fold for naps too. No nap model is trained yet: the shipped
+bundle has none, and the decoder overrides in `TrainedDefaults` (`NAP_HYBRID_*`) are null until a nap decoder is chosen
+by validation (a nap model has to pass the same pre-registered protocol on the nap proxies, section 13.11, before it is
+shipped).
+
+**Evaluation by mode.** `algo-cli evaluate` reports every metric for all sessions and, in `byMode`, for the nights and
+the naps separately (by the block's `napMode.maxSessionMin`); `--nap-proxies 30,60,90,120` adds, for every night, nap
+proxies of its first L minutes cut exactly like `tools/train`'s `nap_proxy` (30 min of context before the start, nothing
+after the end). The per-session results and the CSV export (`CsvExporter`, trailing column `mode`) carry the mode; so do
+the ledger (`estimated_nights.mode`, `sleepWakeOnly`, Room schema version 2 with migration 1 → 2: both columns added,
+every row written before marked as written with all stages, as it was, and as a nap when its session is shorter than 180
+min, the threshold of version 1, otherwise as a night), the notes JSON of a written session (`"mode"`) and the Compare
+screen (metrics split by mode when reference sessions include naps).
+
+**No behaviour change.** With the defaults, and with any other parameters that set the three old thresholds to one
+common value (`napMode.maxSessionMin`), the build with the two modes decodes every session exactly as the build before
+them (`78bcc71`); only settings that gave the three thresholds different values cannot be expressed any more:
+
+- *Synthetic* (`NapModeRegressionTest`): 767 SHA-256 digests (intervals, per-epoch stages and posteriors, warning codes,
+  flags, coverage, confidence; or the not-estimated reason) of 13 configurations (shipped bundle; bundle without
+  `stageLogBiasShort`; geometric decoder; thresholds 0 and 120 min, i.e. the old three thresholds set together;
+  calibration; low-confidence policy LIGHT; elevated nights; synthetic bundle; RULES; HMM) on 6 nights and their proxies
+  of 30–181 min and on generated sessions of 45–181 min, recorded with the earlier build and compared with this one; the
+  bundle fingerprint is unchanged; a nap section made of the main components with `stageLogBias` = `stageLogBiasShort`
+  decodes identically, and a different nap section changes the naps only.
+- *Real nights* (`tools/train` data, both variants): `algo-cli evaluate` of the earlier and this build on the 284 nights
+  plus 1988 nap proxies of 30, 60, 90, 120, 150, 170 and 180 min (the 1704 proxies shorter than 180 min are naps by
+  default), with the shipped bundle, the bundle without `stageLogBiasShort`, thresholds 0 and 120 min, RULES and HMM (12
+  runs of 2272 sessions): every per-epoch CSV is byte-identical and every metric equal; the shipped bundle with a nap
+  section copied from its main components (and `stageLogBiasShort` as the nap bias) gives byte-identical per-epoch
+  results too.
+- *The nap experiment's check* (`train.py naps-verify --exp naps --final naps-final --out-run naps-verify-modes`): this
+  build reproduces A on 568 of 568 nights and C-180 on 2840 of 2840 proxies, with the `SANITY_*` codes of the same
+  1787 proxies shorter than 180 min dropped as in `naps-verify-merge` (section 13.11); the final bundle's resubstitution
+  estimates 1695 of 1704 sessions (1692 by HYBRID) in each variant, as before.

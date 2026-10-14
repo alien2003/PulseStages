@@ -4,8 +4,11 @@ import io.github.alien2003.pulsestages.algo.ALGO_VERSION
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
+import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNight
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticOptions
@@ -54,6 +57,15 @@ internal object DemoData {
     /** Number of demo reference nights. */
     const val REFERENCE_COUNT: Int = 8
 
+    /** Length of the demo reference nap, minutes (a short reference session, compared as a nap). */
+    const val REFERENCE_NAP_MINUTES: Int = 120
+
+    /** Demo sessions of the Nights list: the nights and the naps. */
+    val SESSION_COUNT: Int get() = NIGHT_COUNT + DemoNaps.LENGTHS.size
+
+    /** Demo reference sessions: the reference nights and one reference nap. */
+    const val REFERENCE_SESSION_COUNT: Int = REFERENCE_COUNT + 1
+
     /** The nights that differ from a regular one, by days ago. */
     private val VARIANTS =
         mapOf(
@@ -71,6 +83,7 @@ internal object DemoData {
     private const val STALE_DAYS_AGO = 5
     private const val NO_HEART_RATE_DAYS_AGO = 9
     private const val NIGHT_SEED = 20_261_013L
+    private const val NAP_ID_OFFSET = 100L
     private const val REFERENCE_SEED = 31_415L
     private const val BEDTIME_HOUR = 23
     private const val JITTER_MINUTES = 37L
@@ -123,14 +136,19 @@ internal object DemoData {
         return night.input.copy(baselineNadirBpm = baseline)
     }
 
-    /** The [index]-th reference night (0 = oldest) starting at [startMs]; its person differs a little from the default. */
+    /**
+     * The [index]-th reference night (0 = oldest) starting at [startMs], [durationMin] long (null: a whole night); its
+     * person differs a little from the default.
+     */
     fun referenceNight(
         index: Int,
         startMs: Long,
+        durationMin: Int? = null,
     ): SyntheticNight =
         SyntheticNightGenerator(REFERENCE_SEED + index).generate(
             SyntheticOptions(
                 sessionStartMs = startMs,
+                durationMin = durationMin,
                 person = REFERENCE_PERSON,
             ),
         )
@@ -141,9 +159,16 @@ internal object DemoData {
         zone: ZoneId,
     ): Int = zone.rules.getOffset(Instant.ofEpochMilli(epochMs)).totalSeconds
 
+    /** The clientRecordId of the demo night (or, with [nap], the demo nap) [daysAgo]. */
+    fun clientRecordId(
+        daysAgo: Int,
+        nap: Boolean = false,
+    ): String = if (nap) "ps:demo-nap-$daysAgo" else "ps:demo-$daysAgo"
+
     /**
-     * The ledger-like row of the demo night [daysAgo] estimated with [outcome]; [paramsHash] is the current hash (the
-     * stale variant gets [STALE_HASH]), [configured] the configured estimator (shown for nights not estimated).
+     * The ledger-like row of the demo night (or, with [nap], the demo nap) [daysAgo] estimated with [outcome] under
+     * [params]; [paramsHash] is the current hash (the stale variant gets [STALE_HASH]); a nap not estimated shows the
+     * nap estimator.
      */
     @Suppress("LongParameterList") // One row of the demo ledger.
     fun entity(
@@ -151,30 +176,33 @@ internal object DemoData {
         input: NightInput,
         outcome: EstimationOutcome,
         paramsHash: String,
-        configured: EstimatorType,
+        params: AlgoParams,
         modelId: String?,
         zone: ZoneId,
         nowMs: Long,
         recomputeCount: Int = 0,
+        nap: Boolean = false,
     ): EstimatedNightEntity {
+        val mode = params.modeOf(input.sessionEndMs - input.sessionStartMs)
         val base =
             EstimatedNightEntity(
-                id = daysAgo.toLong(),
-                clientRecordId = "ps:demo-$daysAgo",
-                sourceUuids = listOf("demo-session-$daysAgo"),
+                id = if (nap) NAP_ID_OFFSET + daysAgo else daysAgo.toLong(),
+                clientRecordId = clientRecordId(daysAgo, nap),
+                sourceUuids = listOf(if (nap) "demo-nap-session-$daysAgo" else "demo-session-$daysAgo"),
                 sourcePackage = DEMO_SOURCE_PACKAGE,
                 sessionStartMs = input.sessionStartMs,
                 sessionEndMs = input.sessionEndMs,
                 startZoneOffsetSec = offsetSec(input.sessionStartMs, zone),
                 endZoneOffsetSec = offsetSec(input.sessionEndMs, zone),
                 algoVersion = ALGO_VERSION,
-                paramsHash = if (variantOf(daysAgo) == DemoVariant.STALE && recomputeCount == 0) STALE_HASH else paramsHash,
-                estimator = configured,
+                paramsHash = if (!nap && variantOf(daysAgo) == DemoVariant.STALE && recomputeCount == 0) STALE_HASH else paramsHash,
+                estimator = params.forMode(mode).estimator,
                 status = NightStatus.NOT_ESTIMATED,
                 recomputeCount = recomputeCount,
                 hrSamples = input.heartRate.size,
                 createdAt = nowMs,
                 updatedAt = nowMs,
+                mode = mode,
             )
         return when (outcome) {
             is EstimationOutcome.NotEstimated -> {
@@ -203,6 +231,7 @@ internal object DemoData {
                     nadirBpm = estimate.nadirBpm,
                     hrSamples = estimate.hrSampleCount,
                     stages = estimate.stages,
+                    sleepWakeOnly = estimate.mode == SessionMode.NAP && params.napMode.outputPolicy == NapOutputPolicy.SLEEP_WAKE,
                 )
             }
         }
@@ -241,5 +270,7 @@ internal object DemoData {
             calibrated = night.calibrated,
             rulesFallback = night.rulesFallback,
             updatedAt = night.updatedAt,
+            mode = night.mode,
+            sleepWakeOnly = night.sleepWakeOnly,
         )
 }

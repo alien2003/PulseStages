@@ -9,10 +9,12 @@ import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightInput
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 import io.github.alien2003.pulsestages.algo.night.PreparedNight
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.algo.personal.PersonalModel
 import io.github.alien2003.pulsestages.algo.rules.RulesEstimator
 import java.util.Locale
@@ -76,11 +78,14 @@ class SleepStager internal constructor(
     private val rules = RulesEstimator()
 
     /**
-     * Estimates one night with the configured estimator after the gates: a session shorter than
+     * Estimates one session with the estimator of its mode after the gates: a session shorter than
      * `preprocess.minSessionMin` minutes → [NotEstimatedReason.SESSION_TOO_SHORT] (the default 0 disables this gate);
-     * no heart-rate samples (in range, inside the session ± context) → [NotEstimatedReason.NO_HR_DATA]; coverage ≥
-     * minCoverage → the configured estimator; rulesMinCoverage ≤ coverage < minCoverage → RULES
-     * (RULES_FALLBACK_LOW_COVERAGE unless RULES was configured anyway); below → [NotEstimatedReason.LOW_COVERAGE].
+     * a nap ([SessionMode.NAP]) with `napMode.outputPolicy` SKIP → [NotEstimatedReason.NAP_SKIPPED]; no heart-rate
+     * samples (in range, inside the session ± context) → [NotEstimatedReason.NO_HR_DATA]; coverage ≥ minCoverage → the
+     * configured estimator (`estimator` for a night, `napMode.estimator` for a nap); rulesMinCoverage ≤ coverage <
+     * minCoverage → RULES (RULES_FALLBACK_LOW_COVERAGE unless RULES was configured anyway); below →
+     * [NotEstimatedReason.LOW_COVERAGE]. A nap is estimated with `params.forMode(SessionMode.NAP)`; the estimate's
+     * params hash is always that of [params] as given.
      */
     fun run(
         input: NightInput,
@@ -88,19 +93,30 @@ class SleepStager internal constructor(
     ): EstimationOutcome = run(NightPreparer.prepare(input, params))
 
     /**
-     * [run] on an already prepared night with its parameters ([PreparedNight.params]). Evaluations that vary only
-     * decoder or post-processing parameters reuse the preparation through [PreparedNight.withParams].
+     * [run] on an already prepared night with its parameters ([PreparedNight.configuredParams], in effect
+     * [PreparedNight.params]). Evaluations that vary only decoder or post-processing parameters reuse the preparation
+     * through [PreparedNight.withParams].
      */
     fun run(night: PreparedNight): EstimationOutcome {
         val coverage = night.coverage
         val gates = night.params.preprocess
         val sessionMin = (night.input.sessionEndMs - night.input.sessionStartMs) / MS_PER_MINUTE
+        val napMode = night.params.napMode
         return when {
             sessionMin < gates.minSessionMin -> {
                 EstimationOutcome.NotEstimated(
                     NotEstimatedReason.SESSION_TOO_SHORT,
                     coverage,
                     "session of ${String.format(Locale.ROOT, "%.1f", sessionMin)} min is shorter than ${gates.minSessionMin} min",
+                )
+            }
+
+            night.mode == SessionMode.NAP && napMode.outputPolicy == NapOutputPolicy.SKIP -> {
+                EstimationOutcome.NotEstimated(
+                    NotEstimatedReason.NAP_SKIPPED,
+                    coverage,
+                    "nap of ${String.format(Locale.ROOT, "%.1f", sessionMin)} min (shorter than napMode.maxSessionMin = " +
+                        "${napMode.maxSessionMin} min) and naps are not estimated (napMode.outputPolicy = SKIP)",
                 )
             }
 
@@ -130,7 +146,10 @@ class SleepStager internal constructor(
         }
     }
 
-    /** Estimates with [type] regardless of `params.estimator` and without coverage gates ("compare with RULES"). */
+    /**
+     * Estimates with [type] regardless of `params.estimator` (and `napMode.estimator`) and without coverage gates or
+     * the nap output policy ("compare with RULES"); a nap still gets the nap overrides of `napMode`.
+     */
     fun estimateWith(
         type: EstimatorType,
         input: NightInput,
@@ -169,7 +188,7 @@ class SleepStager internal constructor(
                 EstimatorType.HMM -> hmmEstimate(night)
                 EstimatorType.HYBRID -> hybridOrFallback(night)
             }
-        return estimate.copy(paramsHash = paramsHash(night.params))
+        return estimate.copy(paramsHash = paramsHash(night.configuredParams))
     }
 
     /** HMM with the personal μ/σ overrides when personalization is enabled. */

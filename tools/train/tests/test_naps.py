@@ -1,6 +1,6 @@
 """Nap-proxy evaluation (pulsetrain/naps.py): proxies, per-session metrics, the candidate assembly and the
 pre-registered rule, and the experiment end to end on a tiny run of the FAKE algo-cli (tests/fake_algo_cli.py,
-which implements stageLogBias, stageLogBiasShort and hybrid.shortSessionMaxMin like core-algo)."""
+which implements stageLogBias, stageLogBiasShort, the nap section and napMode.maxSessionMin like core-algo)."""
 
 import json
 import shutil
@@ -67,6 +67,13 @@ def test_candidate_kinds_and_threshold():
 def test_expected_warnings_of_a_build_that_skips_the_sanity_check_on_short_sessions():
     assert naps.sanity_check_min_session_min({"params": {"post": {"proportionsMinSessionMin": 180.0}}}) == 180.0
     assert naps.sanity_check_min_session_min({"params": {"post": {}}}) == 0.0          # builds before the rule
+    # builds with the two processing modes: naps (napMode.maxSessionMin) are not checked unless checkProportions
+    assert naps.sanity_check_min_session_min({"params": {"napMode": {"maxSessionMin": 180.0}}}) == 180.0
+    assert naps.sanity_check_min_session_min({"params": {"napMode": {"maxSessionMin": 120.0, "post": {
+        "checkProportions": False}}, "post": {"proportionsMinSessionMin": 999.0}}}) == 120.0
+    assert naps.sanity_check_min_session_min({"params": {"napMode": {"maxSessionMin": 180.0, "post": {
+        "checkProportions": True}}}}) == 0.0
+    assert naps.sanity_check_min_session_min({"params": {"napMode": {"maxSessionMin": 0.0}}}) == 0.0
     assert naps.sanity_check_min_session_min({}) == 0.0
     stored = ["LOW_HR_RANGE", "SANITY_DEEP_LOW", "DATA_GAPS", "SANITY_REM_HIGH"]
     assert naps.expected_warnings(stored, 120 * MIN, 180.0) == ["LOW_HR_RANGE", "DATA_GAPS"]
@@ -236,11 +243,13 @@ def test_final_model_and_implementation_check_for_an_adopted_c(runs, tmp_path):
             k: v for k, v in base.items() if k not in ("modelId", "training")}
         assert read_json(install) == b and "candidate C-180" in b["training"]["notes"]
         td = read_json(tmp_path / "nf2" / "trained_defaults.json")
-        assert td["hybrid"]["shortSessionMaxMin"] == 180.0 and td["hybrid"]["priorExponent"] == 1.0
+        assert td["napMode"]["maxSessionMin"] == 180.0 and td["hybrid"]["priorExponent"] == 1.0
+        assert "shortSessionMaxMin" not in td["hybrid"]
         from pulsetrain import kotlin_defaults
         src = kotlin_defaults.render_run(tmp_path / "nf2")
-        assert "const val HYBRID_SHORT_SESSION_MAX_MIN: Double = 180.0" in src and "C-180" in src
-        # the fake implements shortSessionMaxMin like core-algo: with it as a default the check passes
+        assert "const val NAP_MAX_SESSION_MIN: Double = 180.0" in src and "C-180" in src
+        # the fake implements the nap threshold like core-algo: with it as a default (and, like the experiment's
+        # build, the sanity check on every session) the check passes
         v = naps.verify_implementation(inp, _FakeWithDefault(naps.AlgoCli.locate(), 180.0), out / "naps",
                                        tmp_path / "verify", final_bundle=tmp_path / "nf2" / "final" / "hybrid_model.json")
         assert v["nightsIdenticalToA"] == v["nights"] > 0 and v["proxiesIdenticalToCandidate"] == v["proxies"] > 0
@@ -256,7 +265,7 @@ def test_final_model_and_implementation_check_for_an_adopted_c(runs, tmp_path):
         hit = next(r_ for r_ in rows if r_["kind"] == "C-180" and r_["L"] == 30 and r_["estimated"])
         hit["warnings"] = [*hit["warnings"], "SANITY_DEEP_LOW"]
         (exp / "results.jsonl").write_text("".join(json.dumps(x) + "\n" for x in rows))
-        skips = _FakeWithDefault(naps.AlgoCli.locate(), 180.0, post={"proportionsMinSessionMin": 180.0})
+        skips = _FakeWithDefault(naps.AlgoCli.locate(), 180.0, check_proportions=False)
         v = naps.verify_implementation(inp, skips, exp, tmp_path / "verify-skips")
         assert v["sanityCheckMinSessionMin"] == [180.0] and v["sanityCodesDropped"] == 1
         assert v["proxiesIdenticalToCandidate"] == v["proxies"]
@@ -271,12 +280,13 @@ def test_final_model_and_implementation_check_for_an_adopted_c(runs, tmp_path):
 
 
 class _FakeWithDefault:
-    """The fake algo-cli with ``hybrid.shortSessionMaxMin`` defaulting to ``value`` (as a build whose
-    TrainedDefaults carries it): the default is merged into every params file the check writes, like the ``post``
-    defaults when given (e.g. ``proportionsMinSessionMin``, which the fake reports in its metrics but ignores)."""
+    """The fake algo-cli with ``napMode.maxSessionMin`` defaulting to ``value`` (as a build whose TrainedDefaults
+    carries it) and ``napMode.post.checkProportions`` to ``check_proportions`` (True = the nap experiment's build,
+    which checked the stage shares of every session; False = the current default, no sanity check on naps, which the
+    fake reports in its metrics but does not implement): merged into every params file the check writes."""
 
-    def __init__(self, cli, value, post=None):
-        self.cli, self.value, self.post = cli, value, dict(post or {})
+    def __init__(self, cli, value, check_proportions=True):
+        self.cli, self.value, self.check = cli, value, check_proportions
 
     def fingerprint(self):
         return self.cli.fingerprint()
@@ -284,9 +294,9 @@ class _FakeWithDefault:
     def evaluate(self, nights, estimator, out, *, params=None, **kw):
         if params is not None:
             p = read_json(params)
-            p.setdefault("hybrid", {}).setdefault("shortSessionMaxMin", self.value)
-            for k, x in self.post.items():
-                p.setdefault("post", {}).setdefault(k, x)
+            nap = p.setdefault("napMode", {})
+            nap.setdefault("maxSessionMin", self.value)
+            nap.setdefault("post", {}).setdefault("checkProportions", self.check)
             write_json(params, p)
         return self.cli.evaluate(nights, estimator, out, params=params, **kw)
 

@@ -143,41 +143,46 @@ JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps --run bias-bas
 mise exec -- python -I tools/train/train.py naps-report --out-run naps        # re-render it from results.jsonl
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-final --exp naps --base-run bias-final \
     --out-run naps-final --install-model                                       # C adopted: bundle + stageLogBiasShort
-mise exec -- python -I tools/train/train.py defaults --run naps-final --write  # + HYBRID_SHORT_SESSION_MAX_MIN
+mise exec -- python -I tools/train/train.py defaults --run naps-final --write  # + NAP_MAX_SESSION_MIN, NAP_*
 mise exec -- ./gradlew :algo-cli:installDist                                   # the build implementing it
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final --out-run naps-verify
 # the same check on the build merged with post.proportionsMinSessionMin (no sanity check below 180 min):
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final \
     --out-run naps-verify-merge
+# and on the build with the two processing modes (one nap threshold napMode.maxSessionMin, ALGORITHM.md section 18):
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-verify --exp naps --final naps-final \
+    --out-run naps-verify-modes
 # audit follow-up, post hoc and reporting only (no decision depends on it):
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps --run bias-base --out-run naps-rerun --context-run loso-v2
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-posthoc --exp naps --final naps-final \
     --rerun naps-rerun --out-run naps-posthoc
 ```
 
-`naps` (`pulsetrain/naps.py`) cuts nap proxies from the OHealth-like night files (the first L in {30, 60, 90, 120,
-180} min of every session, heart rate / steps of the 30 min before, nothing after the end, the labels inside),
-re-evaluates the whole nights first (A = fold bundle + the fold-level b of candidate (b), BASE = no b, RULES,
-HMM-table) and fails unless A / BASE reproduce `bias-base/bias/results.jsonl` night by night; then it fits the
-short-session bias b_short per (variant, outer group, T in {120, 180}) with the fixed point of `bias.py` on the
-inner out-of-fold proxies (L < T) of the group's Walch selection subjects, decodes every proxy of every held-out
-subject per decoding kind (A, BASE, C-120, C-180, RULES, HMM-table) and assembles the candidates A, B-T (b off below
-T) and C-T (b_short below T); metrics per session (accuracy, summed share error in percentage points, kappa reported
-only, NOT_ESTIMATED reasons, low-confidence / sanity flags), per length and pooled over 30-120 min, paired bootstrap
-CIs vs A, the pre-registered rule (Walch, worse variant: lowest error among candidates with accuracy >= A - 0.01).
-`naps-final` fits the final b_short on the LOSO out-of-fold proxies of all Walch subjects and writes
-`out/naps-final/{final/hybrid_model.json, trained_defaults.json, summary.json}`; `naps-verify` checks that a build
-implementing `hybrid.shortSessionMaxMin` / `stageLogBiasShort` reproduces A on every night and the adopted candidate on
-every proxy with its *default* parameters. The experiment's build checked the stage shares of every session; a build
-that runs the sanity check only on sessions of at least `post.proportionsMinSessionMin` (read from the parameters its
-metrics report) must give the stored warnings without the `SANITY_*` codes of shorter sessions, and the summary counts
-those sessions (`sanityCodesDropped`) and gives the build's low-confidence rate per dataset, variant and length
-(`lowConfidenceRate`). `naps-posthoc` (`pulsetrain/naps_posthoc.py`; reporting only, not pre-registered) decodes
-proxies of 150 and 170 min with A and the adopted C (and the 120-min proxies again, which must equal the stored ones,
-with the same `SANITY_*` rule; on such a build its flag tables have no sanity flags below 180 min), compares C-180 with C-120, scores RULES / HMM-table / "always LIGHT" by the rule as if they
-had been candidates, tabulates flags, stage shares of both variants, the REM excess and both kappa definitions (mean
-per subject vs chunk-pooled), checks the final b_short fit against the fold fits and, with `--rerun`, compares a
-re-run of `naps` with the stored run file by file (`--no-decode` skips the algo-cli part).
+`naps` (`pulsetrain/naps.py`) cuts nap proxies from the OHealth-like night files (the first L in {30, 60, 90, 120, 180}
+min of every session, heart rate / steps of the 30 min before, nothing after the end, the labels inside), re-evaluates
+the whole nights first (A = fold bundle + the fold-level b of candidate (b), BASE = no b, RULES, HMM-table) and fails
+unless A / BASE reproduce `bias-base/bias/results.jsonl` night by night; then it fits the short-session bias b_short per
+(variant, outer group, T in {120, 180}) with the fixed point of `bias.py` on the inner out-of-fold proxies (L < T) of
+the group's Walch selection subjects, decodes every proxy of every held-out subject per decoding kind (A, BASE, C-120,
+C-180, RULES, HMM-table) and assembles the candidates A, B-T (b off below T) and C-T (b_short below T); metrics per
+session (accuracy, summed share error in percentage points, kappa reported only, NOT_ESTIMATED reasons, low-confidence /
+sanity flags), per length and pooled over 30-120 min, paired bootstrap CIs vs A, the pre-registered rule (Walch, worse
+variant: lowest error among candidates with accuracy >= A - 0.01). `naps-final` fits the final b_short on the LOSO
+out-of-fold proxies of all Walch subjects and writes `out/naps-final/{final/hybrid_model.json, trained_defaults.json,
+summary.json}` (the threshold as `napMode.maxSessionMin`); `naps-verify` checks that a build implementing the nap
+threshold (`napMode.maxSessionMin`, before the two modes `hybrid.shortSessionMaxMin`) / `stageLogBiasShort` reproduces A
+on every night and the adopted candidate on every proxy with its *default* parameters. The experiment's build checked
+the stage shares of every session; a build that runs the sanity check only on sessions of at least a threshold (read
+from the parameters its metrics report: `napMode.maxSessionMin` unless `napMode.post.checkProportions`, or
+`post.proportionsMinSessionMin` of a build before the modes) must give the stored warnings without the `SANITY_*` codes
+of shorter sessions, and the summary counts those sessions (`sanityCodesDropped`) and gives the build's low-confidence
+rate per dataset, variant and length (`lowConfidenceRate`). `naps-posthoc` (`pulsetrain/naps_posthoc.py`; reporting
+only, not pre-registered) decodes proxies of 150 and 170 min with A and the adopted C (and the 120-min proxies again,
+which must equal the stored ones, with the same `SANITY_*` rule; on such a build its flag tables have no sanity flags
+below 180 min), compares C-180 with C-120, scores RULES / HMM-table / "always LIGHT" by the rule as if they had been
+candidates, tabulates flags, stage shares of both variants, the REM excess and both kappa definitions (mean per subject
+vs chunk-pooled), checks the final b_short fit against the fold fits and, with `--rerun`, compares a re-run of `naps`
+with the stored run file by file (`--no-decode` skips the algo-cli part).
 
 Provenance: every nap run records `meta.code` in its `summary.json` (SHA-256 of `train.py` and each `pulsetrain/*.py`,
 one digest over them, the git commit and the hashed files that differ from it) next to the algo-cli fingerprint and
@@ -197,9 +202,10 @@ every phase). Rebuild algo-cli only between runs and log the rebuild in `tools/t
 
 `defaults` renders `out/<run>/trained_defaults.json` into the generated Kotlin object `TrainedDefaults`
 (`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`,
-`emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it, `shortSessionMaxMin` — 0 = off
-unless the run chose it) and HMM (`emissions`, `meanBouts`,
-`transitions`) defaults from it. The HMM
+`emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it), nap mode (`napMode.maxSessionMin` —
+180 unless the run chose it, a legacy `hybrid.shortSessionMaxMin` of an earlier run read as it; `napMode.estimator` —
+the night's estimator unless chosen; the nap decoder overrides `napMode.hybrid.*` — null = the night's values unless
+chosen) and HMM (`emissions`, `meanBouts`, `transitions`) defaults from it. The HMM
 fields hold the supervised estimates only when HMM-trained beat the physiology table by the selection rule;
 otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` / `TransitionWeights()`, and `HmmParams.PHYSIOLOGY`
 always gives the specification's table.
@@ -340,6 +346,15 @@ Checked on real night files with the installDist launcher; `tests/fake_algo_cli.
   `<subject>.hmm-params.json`, which algo-cli ignores); a night whose subject has no fold model is skipped as
   `NO_FOLD_MODEL`, which the pipeline treats as an error. HMM-trained is evaluated per fold with `--params`
   `folds/<fold>.hmm-params.json` (one call per held-out subject), so no per-subject parameter option is needed.
+  `--estimator` sets the estimator of nights and of naps (`estimator`, `napMode.estimator`).
+- Night / nap modes (ALGORITHM.md section 18): `features` and `evaluate` take `--nap-proxies <minutes,…>` (for every
+  night and length L also its nap proxy `<id>-nap<L>`, cut like `pulsetrain.naps.nap_proxy`); every `perNight` /
+  `skipped` entry has `mode` (NIGHT / NAP by the block's `napMode.maxSessionMin`) and every metrics block has `byMode`
+  (`NIGHT`, `NAP`: the same keys for the sessions of each mode). A bundle may carry a nap model, the `nap` section
+  (`bundle.nap_section(model)` of a bundle trained on nap-length sessions, `bundle.with_nap_model(bundle, nap)`);
+  it decodes the naps instead of the main model, and with `--fold-models` each fold bundle carries its own fold's
+  nap section, so a nap model is evaluated out-of-fold like the main one. A bundle without the section decodes naps
+  with the main model and `stageLogBiasShort`, exactly as before the modes.
 - `--param-grid` input: a JSON array of partial AlgoParams patches, each deep-merged over the base parameters;
   output `{"grid": [block, …]}`, one metrics block per patch with `index` and `patch` added. Without the flag
   (exit code 64) the grid is evaluated point by point (`--grid-mode loop` forces that).

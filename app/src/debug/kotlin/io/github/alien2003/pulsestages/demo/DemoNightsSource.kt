@@ -47,7 +47,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Debug builds only: [NightsSource] over [DemoData]'s synthetic nights, estimated in memory with core-algo's
+ * Debug builds only: [NightsSource] over [DemoData]'s synthetic nights and afternoon naps, estimated in memory with core-algo's
  * [SleepStager] (the bundled hybrid model, the current settings). Nothing is read from or written to Health Connect or
  * the ledger: "delete" and "recompute" change only the in-memory rows, so the screens behave as with real data.
  */
@@ -64,6 +64,7 @@ class DemoNightsSource
             val daysAgo: Int,
             val entity: EstimatedNightEntity,
             val input: NightInput,
+            val nap: Boolean = false,
         )
 
         private val mutex = Mutex()
@@ -132,7 +133,7 @@ class DemoNightsSource
 
                 else -> {
                     val now = clock.millis()
-                    replace(night.daysAgo) { it.copy(status = NightStatus.DELETED, statusReason = DELETED_REASON, updatedAt = now) }
+                    replace(clientRecordId) { it.copy(status = NightStatus.DELETED, statusReason = DELETED_REASON, updatedAt = now) }
                     DeleteNightResult.DELETED
                 }
             }
@@ -151,13 +152,14 @@ class DemoNightsSource
                     input = night.input,
                     outcome = outcome,
                     paramsHash = stager.paramsHash(params, HASH_EXTRA),
-                    configured = params.estimator,
+                    params = params,
                     modelId = stager.modelId,
                     zone = zone,
                     nowMs = clock.millis(),
                     recomputeCount = night.entity.recomputeCount + 1,
+                    nap = night.nap,
                 )
-            replace(night.daysAgo) { updated.copy(createdAt = it.createdAt) }
+            replace(clientRecordId) { updated.copy(createdAt = it.createdAt) }
             val estimated = if (outcome is EstimationOutcome.Estimated) 1 else 0
             val summary = RunSummary(found = 1, estimated = estimated, skipped = 1 - estimated)
             val report = RunReport(OutcomeKind.COMPLETED, summary, blockedReason = null, retryCause = null, detail = null)
@@ -173,12 +175,16 @@ class DemoNightsSource
             ensureGenerated().firstOrNull { it.entity.clientRecordId == clientRecordId }
 
         private fun replace(
-            daysAgo: Int,
+            clientRecordId: String,
             transform: (EstimatedNightEntity) -> EstimatedNightEntity,
         ) {
             nights.update { list ->
                 list?.map { night ->
-                    if (night.daysAgo == daysAgo) DemoNight(night.daysAgo, transform(night.entity), night.input) else night
+                    if (night.entity.clientRecordId == clientRecordId) {
+                        DemoNight(night.daysAgo, transform(night.entity), night.input, night.nap)
+                    } else {
+                        night
+                    }
                 }
             }
         }
@@ -193,11 +199,20 @@ class DemoNightsSource
             val today = LocalDate.now(clock.withZone(zone))
             val now = clock.millis()
             return withContext(estimationDispatcher) {
-                (1..DemoData.NIGHT_COUNT).map { daysAgo ->
-                    val input = DemoData.nightInput(daysAgo, DemoData.sessionStart(daysAgo, today, zone))
-                    val outcome = stager.run(input, params)
-                    DemoNight(daysAgo, DemoData.entity(daysAgo, input, outcome, hash, params.estimator, stager.modelId, zone, now), input)
-                }
+                val nights =
+                    (1..DemoData.NIGHT_COUNT).map { daysAgo ->
+                        val input = DemoData.nightInput(daysAgo, DemoData.sessionStart(daysAgo, today, zone))
+                        val outcome = stager.run(input, params)
+                        DemoNight(daysAgo, DemoData.entity(daysAgo, input, outcome, hash, params, stager.modelId, zone, now), input)
+                    }
+                val naps =
+                    DemoNaps.LENGTHS.keys.map { daysAgo ->
+                        val input = DemoNaps.input(daysAgo, DemoNaps.start(daysAgo, today, zone))
+                        val outcome = stager.run(input, params)
+                        val entity = DemoData.entity(daysAgo, input, outcome, hash, params, stager.modelId, zone, now, nap = true)
+                        DemoNight(daysAgo, entity, input, nap = true)
+                    }
+                nights + naps
             }
         }
 

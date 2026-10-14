@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import androidx.room.Upsert
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -83,6 +84,13 @@ abstract class EstimatedNightDao {
     @Query("SELECT COUNT(*) FROM estimated_nights WHERE status = :status")
     abstract suspend fun countWithStatus(status: NightStatus): Int
 
+    /** Number of nights with [status] processed in [mode] (night or nap). */
+    @Query("SELECT COUNT(*) FROM estimated_nights WHERE status = :status AND mode = :mode")
+    abstract suspend fun countWithStatusAndMode(
+        status: NightStatus,
+        mode: SessionMode,
+    ): Int
+
     /** clientRecordIds of every night whose record we believe to exist in Health Connect (`hcRecordId` set). */
     @Query("SELECT clientRecordId FROM estimated_nights WHERE hcRecordId IS NOT NULL ORDER BY sessionStartMs, id")
     abstract suspend fun clientRecordIdsWithOutput(): List<String>
@@ -122,7 +130,7 @@ abstract class EstimatedNightDao {
      * Stores one pipeline result atomically: [upsert]s [night], upserts [sourceSessions] and, for a
      * [NightStatus.WRITTEN] night with a nadir, its baseline row (other results leave baselines untouched). Naps get a
      * row too: [NightBaselineDao] counts only nights long enough for the baseline, so the stored history follows a
-     * changed `features.baselineMinSessionMin`.
+     * changed `napMode.maxSessionMin`.
      * Returns the night's row id.
      */
     @Transaction
@@ -241,6 +249,6 @@ abstract class EstimatedNightDao {
         const val SUMMARY_COLUMNS =
             "id, clientRecordId, sourcePackage, sessionStartMs, sessionEndMs, startZoneOffsetSec, endZoneOffsetSec, " +
                 "status, statusReason, estimator, algoVersion, paramsHash, coverage, confidence, awakeMin, lightMin, deepMin, " +
-                "remMin, unknownMin, elevatedHr, lowConfidence, calibrated, rulesFallback, updatedAt"
+                "remMin, unknownMin, elevatedHr, lowConfidence, calibrated, rulesFallback, updatedAt, mode, sleepWakeOnly"
     }
 }

@@ -8,6 +8,7 @@ import io.github.alien2003.pulsestages.algo.metrics.StageMinutesError
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
@@ -79,12 +80,15 @@ data class ReferenceSearch(
  * @property estimator the estimator that produced the stages, or null when the night was not estimated.
  * @property score chunk-level comparison with the reference, or null when the night was not estimated.
  * @property notEstimatedReason English reason when the night was not estimated (or the estimator failed).
+ * @property mode whether the reference session was estimated as a night or as a nap (`napMode.maxSessionMin` of the
+ *   parameters it was compared with).
  */
 data class ReferenceNightScore(
     val night: ReferenceNight,
     val estimator: EstimatorType?,
     val score: NightScore?,
     val notEstimatedReason: String?,
+    val mode: SessionMode = SessionMode.NIGHT,
 ) {
     /** Cohen's kappa of this night, or null when not estimated / undefined. */
     val kappa: Double? get() = score?.confusion?.kappa?.takeIf { it.isFinite() }
@@ -97,13 +101,23 @@ data class ReferenceNightScore(
 }
 
 /**
- * Per-night and pooled agreement of our estimator with the reference nights (the "Compare" screen).
+ * Per-night and pooled agreement of our estimator with the reference nights (the "Compare" screen). Short reference
+ * sessions are estimated as naps; [forMode] gives the same numbers for the nights or the naps alone.
  *
  * @property nights one score per reference night, in input order.
  */
 data class ReferenceReport(
     val nights: List<ReferenceNightScore>,
 ) {
+    /** The modes of the compared sessions, in [SessionMode] order. */
+    val modes: List<SessionMode> get() = SessionMode.entries.filter { mode -> nights.any { it.mode == mode } }
+
+    /** Whether the sessions are of both modes (the metrics are then also shown per mode). */
+    val mixesModes: Boolean get() = modes.size > 1
+
+    /** The report of the sessions of [mode] only. */
+    fun forMode(mode: SessionMode): ReferenceReport = ReferenceReport(nights.filter { it.mode == mode })
+
     /** The confusion matrices of every scored night summed (rows: reference, columns: estimate). */
     val pooled: ConfusionMatrix = nights.mapNotNull { it.score?.confusion }.fold(ConfusionMatrix.EMPTY) { sum, m -> sum + m }
 
@@ -201,8 +215,9 @@ object ReferenceStages {
 /**
  * Validation against reference nights from Health Connect: [findReferenceNights] collects the sessions of every app
  * except ours that have real sleep stages ([ReferenceStages.isReference]: LIGHT / DEEP / REM, covering most of the
- * session; awake / asleep-only sessions are reported apart) and that are not naps (`minSessionMin`), each with heart
- * rate (+ steps) over the session ± the context margin: from
+ * session; awake / asleep-only sessions are reported apart) and that are not shorter than the source setting
+ * `minSessionMin` (sessions between it and `napMode.maxSessionMin` are compared as naps, [ReferenceReport.forMode]),
+ * each with heart rate (+ steps) over the session ± the context margin: from
  * the enabled sources first, from any origin when those have none. [compare] runs our estimator on them and scores the
  * result with core-algo's [IntervalScoring] (30-s chunks: kappa, per-stage precision / recall / F1, accuracy, confusion
  * matrix, minute errors), per night and pooled. Never writes anything; never throws except for cancellation.
@@ -272,8 +287,9 @@ class ReferenceComparison
         private suspend fun score(
             night: ReferenceNight,
             params: AlgoParams,
-        ): ReferenceNightScore =
-            try {
+        ): ReferenceNightScore {
+            val mode = params.modeOf(night.input.sessionEndMs - night.input.sessionStartMs)
+            return try {
                 when (val outcome = withContext(estimationDispatcher) { estimator.estimate(night.input, params) }) {
                     is EstimationOutcome.Estimated -> {
                         ReferenceNightScore(
@@ -281,19 +297,21 @@ class ReferenceComparison
                             outcome.estimate.estimator,
                             IntervalScoring.score(night.truth, outcome.estimate.stages),
                             null,
+                            outcome.estimate.mode,
                         )
                     }
 
                     is EstimationOutcome.NotEstimated -> {
-                        ReferenceNightScore(night, null, null, "${outcome.reason}: ${outcome.detail}")
+                        ReferenceNightScore(night, null, null, "${outcome.reason}: ${outcome.detail}", mode)
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 logger.e(TAG, "estimating reference session ${night.session.uuid} failed", throwable = e)
-                ReferenceNightScore(night, null, null, "${e.javaClass.simpleName}: ${e.message}")
+                ReferenceNightScore(night, null, null, "${e.javaClass.simpleName}: ${e.message}", mode)
             }
+        }
 
         /** The reference night of [session], or null when no heart rate exists for it. */
         private suspend fun referenceNight(

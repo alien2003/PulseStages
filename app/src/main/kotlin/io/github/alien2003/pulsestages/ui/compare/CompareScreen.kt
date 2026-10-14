@@ -51,6 +51,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.alien2003.pulsestages.R
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.data.local.db.PersonalModelKind
 import io.github.alien2003.pulsestages.ui.common.ActionRow
@@ -333,6 +334,7 @@ private fun SummaryCard(state: CompareUiState) {
             pluralStringResource(R.plurals.compare_scored_nights, metrics.scoredNights, metrics.scoredNights),
             style = MaterialTheme.typography.bodySmall,
         )
+        if (metrics.byMode.isNotEmpty()) ModeMetricsLines(metrics.byMode)
         metrics.meanMinutesError?.let { error ->
             Text(
                 stringResource(
@@ -350,6 +352,25 @@ private fun SummaryCard(state: CompareUiState) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+    }
+}
+
+/** The pooled kappa and accuracy of the nights and of the naps apart. */
+@Composable
+private fun ModeMetricsLines(byMode: List<ModeMetrics>) {
+    val none = stringResource(R.string.value_not_available)
+    Text(stringResource(R.string.compare_by_mode_title), style = MaterialTheme.typography.titleSmall)
+    byMode.forEach { part ->
+        Text(
+            stringResource(
+                R.string.compare_mode_metrics,
+                stringResource(part.mode.labelRes()),
+                part.kappa?.let { formatDecimal(it, KAPPA_DIGITS) } ?: none,
+                part.accuracy?.let { formatPercent(it) } ?: none,
+            ) + stringResource(R.string.list_separator) +
+                pluralStringResource(R.plurals.compare_scored_nights, part.scoredNights, part.scoredNights),
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -514,7 +535,11 @@ private fun NightsCard(state: CompareUiState) {
         state.nights.forEach { night ->
             val start = localDateTime(night.startMs, night.zoneOffsetSec)
             ListItem(
-                overlineContent = { Text(sourceName(night.packageName, night.label)) },
+                overlineContent = {
+                    val source = sourceName(night.packageName, night.label)
+                    val napLabel = stringResource(R.string.nights_marker_nap)
+                    Text(if (night.mode == SessionMode.NAP) source + stringResource(R.string.list_separator) + napLabel else source)
+                },
                 headlineContent = {
                     Text(
                         stringResource(

@@ -23,6 +23,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
@@ -92,11 +95,15 @@ fun NightsRoute(
             viewModel.select(id, inPane = wide)
             if (!wide) onOpenNight(id)
         },
+        onFilter = viewModel::setFilter,
         detailPane = { id, modifier -> NightDetailPane(clientRecordId = id, viewModel = detailViewModel, modifier = modifier) },
     )
 }
 
-/** Stateless Nights screen; [detailPane] draws the night detail in the right pane of wide layouts. */
+/**
+ * Stateless Nights screen; [onFilter] switches between all sessions, nights and naps; [detailPane] draws the night
+ * detail in the right pane of wide layouts.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NightsScreen(
@@ -105,6 +112,7 @@ fun NightsScreen(
     selectedId: String?,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onFilter: (NightsFilter) -> Unit = {},
     detailPane: @Composable (clientRecordId: String, modifier: Modifier) -> Unit = { _, _ -> },
 ) {
     Scaffold(
@@ -124,23 +132,66 @@ fun NightsScreen(
             is NightsUiState.Loaded -> {
                 Column(modifier = contentModifier) {
                     if (state.synthetic) SyntheticBanner()
-                    LoadedNights(state.nights, wide, selectedId, onSelect, detailPane, Modifier.weight(1f).fillMaxWidth())
+                    if (state.total > 0) FilterRow(state.filter, onFilter)
+                    LoadedNights(state, wide, selectedId, onSelect, detailPane, Modifier.weight(1f).fillMaxWidth())
                 }
             }
         }
     }
 }
 
+/** All / Nights / Naps. */
+@Composable
+private fun FilterRow(
+    filter: NightsFilter,
+    onFilter: (NightsFilter) -> Unit,
+) {
+    val spacing = MaterialTheme.spacing
+    val label = stringResource(R.string.nights_filter_label)
+    SingleChoiceSegmentedButtonRow(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = spacing.medium, vertical = spacing.small)
+                .semantics { contentDescription = label },
+    ) {
+        NightsFilter.entries.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = option == filter,
+                onClick = { onFilter(option) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = NightsFilter.entries.size),
+            ) { Text(stringResource(option.labelRes())) }
+        }
+    }
+}
+
+@StringRes
+private fun NightsFilter.labelRes(): Int =
+    when (this) {
+        NightsFilter.ALL -> R.string.nights_filter_all
+        NightsFilter.NIGHTS -> R.string.nights_filter_nights
+        NightsFilter.NAPS -> R.string.nights_filter_naps
+    }
+
 @Composable
 private fun LoadedNights(
-    nights: List<NightListItem>,
+    state: NightsUiState.Loaded,
     wide: Boolean,
     selectedId: String?,
     onSelect: (String) -> Unit,
     detailPane: @Composable (clientRecordId: String, modifier: Modifier) -> Unit,
     modifier: Modifier,
 ) {
-    if (nights.isEmpty()) {
+    val nights = state.nights
+    if (nights.isEmpty() && state.total > 0) {
+        val body = if (state.filter == NightsFilter.NAPS) R.string.nights_filter_empty_naps else R.string.nights_filter_empty_nights
+        EmptyState(
+            title = stringResource(state.filter.labelRes()),
+            body = stringResource(body),
+            icon = R.drawable.ic_nights,
+            modifier = modifier,
+        )
+    } else if (nights.isEmpty()) {
         EmptyState(
             title = stringResource(R.string.nights_empty_title),
             body = stringResource(R.string.nights_empty_body),
@@ -246,6 +297,7 @@ private fun NightMarkers(item: NightListItem) {
     val night = item.summary
     val markers =
         listOfNotNull(
+            Marker(R.drawable.ic_nap, R.string.nights_marker_nap, MarkerTone.NEUTRAL).takeIf { item.nap },
             Marker(R.drawable.ic_refresh, R.string.nights_marker_stale, MarkerTone.NEUTRAL).takeIf { item.stale },
             Marker(R.drawable.ic_heart, R.string.nights_marker_elevated_hr, MarkerTone.ALERT).takeIf { night.elevatedHr },
             Marker(R.drawable.ic_warning, R.string.nights_marker_low_confidence, MarkerTone.NEUTRAL).takeIf { night.lowConfidence },

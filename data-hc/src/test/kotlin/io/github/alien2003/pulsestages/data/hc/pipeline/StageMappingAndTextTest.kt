@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.data.hc.HcStage
@@ -27,6 +28,32 @@ class StageMappingTest {
         assertEquals(0, StageMapping.toHcType(SleepStage.UNKNOWN, awakeAsLight = true))
         SleepStage.entries.forEach { assertEquals(it, StageMapping.fromHcType(StageMapping.toHcType(it, awakeAsLight = false))) }
         assertEquals(SleepStage.UNKNOWN, StageMapping.fromHcType(2))
+    }
+
+    @Test
+    fun `the SLEEP_WAKE output of a nap has AWAKE and SLEEPING only, merged`() {
+        val stages =
+            listOf(
+                StageInterval(0, 10 * m, SleepStage.AWAKE),
+                StageInterval(10 * m, 20 * m, SleepStage.LIGHT),
+                StageInterval(20 * m, 40 * m, SleepStage.DEEP),
+                StageInterval(40 * m, 45 * m, SleepStage.UNKNOWN),
+                StageInterval(45 * m, 50 * m, SleepStage.REM),
+                StageInterval(50 * m, 55 * m, SleepStage.AWAKE),
+                StageInterval(55 * m, 60 * m, SleepStage.LIGHT),
+            )
+
+        assertEquals(
+            listOf(HcStage(0, 10 * m, 1), HcStage(10 * m, 50 * m, 2), HcStage(50 * m, 55 * m, 1), HcStage(55 * m, 60 * m, 2)),
+            StageMapping.toSleepWakeHcStages(stages, awakeAsLight = false),
+        )
+        // With awakeAsLight the awakenings are written as sleep too: one SLEEPING stage.
+        assertEquals(listOf(HcStage(0, 60 * m, 2)), StageMapping.toSleepWakeHcStages(stages, awakeAsLight = true))
+        assertEquals(emptyList<String>(), StageMapping.validate(StageMapping.toSleepWakeHcStages(stages, false), 0, 60 * m, m))
+        assertEquals(1, StageMapping.toSleepWakeHcType(SleepStage.AWAKE, awakeAsLight = false))
+        listOf(SleepStage.LIGHT, SleepStage.DEEP, SleepStage.REM, SleepStage.UNKNOWN).forEach {
+            assertEquals(2, StageMapping.toSleepWakeHcType(it, awakeAsLight = false), "$it")
+        }
     }
 
     @Test
@@ -73,7 +100,9 @@ class StageMappingTest {
                     it
             },
         )
-        assertTrue(problems(HcStage(0, 60 * m, 2)).any { "type 2" in it })
+        assertTrue(problems(HcStage(0, 60 * m, 3)).any { "type 3" in it })
+        // SLEEPING (2) is written for naps in the SLEEP_WAKE output.
+        assertTrue(problems(HcStage(0, 60 * m, 2)).none { "type" in it })
         assertTrue(problems(HcStage(-m, 60 * m, 4)).any { "outside" in it })
         assertTrue(StageMapping.validate(listOf(HcStage(0, 10_000, 4), HcStage(10_000, 30_000, 5)), 0, 30_000, m).isNotEmpty())
     }
@@ -118,6 +147,7 @@ class SessionTextTest {
         val notes =
             SessionText.notes(
                 estimator = EstimatorType.HYBRID,
+                mode = SessionMode.NIGHT,
                 algoVersion = 1,
                 paramsHash = "abc123",
                 coverage = 0.92649,
@@ -127,7 +157,7 @@ class SessionTextTest {
                 calibrated = false,
             )
         assertEquals(
-            """{"algo":"HYBRID","version":1,"paramsHash":"abc123","coverage":0.926,"confidence":0.611,""" +
+            """{"algo":"HYBRID","mode":"NIGHT","version":1,"paramsHash":"abc123","coverage":0.926,"confidence":0.611,""" +
                 """"sourceUuids":["u1","u2"],"hrSamples":231,"calibrated":false}""",
             notes,
         )
@@ -137,7 +167,7 @@ class SessionTextTest {
 
     @Test
     fun `the source uuids are read back from our notes, anything else has none`() {
-        val notes = SessionText.notes(EstimatorType.RULES, 1, "h", 0.5, 0.5, listOf("u1", "u2"), 10, calibrated = true)
+        val notes = SessionText.notes(EstimatorType.RULES, SessionMode.NAP, 1, "h", 0.5, 0.5, listOf("u1", "u2"), 10, calibrated = true)
         assertEquals(listOf("u1", "u2"), SessionText.sourceUuidsOf(notes))
         listOf(null, "", "{}", "not json", "[1,2]", """{"sourceUuids":"u1"}""", """{"sourceUuids":[1,null]}""").forEach {
             assertEquals(emptyList<String>(), SessionText.sourceUuidsOf(it), "notes: $it")

@@ -39,13 +39,17 @@ interface StageEstimator {
  *     fun paramsHash(params: AlgoParams, extra: String = ""): String // + model and (if enabled) personal fingerprints
  *     val modelId: String?
  *   run(): preprocess → session < preprocess.minSessionMin (default 0 = off) → NotEstimated(SESSION_TOO_SHORT);
+ *   mode = NAP when the session is shorter than napMode.maxSessionMin (AlgoParams.modeOf), NIGHT otherwise; a NAP is
+ *   run with AlgoParams.forMode(NAP) (napMode.estimator, nap post-processing / decoder overrides, no baseline) and with
+ *   napMode.outputPolicy SKIP → NotEstimated(NAP_SKIPPED);
  *   no HR samples → NotEstimated(NO_HR_DATA); coverage ≥ minCoverage: configured estimator;
  *   [rulesMinCoverage, minCoverage): RULES with RULES_FALLBACK_LOW_COVERAGE; below: NotEstimated(LOW_COVERAGE).
  *   HYBRID is served by the internal HybridEstimation seam (HybridEstimator); without a bundle, or when the bundle does
  *   not match HybridFeatureExtractor (featureSetVersion / featureNames), the HMM is used with HYBRID_MODEL_UNAVAILABLE.
  * HmmEstimator, RulesEstimator,     the StageEstimator implementations (algo.hmm, algo.rules, algo.hybrid).
  *   HybridEstimator
- * HybridModel                       the JSON model bundle (docs/INTERCHANGE.md §3): parse/validate, fingerprint().
+ * HybridModel                       the JSON model bundle (docs/INTERCHANGE.md §3): parse/validate, fingerprint();
+ *   NapSubModel, HybridComponents   its optional nap model, decoding NAP sessions instead of the main model.
  * HybridFeatureExtractor            FEATURE_SET_VERSION, FEATURE_NAMES and the per-epoch hybrid features.
  * PersonalModel, PersonalCalibrator, personalization (algo.personal): bias deltas / HMM μ,σ overrides, supervised
  *   PopulationEmAdapter             calibration on reference nights, population EM over many nights.

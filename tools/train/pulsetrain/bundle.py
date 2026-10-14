@@ -3,8 +3,11 @@
 The ``hmm`` block holds the supervised HMM estimates in the AlgoParams JSON shape (EmissionTable / MeanBouts /
 TransitionWeights field names of core-algo/.../params/AlgoParams.kt). ``stageLogBias`` (optional) is the per-stage
 log-bias of the scaled likelihoods fitted by the proportion matching of :mod:`pulsetrain.bias`;
-``stageLogBiasShort`` (optional) replaces it on sessions shorter than AlgoParams ``hybrid.shortSessionMaxMin``
-(the nap experiment of :mod:`pulsetrain.naps`).
+``stageLogBiasShort`` (optional) replaces it on naps, sessions shorter than AlgoParams ``napMode.maxSessionMin`` (the
+nap experiment of :mod:`pulsetrain.naps`), when the bundle has no ``nap`` section. ``nap`` (optional) is a complete
+second model for naps (:data:`NAP_KEYS`: classifier, standardization, feature list, class priors, durations, bout
+transitions, initial stage, time prior, optional ``stageLogBias`` and ``training``), validated like the main model;
+core-algo decodes naps with it instead of the main model (docs/INTERCHANGE.md section 3).
 """
 
 from __future__ import annotations
@@ -23,8 +26,12 @@ SCHEMA_VERSION = 1
 CLASS_ORDER = list(STAGES)
 TOP_LEVEL_KEYS = ("schemaVersion", "modelId", "featureSetVersion", "featureNames", "standardization", "classOrder",
                   "classifier", "classPriors", "durations", "boutTransitions", "initialStage", "timePrior", "hmm",
-                  "training", "stageLogBias", "stageLogBiasShort")
-OPTIONAL_KEYS = ("hmm", "stageLogBias", "stageLogBiasShort")
+                  "training", "stageLogBias", "stageLogBiasShort", "nap")
+OPTIONAL_KEYS = ("hmm", "stageLogBias", "stageLogBiasShort", "nap")
+COMPONENT_KEYS = ("featureSetVersion", "featureNames", "standardization", "classifier", "classPriors", "durations",
+                  "boutTransitions", "initialStage", "timePrior")
+NAP_KEYS = (*COMPONENT_KEYS, "stageLogBias", "training")       # Kotlin NapSubModel, in declaration order
+NAP_OPTIONAL_KEYS = ("stageLogBias", "training")
 STAGE_BIAS_KEYS = ("stageLogBias", "stageLogBiasShort")
 REQUIRED_KEYS = tuple(k for k in TOP_LEVEL_KEYS if k not in OPTIONAL_KEYS)
 TRAINING_KEYS = ("dataset", "license", "subjects", "nights", "variants", "createdAt", "notes")
@@ -101,91 +108,9 @@ def validate_bundle(b: Mapping, expected_feature_names: Sequence[str] | None = N
         errs.append(f"schemaVersion must be {SCHEMA_VERSION}")
     if not isinstance(b["modelId"], str) or not b["modelId"]:
         errs.append("modelId must be a non-empty string")
-    if not isinstance(b["featureSetVersion"], int) or isinstance(b["featureSetVersion"], bool):
-        errs.append("featureSetVersion must be an integer")
-    elif expected_feature_set_version is not None and b["featureSetVersion"] != expected_feature_set_version:
-        errs.append(f"featureSetVersion {b['featureSetVersion']} != expected {expected_feature_set_version}")
-    names = b["featureNames"]
-    nf = len(names) if isinstance(names, list) else -1
-    if nf <= 0 or not all(isinstance(n, str) for n in names) or len(set(names)) != nf:
-        errs.append("featureNames must be a non-empty list of unique strings")
-    elif expected_feature_names is not None and list(names) != list(expected_feature_names):
-        errs.append("featureNames differ from the expected feature list")
-    std = b["standardization"]
-    if not isinstance(std, Mapping) or set(std) != {"mean", "std"}:
-        errs.append("standardization must have exactly mean and std")
-    else:
-        for k in ("mean", "std"):
-            v = std[k]
-            if not isinstance(v, list) or len(v) != nf or not all(_is_num(x) for x in v):
-                errs.append(f"standardization.{k}: expected {nf} finite numbers")
-        if isinstance(std["std"], list) and any(_is_num(x) and x <= 0 for x in std["std"]):
-            errs.append("standardization.std must be > 0")
     if b["classOrder"] != CLASS_ORDER:
         errs.append(f"classOrder must be {CLASS_ORDER}")
-    clf = b["classifier"]
-    if not isinstance(clf, Mapping) or set(clf) != {"type", "layers"}:
-        errs.append("classifier must have exactly type and layers")
-    else:
-        layers = clf["layers"]
-        if clf["type"] not in ("logreg", "mlp"):
-            errs.append("classifier.type must be logreg or mlp")
-        if not isinstance(layers, list) or not layers:
-            errs.append("classifier.layers must be a non-empty list")
-        else:
-            if clf["type"] == "logreg" and len(layers) != 1:
-                errs.append("logreg must have exactly one layer")
-            if clf["type"] == "mlp" and len(layers) < 2:
-                errs.append("mlp must have hidden layers")
-            n_in = nf
-            for i, layer in enumerate(layers):
-                w = f"classifier.layers[{i}]"
-                if not isinstance(layer, Mapping) or set(layer) != {"weights", "bias", "activation"}:
-                    errs.append(f"{w} must have exactly weights, bias, activation")
-                    break
-                W, bias = layer["weights"], layer["bias"]
-                last = i == len(layers) - 1
-                if layer["activation"] != ("softmax" if last else "relu"):
-                    errs.append(f"{w}.activation must be {'softmax' if last else 'relu'}")
-                if (not isinstance(W, list) or not W or not all(isinstance(r, list) and len(r) == n_in
-                                                                  and all(_is_num(x) for x in r) for r in W)):
-                    errs.append(f"{w}.weights must be out x {n_in} finite numbers")
-                    break
-                if not isinstance(bias, list) or len(bias) != len(W) or not all(_is_num(x) for x in bias):
-                    errs.append(f"{w}.bias must have {len(W)} finite numbers")
-                n_in = len(W)
-            else:
-                if n_in != N_STAGES:
-                    errs.append(f"last layer must have {N_STAGES} outputs")
-    _prob_vector(b["classPriors"], N_STAGES, "classPriors", errs)
-    if isinstance(b["classPriors"], list) and any(_is_num(x) and x <= 0 for x in b["classPriors"]):
-        errs.append("classPriors must be > 0 (posteriors are divided by them)")
-    dur = b["durations"]
-    if not isinstance(dur, Mapping) or list(dur) != CLASS_ORDER:
-        errs.append(f"durations must have keys {CLASS_ORDER}")
-    else:
-        for s, g in dur.items():
-            if (not isinstance(g, Mapping) or set(g) != {"shape", "scale"} or not all(_is_num(g[k]) and g[k] > 0
-                                                                                      for k in g)):
-                errs.append(f"durations.{s} must be {{shape > 0, scale > 0}}")
-    bt = b["boutTransitions"]
-    if not isinstance(bt, list) or len(bt) != N_STAGES:
-        errs.append("boutTransitions must be 4x4")
-    else:
-        for i, row in enumerate(bt):
-            _prob_vector(row, N_STAGES, f"boutTransitions[{i}]", errs)
-    _prob_vector(b["initialStage"], N_STAGES, "initialStage", errs)
-    tp = b["timePrior"]
-    if not isinstance(tp, Mapping) or set(tp) != {"binMinutes", "table"}:
-        errs.append("timePrior must have exactly binMinutes and table")
-    else:
-        if not _is_num(tp["binMinutes"]) or tp["binMinutes"] <= 0:
-            errs.append("timePrior.binMinutes must be > 0")
-        if not isinstance(tp["table"], list) or not tp["table"]:
-            errs.append("timePrior.table must be a non-empty list")
-        else:
-            for i, row in enumerate(tp["table"]):
-                _prob_vector(row, N_STAGES, f"timePrior.table[{i}]", errs)
+    _validate_components(b, "", errs, expected_feature_names, expected_feature_set_version)
     if "hmm" in b:
         _validate_hmm(b["hmm"], errs)
     for key in STAGE_BIAS_KEYS:
@@ -193,6 +118,8 @@ def validate_bundle(b: Mapping, expected_feature_names: Sequence[str] | None = N
             v = b[key]
             if not isinstance(v, list) or len(v) != N_STAGES or not all(_is_num(x) for x in v):
                 errs.append(f"{key} must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
+    if "nap" in b:
+        _validate_nap(b["nap"], errs)
     tr = b["training"]
     if not isinstance(tr, Mapping) or set(tr) != set(TRAINING_KEYS):
         errs.append(f"training must have exactly {list(TRAINING_KEYS)}")
@@ -207,6 +134,113 @@ def validate_bundle(b: Mapping, expected_feature_names: Sequence[str] | None = N
             errs.append("training.variants must be a list of strings")
     if errs:
         raise BundleError("invalid hybrid model bundle: " + "; ".join(errs))
+
+
+def _validate_components(b: Mapping, prefix: str, errs: list[str], expected_feature_names: Sequence[str] | None = None,
+                         expected_feature_set_version: int | None = None) -> None:
+    """The checks shared by the main model and the ``nap`` section (``prefix`` names the section in messages)."""
+    if not isinstance(b["featureSetVersion"], int) or isinstance(b["featureSetVersion"], bool):
+        errs.append(f"{prefix}featureSetVersion must be an integer")
+    elif expected_feature_set_version is not None and b["featureSetVersion"] != expected_feature_set_version:
+        errs.append(f"{prefix}featureSetVersion {b['featureSetVersion']} != expected {expected_feature_set_version}")
+    names = b["featureNames"]
+    nf = len(names) if isinstance(names, list) else -1
+    if nf <= 0 or not all(isinstance(n, str) for n in names) or len(set(names)) != nf:
+        errs.append(f"{prefix}featureNames must be a non-empty list of unique strings")
+    elif expected_feature_names is not None and list(names) != list(expected_feature_names):
+        errs.append(f"{prefix}featureNames differ from the expected feature list")
+    std = b["standardization"]
+    if not isinstance(std, Mapping) or set(std) != {"mean", "std"}:
+        errs.append(f"{prefix}standardization must have exactly mean and std")
+    else:
+        for k in ("mean", "std"):
+            v = std[k]
+            if not isinstance(v, list) or len(v) != nf or not all(_is_num(x) for x in v):
+                errs.append(f"{prefix}standardization.{k}: expected {nf} finite numbers")
+        if isinstance(std["std"], list) and any(_is_num(x) and x <= 0 for x in std["std"]):
+            errs.append(f"{prefix}standardization.std must be > 0")
+    clf = b["classifier"]
+    if not isinstance(clf, Mapping) or set(clf) != {"type", "layers"}:
+        errs.append(f"{prefix}classifier must have exactly type and layers")
+    else:
+        layers = clf["layers"]
+        if clf["type"] not in ("logreg", "mlp"):
+            errs.append(f"{prefix}classifier.type must be logreg or mlp")
+        if not isinstance(layers, list) or not layers:
+            errs.append(f"{prefix}classifier.layers must be a non-empty list")
+        else:
+            if clf["type"] == "logreg" and len(layers) != 1:
+                errs.append(f"{prefix}logreg must have exactly one layer")
+            if clf["type"] == "mlp" and len(layers) < 2:
+                errs.append(f"{prefix}mlp must have hidden layers")
+            n_in = nf
+            for i, layer in enumerate(layers):
+                w = f"classifier.layers[{i}]"
+                if not isinstance(layer, Mapping) or set(layer) != {"weights", "bias", "activation"}:
+                    errs.append(f"{prefix}{w} must have exactly weights, bias, activation")
+                    break
+                W, bias = layer["weights"], layer["bias"]
+                last = i == len(layers) - 1
+                if layer["activation"] != ("softmax" if last else "relu"):
+                    errs.append(f"{prefix}{w}.activation must be {'softmax' if last else 'relu'}")
+                if (not isinstance(W, list) or not W or not all(isinstance(r, list) and len(r) == n_in
+                                                                  and all(_is_num(x) for x in r) for r in W)):
+                    errs.append(f"{prefix}{w}.weights must be out x {n_in} finite numbers")
+                    break
+                if not isinstance(bias, list) or len(bias) != len(W) or not all(_is_num(x) for x in bias):
+                    errs.append(f"{prefix}{w}.bias must have {len(W)} finite numbers")
+                n_in = len(W)
+            else:
+                if n_in != N_STAGES:
+                    errs.append(f"{prefix}last layer must have {N_STAGES} outputs")
+    _prob_vector(b["classPriors"], N_STAGES, f"{prefix}classPriors", errs)
+    if isinstance(b["classPriors"], list) and any(_is_num(x) and x <= 0 for x in b["classPriors"]):
+        errs.append(f"{prefix}classPriors must be > 0 (posteriors are divided by them)")
+    dur = b["durations"]
+    if not isinstance(dur, Mapping) or list(dur) != CLASS_ORDER:
+        errs.append(f"{prefix}durations must have keys {CLASS_ORDER}")
+    else:
+        for s, g in dur.items():
+            if (not isinstance(g, Mapping) or set(g) != {"shape", "scale"} or not all(_is_num(g[k]) and g[k] > 0
+                                                                                      for k in g)):
+                errs.append(f"{prefix}durations.{s} must be {{shape > 0, scale > 0}}")
+    bt = b["boutTransitions"]
+    if not isinstance(bt, list) or len(bt) != N_STAGES:
+        errs.append(f"{prefix}boutTransitions must be 4x4")
+    else:
+        for i, row in enumerate(bt):
+            _prob_vector(row, N_STAGES, f"{prefix}boutTransitions[{i}]", errs)
+    _prob_vector(b["initialStage"], N_STAGES, f"{prefix}initialStage", errs)
+    tp = b["timePrior"]
+    if not isinstance(tp, Mapping) or set(tp) != {"binMinutes", "table"}:
+        errs.append(f"{prefix}timePrior must have exactly binMinutes and table")
+    else:
+        if not _is_num(tp["binMinutes"]) or tp["binMinutes"] <= 0:
+            errs.append(f"{prefix}timePrior.binMinutes must be > 0")
+        if not isinstance(tp["table"], list) or not tp["table"]:
+            errs.append(f"{prefix}timePrior.table must be a non-empty list")
+        else:
+            for i, row in enumerate(tp["table"]):
+                _prob_vector(row, N_STAGES, f"{prefix}timePrior.table[{i}]", errs)
+
+
+def _validate_nap(nap: Any, errs: list[str]) -> None:
+    if not isinstance(nap, Mapping):
+        errs.append("nap must be a JSON object")
+        return
+    missing = [k for k in NAP_KEYS if k not in nap and k not in NAP_OPTIONAL_KEYS]
+    extra = [k for k in nap if k not in NAP_KEYS]
+    if missing or extra:
+        errs.append(f"nap: missing keys {missing}, unknown keys {extra}" if missing else f"nap: unknown keys {extra}")
+        if missing:
+            return
+    _validate_components(nap, "nap.", errs)
+    if "stageLogBias" in nap:
+        v = nap["stageLogBias"]
+        if not isinstance(v, list) or len(v) != N_STAGES or not all(_is_num(x) for x in v):
+            errs.append(f"nap.stageLogBias must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
+    if "training" in nap and (not isinstance(nap["training"], Mapping) or not set(nap["training"]) <= set(TRAINING_KEYS)):
+        errs.append(f"nap.training may only have {list(TRAINING_KEYS)}")
 
 
 def _validate_hmm(h: Any, errs: list[str]) -> None:
@@ -240,11 +274,13 @@ def with_stage_log_bias(bundle: Mapping, bias: Sequence[float] | None) -> dict:
 
     core-algo adds ``stageLogBias[s]`` to the emission score of every epoch with heart-rate data (docs/INTERCHANGE.md
     section 3); the key goes last, after ``training``, like the Kotlin field."""
-    out = {k: v for k, v in bundle.items() if k not in STAGE_BIAS_KEYS}
+    out = {k: v for k, v in bundle.items() if k not in (*STAGE_BIAS_KEYS, "nap")}
     if bias is not None:
         out["stageLogBias"] = [float(x) for x in bias]
     if "stageLogBiasShort" in bundle:
         out["stageLogBiasShort"] = bundle["stageLogBiasShort"]
+    if "nap" in bundle:
+        out["nap"] = bundle["nap"]
     validate_bundle(out)
     return out
 
@@ -252,11 +288,38 @@ def with_stage_log_bias(bundle: Mapping, bias: Sequence[float] | None) -> dict:
 def with_stage_log_bias_short(bundle: Mapping, bias: Sequence[float] | None) -> dict:
     """A copy of ``bundle`` with ``stageLogBiasShort`` set to ``bias`` (AWAKE, LIGHT, DEEP, REM), or removed for None.
 
-    core-algo uses it instead of ``stageLogBias`` on sessions shorter than ``hybrid.shortSessionMaxMin`` minutes
-    (docs/INTERCHANGE.md section 3); the key goes last, after ``stageLogBias``, like the Kotlin field."""
-    out = {k: v for k, v in bundle.items() if k != "stageLogBiasShort"}
+    core-algo uses it instead of ``stageLogBias`` on naps, sessions shorter than ``napMode.maxSessionMin`` minutes,
+    when the bundle has no ``nap`` section (docs/INTERCHANGE.md section 3); the key goes after ``stageLogBias``, like
+    the Kotlin field."""
+    out = {k: v for k, v in bundle.items() if k not in ("stageLogBiasShort", "nap")}
     if bias is not None:
         out["stageLogBiasShort"] = [float(x) for x in bias]
+    if "nap" in bundle:
+        out["nap"] = bundle["nap"]
+    validate_bundle(out)
+    return out
+
+
+def nap_section(model: Mapping, training: Mapping | None = None) -> dict:
+    """The ``nap`` section made of the components of the bundle ``model`` (a bundle trained on nap-length sessions,
+    e.g. by :func:`build_bundle`): its classifier, standardization, feature list, class priors, durations, bout
+    transitions, initial stage, time prior and ``stageLogBias`` (when it has one), plus ``training`` (default: the
+    model's)."""
+    validate_bundle(model)
+    out = {k: model[k] for k in COMPONENT_KEYS}
+    if "stageLogBias" in model:
+        out["stageLogBias"] = model["stageLogBias"]
+    out["training"] = dict(training if training is not None else model["training"])
+    return out
+
+
+def with_nap_model(bundle: Mapping, nap: Mapping | None) -> dict:
+    """A copy of ``bundle`` with the ``nap`` section ``nap`` (see :func:`nap_section`), or without one for None. The
+    key goes last, like the Kotlin field; the nap section enters the bundle fingerprint, a bundle without it keeps
+    its fingerprint."""
+    out = {k: v for k, v in bundle.items() if k != "nap"}
+    if nap is not None:
+        out["nap"] = {k: nap[k] for k in NAP_KEYS if k in nap}
     validate_bundle(out)
     return out
 

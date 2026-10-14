@@ -45,6 +45,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import io.github.alien2003.pulsestages.R
+import io.github.alien2003.pulsestages.ui.common.UiText
 import io.github.alien2003.pulsestages.ui.common.resolve
 import io.github.alien2003.pulsestages.ui.theme.spacing
 import java.time.LocalTime
@@ -102,7 +103,7 @@ fun SettingField(
             TimeSetting(spec, spec.read(state.settings), problems, onEdit, modifier)
         }
 
-        is TextSpec -> {
+        is TextSpec, is OptionalDoubleSpec -> {
             NumberSetting(spec, state, onEdit, modifier)
         }
 
@@ -131,8 +132,14 @@ fun NumberSetting(
     val keyboard =
         when (spec) {
             is IntSpec -> KeyboardType.Number
-            is DoubleSpec -> KeyboardType.Decimal
+            is DoubleSpec, is OptionalDoubleSpec -> KeyboardType.Decimal
             else -> KeyboardType.Text
+        }
+    val placeholder =
+        when (spec) {
+            is TextSpec -> spec.placeholder
+            is OptionalDoubleSpec -> UiText.of(R.string.settings_same_as_nights_value, formatSettingNumber(spec.inherited(state.settings)))
+            else -> null
         }
     OutlinedTextField(
         value = text,
@@ -142,7 +149,7 @@ fun NumberSetting(
         },
         modifier = modifier.fillMaxWidth().semantics { if (label != null) contentDescription = title },
         label = { Text(label ?: title) },
-        placeholder = (spec as? TextSpec)?.let { { Text(it.placeholder.resolve()) } },
+        placeholder = placeholder?.let { { Text(it.resolve()) } },
         suffix = unitOf(spec)?.let { { Text(it) } },
         singleLine = spec !is TextSpec,
         isError = problems.isNotEmpty(),
@@ -161,6 +168,7 @@ private fun unitOf(spec: SettingSpec): String? =
     when (spec) {
         is IntSpec -> spec.unit?.resolve()
         is DoubleSpec -> spec.unit?.resolve()
+        is OptionalDoubleSpec -> spec.unit?.resolve()
         else -> null
     }
 
@@ -169,6 +177,7 @@ private fun boundsOf(spec: SettingSpec): String? =
     when (spec) {
         is IntSpec -> spec.range?.let { stringResource(R.string.bounds_range, it.first.toString(), it.last.toString()) }
         is DoubleSpec -> spec.bounds?.resolve()
+        is OptionalDoubleSpec -> spec.bounds?.resolve()
         else -> null
     }
 

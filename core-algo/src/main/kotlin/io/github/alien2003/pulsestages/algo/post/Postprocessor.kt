@@ -27,8 +27,8 @@ internal fun interface EpochDecoder {
  *
  * @property hasData session epochs with heart-rate data.
  * @property forced session epochs forced to AWAKE (never relabelled).
- * @property checkProportions run the sanity check and the proportion calibration (false for sessions shorter than
- *   `post.proportionsMinSessionMin`: whole-night stage shares do not describe a nap).
+ * @property checkProportions run the sanity check and the proportion calibration (false for a nap unless
+ *   `napMode.post.checkProportions`: whole-night stage shares do not describe a nap).
  */
 internal class PostprocessContext(
     val grid: EpochGrid,

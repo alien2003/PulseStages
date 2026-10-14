@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.alien2003.pulsestages.R
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightEntity
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.ui.common.ActionRow
@@ -276,6 +277,13 @@ private fun HeaderCard(
             style = MaterialTheme.typography.bodyLarge,
         )
         LabeledValue(stringResource(R.string.night_detail_status), stringResource(night.status.labelRes()))
+        LabeledValue(stringResource(R.string.night_detail_mode), stringResource(night.mode.labelRes()))
+        if (night.mode == SessionMode.NAP) {
+            Text(text = stringResource(R.string.night_detail_nap_rough), style = MaterialTheme.typography.bodyMedium)
+            if (night.sleepWakeOnly && night.status == NightStatus.WRITTEN) {
+                Text(text = stringResource(R.string.night_detail_nap_sleep_wake), style = MaterialTheme.typography.bodySmall)
+            }
+        }
         // The ledger's statusReason is an English diagnostic (it is in the log); a localized explanation is shown.
         statusReasonRes(night.status, night.statusReason)?.let { reason ->
             LabeledValue(stringResource(R.string.night_detail_reason), stringResource(reason))

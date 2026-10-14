@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.alien2003.pulsestages.algo.ALGO_VERSION
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.db.NightSummary
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
@@ -46,6 +47,9 @@ data class NightListItem(
     /** The night has no output because of a problem (its status and reason are shown). */
     val problem: Boolean get() = summary.status == NightStatus.NOT_ESTIMATED || summary.status == NightStatus.FAILED
 
+    /** The session was processed as a nap (the "Nap" badge). */
+    val nap: Boolean get() = summary.mode == SessionMode.NAP
+
     /** Mapping. */
     companion object {
         /** List items of [summaries]; stale is judged against [currentParamsHash] (never stale while it is unknown). */
@@ -57,6 +61,27 @@ data class NightListItem(
                 NightListItem(summary, stale = currentParamsHash != null && summary.isStale(ALGO_VERSION, currentParamsHash))
             }
     }
+}
+
+/** Which sessions the Nights list shows. */
+enum class NightsFilter {
+    /** Nights and naps. */
+    ALL,
+
+    /** Nights only. */
+    NIGHTS,
+
+    /** Naps only. */
+    NAPS,
+    ;
+
+    /** Whether [item] is shown with this filter. */
+    fun accepts(item: NightListItem): Boolean =
+        when (this) {
+            ALL -> true
+            NIGHTS -> !item.nap
+            NAPS -> item.nap
+        }
 }
 
 /** UI state of the Nights list. */
@@ -71,12 +96,16 @@ sealed interface NightsUiState {
     /**
      * The nights, newest first (empty when nothing was processed yet).
      *
-     * @property nights the list items.
+     * @property nights the list items the [filter] shows.
      * @property synthetic the nights are synthetic demo data (debug builds).
+     * @property filter which sessions are shown (all, nights or naps).
+     * @property total number of sessions of every mode (the list is empty only when this is 0 and nothing was processed).
      */
     data class Loaded(
         val nights: List<NightListItem>,
         val synthetic: Boolean = false,
+        val filter: NightsFilter = NightsFilter.ALL,
+        val total: Int = nights.size,
     ) : NightsUiState
 }
 
@@ -110,6 +139,9 @@ class NightsViewModel
         /** `synthetic` of the current source (followed even while the list is not shown), or null before it is known. */
         private var currentSynthetic: Boolean? = null
 
+        /** Which sessions the list shows (kept in the [SavedStateHandle]). */
+        val filter: StateFlow<NightsFilter> = savedState.getStateFlow(KEY_FILTER, NightsFilter.ALL)
+
         /** The current UI state. */
         val state: StateFlow<NightsUiState> =
             sources.nights
@@ -117,7 +149,13 @@ class NightsViewModel
                     val replaced = shownSynthetic.let { it != null && it != source.synthetic }
                     nightsState(source, logger, loadingFirst = replaced)
                 }.onEach { state -> if (state is NightsUiState.Loaded) shownSynthetic = state.synthetic }
+                .combine(filter) { state, filter -> state.filtered(filter) }
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), NightsUiState.Loading)
+
+        /** Shows the sessions of [filter] (all, nights or naps). */
+        fun setFilter(filter: NightsFilter) {
+            savedState[KEY_FILTER] = filter
+        }
 
         /** The night the user selected last, or null (a wide window then shows the newest night). */
         val selectedId: StateFlow<String?> = savedState.getStateFlow(KEY_SELECTED, null)
@@ -170,6 +208,7 @@ class NightsViewModel
         }
 
         private companion object {
+            const val KEY_FILTER = "nights.filter"
             const val KEY_SELECTED = "nights.selected"
             const val KEY_OPEN_WHEN_COMPACT = "nights.open_when_compact"
             const val KEY_SELECTED_SYNTHETIC = "nights.selected_synthetic"
@@ -197,6 +236,13 @@ private fun nightsState(
 }
 
 private const val NIGHTS_TAG = "NightsViewModel"
+
+/** This state with only the items of [filter] (every item counted in `total`). */
+private fun NightsUiState.filtered(filter: NightsFilter): NightsUiState =
+    when (this) {
+        is NightsUiState.Loaded -> copy(nights = nights.filter(filter::accepts), filter = filter, total = nights.size)
+        NightsUiState.Loading, NightsUiState.Error -> this
+    }
 
 /**
  * The current params hash for the stale markers: null until it is known; a failure only loses the markers (logged),

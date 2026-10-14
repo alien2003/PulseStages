@@ -40,7 +40,9 @@ one-line message, never a stack trace.
 
 ```
 algo-cli features  --nights <dir|jsonl> --out <features.csv> [--params <algo-params.json>]
-    one row per SESSION epoch: night_id, subject, epoch, start_ms, has_data, label (majority of overlapping
+                   [--nap-proxies <minutes,...>]
+    one row per SESSION epoch (with --nap-proxies also the rows of every night's nap proxies, see below):
+    night_id, subject, epoch, start_ms, has_data, label (majority of overlapping
     label intervals, ties → the label covering the epoch midpoint, else the lowest stage index; empty if none), then
     the hybrid feature columns in HybridFeatureExtractor.FEATURE_NAMES order, then the HMM base features that are
     not already among them: cyclePhase (empty if unavailable), steps. (hrNorm, hrVar, hrSlope and t are hybrid
@@ -49,15 +51,17 @@ algo-cli features  --nights <dir|jsonl> --out <features.csv> [--params <algo-par
 algo-cli evaluate  --nights <dir|jsonl> [--estimator RULES|HMM|HYBRID] [--params <algo-params.json>]
                    [--param-grid <grid.json>]
                    [--model <hybrid-model.json> | --fold-models <dir with <subject>.json>]
-                   --out <metrics.json> [--per-epoch <predictions.csv>]
-    runs SleepStager on every night (with the fold model of the night's subject when --fold-models is given)
-    and scores predictions against labels at the resolution of the label intervals (each 30-s PSG epoch is
-    compared with the predicted stage covering its midpoint). Output JSON: pooled confusion matrix, kappa,
-    accuracy, per-stage precision/recall/F1, per-night kappa, mean/median per-subject kappa, mean absolute
-    minutes error for DEEP/REM/AWAKE, number of nights skipped and why.
+                   [--nap-proxies <minutes,...>] --out <metrics.json> [--per-epoch <predictions.csv>]
+    runs SleepStager on every night (with the fold model of the night's subject when --fold-models is given; a
+    bundle with a `nap` section decodes the naps with it, so a fold bundle carries its fold's nap model) and scores
+    predictions against labels at the resolution of the label intervals (each 30-s PSG epoch is compared with the
+    predicted stage covering its midpoint). Output JSON: pooled confusion matrix, kappa, accuracy, per-stage
+    precision/recall/F1, per-night kappa, mean/median per-subject kappa, mean absolute minutes error for
+    DEEP/REM/AWAKE, number of nights skipped and why, and all of it split by mode (`byMode`).
 
 algo-cli estimate  --night <file> [--id <night id>] [--estimator ...] [--model ...] [--params ...] --csv <out.csv>
-    same CSV as the in-app export (CsvExporter); --id selects a night when the file holds several.
+    same CSV as the in-app export (CsvExporter: `epoch,start_ms,has_data,hr_raw,hr_smooth,<features>,p_awake,
+    p_light,p_deep,p_rem,stage,mode`, mode = NIGHT or NAP); --id selects a night when the file holds several.
 
 algo-cli synthesize --out <dir> [--count N] [--seed S] [--subjects K]
     labelled synthetic nights as *.night.json (pipeline smoke tests only, never for choosing parameters).
@@ -66,17 +70,24 @@ algo-cli feature-names
     {"algoVersion": 1, "featureSetVersion": 1, "featureNames": [...]} — what a bundle must declare.
 ```
 
-`--estimator` overrides `estimator` of the base parameters. `--param-grid` is a JSON array of partial AlgoParams
+`--estimator` overrides `estimator` and `napMode.estimator` of the base parameters (the estimator of nights and of
+naps). `--nap-proxies 30,60,90,120` (features and evaluate) adds, for every night and every length L, the nap proxy
+of the night's first L minutes, cut exactly like `tools/train`'s `nap_proxy` (`pulsetrain/naps.py`): session `[start,
+start + L)`, heart rate (and SpO2 / HRV / respiratory rate) of `[start − 30 min, start + L]`, step records ending in
+`(start − 30 min, start + L]`, forced-awake spans clipped to the session, the label intervals lying fully inside it,
+nothing after the end; the same subject (and fold model), variant and baseline; id `<night id>-nap<L>` (`-nap90.5`
+for a fractional length); a night shorter than L gives none. Proxies follow the nights in the output, length by
+length. `--param-grid` is a JSON array of partial AlgoParams
 objects ("patches"); each is deep-merged over the base parameters (objects merge key by key, other values replace;
 unknown keys are errors) and produces one metrics block, all in one JVM run. Nights are parsed once; preprocessing,
 features, hybrid features and classifier outputs are shared by all grid entries with equal `preprocess` and
 `features` parameters, so grids over decoder / post-processing parameters are cheap.
 
 Skip reasons: `NO_LABELS` (night has no labels), `NO_FOLD_MODEL` (no `<subject>.json` in --fold-models), and the
-NotEstimatedReason names (`NO_HR_DATA`, `LOW_COVERAGE`, and `SESSION_TOO_SHORT` for sessions shorter than
-`preprocess.minSessionMin` minutes — that gate is off by default, `minSessionMin` = 0; the app drops naps by its own
-source setting before estimating). Without `--model`/`--fold-models` HYBRID falls back to HMM (visible in
-`estimatorsUsed` and `warnings`).
+NotEstimatedReason names (`NO_HR_DATA`, `LOW_COVERAGE`, `SESSION_TOO_SHORT` for sessions shorter than
+`preprocess.minSessionMin` minutes — that gate is off by default, `minSessionMin` = 0; the app ignores sessions below
+its own source setting before estimating — and `NAP_SKIPPED` for a nap under `napMode.outputPolicy` SKIP). Without
+`--model`/`--fold-models` HYBRID falls back to HMM (visible in `estimatorsUsed` and `warnings`).
 
 Metrics block (the whole output without `--param-grid`; with it `{"grid": [block, ...]}` where each block also has
 `index` and the `patch`):
@@ -94,7 +105,10 @@ Metrics block (the whole output without `--param-grid`; with it `{"grid": [block
   "perSubject": {"subjects": 30, "meanKappa": 0.29, "medianKappa": 0.3,
                  "values": [{"subject": "46343", "nights": 1, "kappa": 0.33, "accuracy": 0.6}, ...]},
   "minutesError": {"deep": 21.5, "rem": 30.1, "awake": 18.0},          // mean |estimate − truth| minutes per night
-  "perNight": [{"id": "...", "subject": "...", "variant": "...", "estimator": "HYBRID", "kappa": 0.3, "accuracy": 0.6,
+  "byMode": {"NIGHT": {"nights": {...}, "estimatorsUsed": {...}, "warnings": {...}, "pooled": {...},
+                       "meanNightKappa": 0.29, "medianNightKappa": 0.3, "perSubject": {...}, "minutesError": {...}},
+             "NAP":   { /* the same keys for the naps (sessions shorter than napMode.maxSessionMin) */ }},
+  "perNight": [{"id": "...", "subject": "...", "variant": "...", "mode": "NIGHT", "estimator": "HYBRID", "kappa": 0.3, "accuracy": 0.6,
                 "macroF1": 0.4, "coverage": 0.97, "confidence": 0.55, "scoredChunks": 900,
                 "confusion": [[...4], ...],                                    // this night's 4×4 counts
                 "truthMinutes": {"AWAKE": 40.0, "LIGHT": 230.0, "DEEP": 60.0, "REM": 90.0},
@@ -103,7 +117,9 @@ Metrics block (the whole output without `--param-grid`; with it `{"grid": [block
 }
 ```
 
-The per-night `confusion` matrices add up to `pooled.confusion`, so the results of several runs (e.g. one per
+`skipped` entries carry the `mode` as well. The modes of `byMode` follow `napMode.maxSessionMin` of the block's
+parameters; the two pooled matrices add up to `pooled.confusion`. The per-night `confusion` matrices add up to
+`pooled.confusion`, so the results of several runs (e.g. one per
 cross-validation fold) can be pooled again by the caller. Undefined values (e.g. the kappa of a night with a single
 class on both sides) are `null`. Kappas are unweighted
 Cohen's kappa over the scored 30-s chunks (UNKNOWN on either side is skipped and counted in `skippedChunks`); the
@@ -143,15 +159,28 @@ row per session epoch, evaluated night and grid entry (label as in `features`).
   "training": { "dataset": "...", "license": "...", "subjects": 31, "nights": 31, "variants": ["..."],
                 "createdAt": "ISO-8601", "notes": "..." },
   "stageLogBias": [bA, bL, bD, bR],                       // optional per-stage log-bias of the scaled likelihoods
-  "stageLogBiasShort": [bA, bL, bD, bR]                   // optional: replaces stageLogBias on short sessions (naps)
+  "stageLogBiasShort": [bA, bL, bD, bR],                  // optional: replaces stageLogBias on naps without a nap model
+  "nap": {                                                // optional nap model: decodes naps instead of the main model
+    "featureSetVersion": 1, "featureNames": ["..."],      // same rules as the main model
+    "standardization": { "mean": [..], "std": [..] },
+    "classifier": { "type": "mlp", "layers": [ { "weights": [[...]], "bias": [...], "activation": "relu" } ] },
+    "classPriors": [pA, pL, pD, pR],
+    "durations": { "AWAKE": {"shape": k, "scale": theta}, "LIGHT": {...}, "DEEP": {...}, "REM": {...} },
+    "boutTransitions": [[...4], [...4], [...4], [...4]],
+    "initialStage": [pA, pL, pD, pR],
+    "timePrior": { "binMinutes": 30, "table": [[pA, pL, pD, pR], ...] },
+    "stageLogBias": [bA, bL, bD, bR],                     // optional log-bias of the nap classifier
+    "training": { "dataset": "...", "notes": "..." }      // optional provenance (any TrainingInfo fields)
+  }
 }
 ```
 
 `HybridModel.fingerprint()` = SHA-256 of the canonical bundle bytes (the parsed bundle re-encoded as JSON with every
 field, object keys sorted, no whitespace — so formatting and key order do not matter); it is part of the params hash.
-Optional fields added after the first shipped bundles (`stageLogBias`, `stageLogBiasShort`) are left out of the
+Optional fields added after the first shipped bundles (`stageLogBias`, `stageLogBiasShort`, `nap`) are left out of the
 canonical JSON when they are absent, so a bundle without them keeps its fingerprint (and the personal models keyed to
-it stay valid).
+it stay valid); the `nap` section is part of the canonical JSON when present (a bundle with a nap model is a different
+model).
 
 `stageLogBias` (optional; absent = all 0): per-stage additive log-bias b_s, AWAKE / LIGHT / DEEP / REM, added to the
 emission score of every epoch with heart-rate data, `e_k(s) = w_e · (ln p(s | x_k) − β · ln classPriors_s) + b_s`
@@ -160,12 +189,26 @@ emission score of every epoch with heart-rate data, `e_k(s) = w_e · (ln p(s | x
 match the true shares (proportion matching); it belongs to the classifier it corrects, which is why it lives in the
 bundle and enters its fingerprint rather than being an AlgoParams value.
 
-`stageLogBiasShort` (optional; absent = short sessions keep `stageLogBias`): the per-stage log-bias used INSTEAD of
-`stageLogBias` on sessions shorter than `hybrid.shortSessionMaxMin` minutes (AlgoParams; 0 = off, every session uses
-`stageLogBias`; session length = `sessionEndMs − sessionStartMs`, strictly shorter). Fitted by the same fixed point on
-out-of-fold decodes of nap-length sessions cut from the training nights (`tools/train/pulsetrain/naps.py`,
-ALGORITHM.md section 13.11): a nap has a different stage mix from a whole night, so the whole-night b does not match
-its shares.
+`stageLogBiasShort` (optional; absent = naps keep `stageLogBias`): the per-stage log-bias used INSTEAD of
+`stageLogBias` on naps — sessions shorter than `napMode.maxSessionMin` minutes (AlgoParams, 180 by default; 0 = no
+naps, every session uses `stageLogBias`; session length = `sessionEndMs − sessionStartMs`, strictly shorter) — when the
+bundle has no `nap` section. Fitted by the same fixed point on out-of-fold decodes of nap-length sessions cut from the
+training nights (`tools/train/pulsetrain/naps.py`, ALGORITHM.md section 13.11): a nap has a different stage mix from a
+whole night, so the whole-night b does not match its shares.
+
+`nap` (optional; absent = naps are decoded by the main model with `stageLogBiasShort`, exactly as before the two
+processing modes): a complete second model for naps (`NapSubModel`; ALGORITHM.md section 18) with the keys
+`featureSetVersion`, `featureNames`, `standardization`, `classifier`, `classPriors`, `durations`, `boutTransitions`,
+`initialStage`, `timePrior` (same meaning and rules as the main model's), optional `stageLogBias` (its own log-bias;
+`stageLogBiasShort` is then not used) and optional `training` (provenance, any `training` fields). It shares the
+bundle's `schemaVersion`, `classOrder` and `modelId`. When present, every nap (`SessionMode.NAP`) is decoded with it:
+its classifier and standardization give the posteriors, its class priors scale them, its durations, bout transitions,
+initial stage and time prior build the HSMM / HMM, with the nap decoder parameters (`napMode.hybrid` overrides of
+`hybrid`); nights always use the main model. Personal classifier deltas (section 4) are fitted for the main classifier
+and never apply to the nap model. A nap section whose `featureSetVersion` / `featureNames` differ from this build makes
+the naps (only) fall back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. `tools/train/pulsetrain/bundle.py` builds it
+(`nap_section(model)` from a bundle trained on nap-length sessions, `with_nap_model(bundle, nap)`); with
+`--fold-models` each fold bundle carries its own fold's nap section.
 
 Validation (`HybridModel.parse`, HybridModelException on failure): `schemaVersion` 1; `classOrder` exactly
 `["AWAKE","LIGHT","DEEP","REM"]` (every probability vector is in this order); distinct `featureNames`;
@@ -173,7 +216,8 @@ Validation (`HybridModel.parse`, HybridModelException on failure): `schemaVersio
 inputs to 4 outputs, `relu` on hidden layers and `softmax` on the last, `logreg` = exactly one layer; finite weights;
 `classPriors` positive, `initialStage`, every `boutTransitions` row and every `timePrior.table` row non-negative,
 each summing to 1 (±1e-3); gamma `shape`/`scale` positive; `timePrior.binMinutes` positive; `stageLogBias` and
-`stageLogBiasShort`, when present, exactly 4 finite numbers each. Unknown keys are ignored.
+`stageLogBiasShort`, when present, exactly 4 finite numbers each; a `nap` section passes every check of the main model
+(messages prefixed `nap.`). Unknown keys are ignored.
 A bundle whose `featureSetVersion` or `featureNames` differ from this build's `HybridFeatureExtractor` is valid but
 unusable: the estimator falls back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. The `hmm` section is informational
 (the HMM always uses `AlgoParams.hmm`; the training pipeline may turn those estimates into the defaults).
@@ -218,3 +262,18 @@ Applied by `SleepStager(hybridModel, personalModel)` only when `AlgoParams.perso
 of the canonical JSON) then enters the params hash. `PersonalCalibrator` (reference nights with true stages) fits
 `biasDeltas` and `hmmMeans`; `PopulationEmAdapter` (unsupervised, many nights) fits `hmmMeans` and `hmmSds` and keeps
 the deltas of the model it starts from.
+
+## 5. Night / nap modes in the app's output (`napMode.outputPolicy`)
+
+What the app writes to Health Connect for a nap (`SessionMode.NAP`, a session shorter than `napMode.maxSessionMin`;
+nights always get STAGES), the same `SleepSessionRecord` metadata, title and notes either way:
+
+| policy | written stages | ledger row |
+|---|---|---|
+| `STAGES` (default) | AWAKE → `STAGE_TYPE_AWAKE` (1), LIGHT → `STAGE_TYPE_LIGHT` (4), DEEP → `STAGE_TYPE_DEEP` (5), REM → `STAGE_TYPE_REM` (6), UNKNOWN (data gaps) → `STAGE_TYPE_UNKNOWN` (0), like a night | WRITTEN, `mode` NAP |
+| `SLEEP_WAKE` | AWAKE → `STAGE_TYPE_AWAKE` (1); LIGHT, DEEP, REM and UNKNOWN → `STAGE_TYPE_SLEEPING` (2) (the source session already says the whole span was sleep); adjacent equal types merged; with `awakeAsLight` AWAKE is written as SLEEPING too | WRITTEN, `mode` NAP, `sleepWakeOnly` = true (the row keeps the estimated stages and minutes) |
+| `SKIP` | nothing; an output written for the nap earlier is deleted when the nap is processed again | NOT_ESTIMATED, reason `NAP_SKIPPED: …`, `mode` NAP |
+
+The notes JSON of every written session has `"mode": "NIGHT"` or `"NAP"` after `"algo"`:
+`{"algo":"HYBRID","mode":"NAP","version":1,"paramsHash":"…",…}`.
+

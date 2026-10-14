@@ -9,7 +9,9 @@ import io.github.alien2003.pulsestages.data.hc.HcStage
  * Mapping of estimated stages to Health Connect stage types and the checks every written hypnogram must pass.
  * AWAKE → STAGE_TYPE_AWAKE (1), LIGHT → STAGE_TYPE_LIGHT (4), DEEP → STAGE_TYPE_DEEP (5), REM → STAGE_TYPE_REM (6),
  * UNKNOWN → STAGE_TYPE_UNKNOWN (0); with `awakeAsLight` AWAKE (including the forced-awake gaps between merged
- * fragments) is written as LIGHT.
+ * fragments) is written as LIGHT. A nap with the SLEEP_WAKE output ([toSleepWakeHcStages]) gets only AWAKE (1) and
+ * SLEEPING (2): LIGHT, DEEP, REM and UNKNOWN are SLEEPING (the source session already says the whole span was sleep),
+ * and with `awakeAsLight` AWAKE is SLEEPING too.
  */
 object StageMapping {
     /** The stage types PulseStages ever writes. */
@@ -17,6 +19,7 @@ object StageMapping {
         setOf(
             SleepSessionRecord.STAGE_TYPE_UNKNOWN,
             SleepSessionRecord.STAGE_TYPE_AWAKE,
+            SleepSessionRecord.STAGE_TYPE_SLEEPING,
             SleepSessionRecord.STAGE_TYPE_LIGHT,
             SleepSessionRecord.STAGE_TYPE_DEEP,
             SleepSessionRecord.STAGE_TYPE_REM,
@@ -45,14 +48,31 @@ object StageMapping {
             else -> SleepStage.UNKNOWN
         }
 
+    /** The Health Connect type of [stage] in the SLEEP_WAKE output of a nap: AWAKE (or SLEEPING with [awakeAsLight]) / SLEEPING. */
+    fun toSleepWakeHcType(
+        stage: SleepStage,
+        awakeAsLight: Boolean,
+    ): Int = if (stage == SleepStage.AWAKE && !awakeAsLight) SleepSessionRecord.STAGE_TYPE_AWAKE else SleepSessionRecord.STAGE_TYPE_SLEEPING
+
     /** [stages] mapped to Health Connect types, sorted by start, with adjacent equal types merged. */
     fun toHcStages(
         stages: List<StageInterval>,
         awakeAsLight: Boolean,
+    ): List<HcStage> = merge(stages) { toHcType(it, awakeAsLight) }
+
+    /** [stages] in the SLEEP_WAKE output of a nap ([toSleepWakeHcType]), sorted, with adjacent equal types merged. */
+    fun toSleepWakeHcStages(
+        stages: List<StageInterval>,
+        awakeAsLight: Boolean,
+    ): List<HcStage> = merge(stages) { toSleepWakeHcType(it, awakeAsLight) }
+
+    private fun merge(
+        stages: List<StageInterval>,
+        typeOf: (SleepStage) -> Int,
     ): List<HcStage> {
         val merged = mutableListOf<HcStage>()
         stages.sortedWith(compareBy({ it.startMs }, { it.endMs })).forEach { interval ->
-            val type = toHcType(interval.stage, awakeAsLight)
+            val type = typeOf(interval.stage)
             val last = merged.lastOrNull()
             if (last != null && last.type == type && last.endMs == interval.startMs) {
                 merged[merged.lastIndex] = last.copy(endMs = interval.endMs)
@@ -63,7 +83,7 @@ object StageMapping {
         return merged
     }
 
-    /** [stages] as the ledger stores them (the stages exactly as written). */
+    /** [stages] (written with [toHcStages]) as the ledger stores them. */
     fun toLedgerStages(stages: List<HcStage>): List<StageInterval> = stages.map { StageInterval(it.startMs, it.endMs, fromHcType(it.type)) }
 
     /**

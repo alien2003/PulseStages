@@ -131,4 +131,19 @@ class PopulationEmAdapterTest {
         val noIterations = physiology.let { it.copy(hmm = it.hmm.copy(emIterations = 0)) }
         assertNull(PopulationEmAdapter.adapt(nights(1), noIterations).model)
     }
+
+    @Test
+    fun `naps are skipped, the population EM uses nights only`() {
+        val nights = nights(3)
+        val naps = nights.map { it.copy(sessionEndMs = it.sessionStartMs + 90 * 60_000L) }
+
+        val withNaps = PopulationEmAdapter.adapt(nights + naps, physiology)
+        val nightsOnly = PopulationEmAdapter.adapt(nights, physiology)
+
+        assertEquals(3, withNaps.nightsUsed)
+        assertEquals(3, withNaps.nightsSkipped)
+        assertEquals(nightsOnly.model?.hmmMeans, withNaps.model?.hmmMeans)
+        val noNapMode = physiology.copy(napMode = physiology.napMode.copy(maxSessionMin = 0.0))
+        assertEquals(6, PopulationEmAdapter.adapt(nights + naps, noNapMode).nightsUsed)
+    }
 }

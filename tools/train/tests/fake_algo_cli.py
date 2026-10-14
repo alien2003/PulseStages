@@ -164,6 +164,12 @@ def bundle_ok(b):
     return b.get("featureNames") == FEATURE_NAMES and b.get("featureSetVersion") == FEATURE_SET_VERSION
 
 
+def is_nap(n, params):
+    """A session strictly shorter than napMode.maxSessionMin (0 = no naps, the fake's default when not given)."""
+    short_max = (params.get("napMode") or {}).get("maxSessionMin", 0.0)
+    return short_max > 0 and (n["sessionEndMs"] - n["sessionStartMs"]) / 60_000.0 < short_max
+
+
 def predict(n, rows, estimator, params, bundle):
     warnings = []
     coverage = sum(r["has_data"] for r in rows) / max(1, len(rows))
@@ -210,11 +216,15 @@ def predict(n, rows, estimator, params, bundle):
         hp = params.get("hybrid", {})
         ew, tw = hp.get("emissionWeight", 1.0), hp.get("timePriorWeight", 1.0)
         beta = hp.get("priorExponent", 1.0)
-        short_max = hp.get("shortSessionMaxMin", 0.0)       # like core-algo HybridEmissions.stageBias
-        session_min = (n["sessionEndMs"] - n["sessionStartMs"]) / 60_000.0
-        short = short_max > 0 and session_min < short_max
-        bias = ((bundle.get("stageLogBiasShort") or bundle.get("stageLogBias")) if short
-                else bundle.get("stageLogBias")) or [0.0] * 4
+        # like core-algo: a nap (shorter than napMode.maxSessionMin; 0 here when not given) uses the bundle's nap
+        # section when it has one, else the main model with stageLogBiasShort (HybridEstimator / HybridEmissions)
+        short = is_nap(n, params)
+        nap = bundle.get("nap") if short else None
+        if nap is not None:
+            bundle, bias = nap, nap.get("stageLogBias") or [0.0] * 4
+        else:
+            bias = ((bundle.get("stageLogBiasShort") or bundle.get("stageLogBias")) if short
+                    else bundle.get("stageLogBias")) or [0.0] * 4
         prior = bundle["classPriors"]
         table, bm = bundle["timePrior"]["table"], bundle["timePrior"]["binMinutes"]
         for r in rows:
@@ -291,6 +301,7 @@ def evaluate_once(nights, estimator, params, model_path, fold_dir, per_epoch_row
             for j in range(4):
                 pooled[i][j] += c[i][j]
         scored.append({"id": n["id"], "subject": n["subject"], "variant": n.get("variant"), "estimator": used,
+                       "mode": "NAP" if is_nap(n, params) else "NIGHT",
                        "kappa": kappa(c), "scoredChunks": sum(map(sum, c)), "confusion": c,
                        "minutesError": {s.lower(): abs(est_min[s] - truth_min[s]) for s in ("DEEP", "REM", "AWAKE")},
                        "warnings": warns})

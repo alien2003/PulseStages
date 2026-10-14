@@ -34,11 +34,32 @@ object TrainedDefaults {
     const val HYBRID_PRIOR_EXPONENT: Double = 1.0
 
     /**
-     * Hybrid decoder: sessions shorter than this many minutes use the bundle's stageLogBiasShort instead of
-     * stageLogBias (pre-registered nap experiment (docs/prereg/prereg-naps.md), candidate C-180: sessions shorter
-     * than 180 min use the bundle's stageLogBiasShort).
+     * Nap mode: sessions shorter than this many minutes are naps, 0 = every session is a night (pre-registered nap
+     * experiment (docs/prereg/prereg-naps.md), candidate C-180: sessions shorter than 180 min use the bundle's
+     * stageLogBiasShort; the run stored it as hybrid.shortSessionMaxMin, which the nap threshold replaced).
      */
-    const val HYBRID_SHORT_SESSION_MAX_MIN: Double = 180.0
+    const val NAP_MAX_SESSION_MIN: Double = 180.0
+
+    /** Nap mode: the estimator of naps (not part of this run's selection: the night's estimator). */
+    val NAP_ESTIMATOR: EstimatorType = EstimatorType.HYBRID
+
+    /**
+     * Nap mode: duration model of the hybrid decoder for naps (null = the night's value; this run chose no nap
+     * decoder).
+     */
+    val NAP_HYBRID_DURATION_MODEL: DurationModel? = null
+
+    /**
+     * Nap mode: exponent of the scaled likelihoods of the hybrid decoder for naps (null = the night's value; this
+     * run chose no nap decoder).
+     */
+    val NAP_HYBRID_EMISSION_WEIGHT: Double? = null
+
+    /**
+     * Nap mode: weight of the time-of-night prior of the hybrid decoder for naps (null = the night's value; this
+     * run chose no nap decoder).
+     */
+    val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double? = null
 
     /**
      * HMM emissions: the supervised estimates scored 0.117 vs 0.070 for the physiology table but failed the

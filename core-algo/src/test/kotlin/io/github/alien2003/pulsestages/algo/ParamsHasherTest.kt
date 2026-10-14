@@ -6,6 +6,7 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -49,6 +50,15 @@ class ParamsHasherTest {
     private fun mutate(leaf: Leaf): JsonPrimitive {
         val value = leaf.value
         return when {
+            // A null nap override ("the night's value"): any value is a change.
+            value is JsonNull && leaf.descriptor.kind == SerialKind.ENUM -> {
+                JsonPrimitive(leaf.descriptor.getElementName(0))
+            }
+
+            value is JsonNull -> {
+                JsonPrimitive(0.5)
+            }
+
             leaf.descriptor.kind == SerialKind.ENUM -> {
                 val names = (0 until leaf.descriptor.elementsCount).map { leaf.descriptor.getElementName(it) }
                 JsonPrimitive(names.first { it != value.content })

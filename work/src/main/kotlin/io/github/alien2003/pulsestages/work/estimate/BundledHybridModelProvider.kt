@@ -37,7 +37,9 @@ class AndroidModelAssetSource(
  * The hybrid model bundle shipped in the app's assets ([ASSET_PATH]), loaded and validated once (lazily, on the IO
  * dispatcher) and cached for the process. An absent, unreadable or invalid bundle gives null — HYBRID then falls back to
  * the HMM with the HYBRID_MODEL_UNAVAILABLE warning — and is logged once. A bundle built for another feature set is
- * returned as is: core-algo's `SleepStager` detects the incompatibility and falls back the same way.
+ * returned as is: core-algo's `SleepStager` detects the incompatibility and falls back the same way (for naps also
+ * when only the bundle's nap model does not match). The log line says how naps are decoded (nap model or the main model
+ * with its short-session bias).
  */
 @Singleton
 class BundledHybridModelProvider
@@ -78,8 +80,15 @@ class BundledHybridModelProvider
             try {
                 HybridModel.parse(json).also { model ->
                     val problem = model.compatibilityProblem()
+                    val napProblem = model.napCompatibilityProblem()
+                    val naps =
+                        when {
+                            model.nap == null -> "naps: the main model with its short-session bias"
+                            napProblem == null -> "naps: its nap model"
+                            else -> "its nap model does not match this build ($napProblem); naps fall back to HMM"
+                        }
                     if (problem == null) {
-                        logger.i(TAG, "hybrid model ${model.modelId} loaded")
+                        logger.i(TAG, "hybrid model ${model.modelId} loaded ($naps)")
                     } else {
                         logger.w(TAG, "hybrid model ${model.modelId} does not match this build ($problem); HYBRID falls back to HMM")
                     }

@@ -106,7 +106,7 @@ class DemoScreenSourcesTest {
             // On: the demo nights, the night shown is not among them (the detail returns to the list), demo references.
             sources.enabled.value = true
             val demoList = nights.awaitLoaded { it.synthetic }
-            assertEquals(DemoData.NIGHT_COUNT, demoList.nights.size)
+            assertEquals(DemoData.SESSION_COUNT, demoList.nights.size)
             assertTrue(demoList.nights.all { it.summary.sourcePackage == DEMO_SOURCE_PACKAGE })
             val gone = detail.state.first { it.synthetic && it.load != DetailLoad.LOADING }
             assertTrue(gone.goneWithReplacedData)
@@ -114,7 +114,8 @@ class DemoScreenSourcesTest {
             val demoNight = detail.state.first { it.load == DetailLoad.LOADED }
             assertTrue(demoNight.synthetic)
             val demoCompare = compare.state.first { it.synthetic && it.phase == ComparePhase.READY && it.metrics != null }
-            assertEquals(DemoData.REFERENCE_COUNT, demoCompare.referenceCount)
+            assertEquals(DemoData.REFERENCE_SESSION_COUNT, demoCompare.referenceCount)
+            assertEquals(2, demoCompare.metrics?.byMode?.size, "nights and naps apart")
 
             // Off: the real data again; the demo data never reached the ledger.
             sources.enabled.value = false

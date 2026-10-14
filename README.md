@@ -103,6 +103,25 @@ the tested naps of up to 2 hours, and 3 in 5 to 3 in 4 of the 30-minute ones). T
 unmarked nap is still only a rough sketch. Details:
 [ALGORITHM.md §13.11](ALGORITHM.md#1311-daytime-naps-nap-proxies-and-a-short-session-bias-pre-registered-adopted).
 
+**Nights and naps are two processing modes.** One setting decides which is which: Settings → **Naps** → "Nap
+threshold" (`napMode.maxSessionMin`, 180 min). A session shorter than that is a nap, a longer one a night; 0 turns
+naps off. Sessions shorter than "Minimum session length" of the sources are still ignored altogether. A nap:
+
+- is never compared with your heart-rate baseline and never counts for it (no "elevated heart rate" for naps);
+- gets no stage-share check unless "Check the stage shares of naps" is on;
+- is estimated with "Estimator for naps" (HYBRID), and with the nap values of the minimum bouts, the uncertain-epoch
+  settings and the hybrid decoder. Each of these is empty by default, which means "same as nights";
+- is decoded with a nap model when the model bundle has one. The bundled model has none yet, so naps are decoded by
+  the night model with the short-session correction above, exactly as before the two modes;
+- is written as "Written for a nap" says: **Stages** (like a night, the default), **Asleep / awake** (only AWAKE and
+  SLEEPING in Health Connect; the app still shows its stage estimate) or **Nothing** (not estimated, nothing written;
+  an earlier output of the nap is removed when it is processed again);
+- is left out of the calibration on reference nights and of the unsupervised adaptation.
+
+The Nights tab marks naps with a **Nap** badge and can show all sessions, only nights or only naps. The night detail
+says whether a session was processed as a night or a nap and, for a nap, that its stages are rough. Home counts
+written nights and naps apart. Details: [ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
+
 ## Screenshots
 
 These screenshots contain no real health data. They are rendered on the JVM by `ScreenshotsTest` (Robolectric native
@@ -299,16 +318,17 @@ Android 14+ it uses an `activity-alias` with `android.intent.action.VIEW_PERMISS
   overwrite policy "Recompute everything".
 - Fragments of one night from one app with a gap shorter than `mergeGapMin` (30 min) are merged into one night. The
   gap is written as AWAKE.
-- A merged night shorter than `minSessionMin` (90 min) is treated as a nap and skipped.
-- Naps can be estimated too: lower `minSessionMin` (Settings → Sources), for example to 30 min (see [Naps](#naps)).
-  Then:
-  - sessions shorter than `baselineMinSessionMin` (180 min, Settings → Features) do not count for the heart-rate
-    baseline and are never marked "elevated heart rate";
-  - sessions shorter than `proportionsMinSessionMin` (180 min, Settings → Post-processing) get no sanity check of the
-    stage shares, so a nap without deep sleep is not flagged as implausible;
-  - a nap that ends less than `mergeGapMin` before the night is merged into the night (the gap is AWAKE).
-- Every estimated session shorter than 3 hours (`hybrid.shortSessionMaxMin`, 180 min) uses the short-session
-  correction: naps, and with the default 90 min also short nights of 90–180 min.
+- A merged session shorter than `minSessionMin` (90 min) is ignored (it is not processed at all).
+- Every other merged session is processed as a nap if it is shorter than the nap threshold `napMode.maxSessionMin`
+  (180 min, Settings → Naps), otherwise as a night (see [Naps](#naps)). With the default 90 min this means sessions of
+  90–180 min are naps. Lower `minSessionMin` (Settings → Sources), for example to 30 min, to estimate shorter naps too.
+  A nap:
+  - does not count for the heart-rate baseline and is never marked "elevated heart rate";
+  - gets no sanity check of the stage shares (unless `napMode.post.checkProportions`), so a nap without deep sleep is
+    not flagged as implausible;
+  - uses the short-session correction of the bundled model, or the bundle's nap model when it has one;
+  - is written with all stages, as asleep / awake only, or not at all (`napMode.outputPolicy`).
+- A nap that ends less than `mergeGapMin` before the night is merged into the night (the gap is AWAKE).
 
 ### Health Connect's own "Data sources and priority"
 
@@ -371,6 +391,10 @@ These are the stages PulseStages writes, using only `SleepSessionRecord.STAGE_TY
 | no data: heart-rate gap longer than `maxInterpGapMin` (10 min) | `STAGE_TYPE_UNKNOWN` (0) with the default `gapPolicy` UNKNOWN; LIGHT or the neighbouring stage with `gapPolicy` LIGHT / NEAREST |
 | gap between merged fragments | AWAKE |
 
+A nap written with "Written for a nap" = **Asleep / awake** (`napMode.outputPolicy` SLEEP_WAKE) gets only
+`STAGE_TYPE_AWAKE` (1) and `STAGE_TYPE_SLEEPING` (2): LIGHT, DEEP, REM and no-data spans are SLEEPING, and with
+`awakeAsLight` AWAKE is SLEEPING too. Nights always get the table above.
+
 Rules for the written stages:
 
 - They cover the session exactly, with no gaps or overlaps.
@@ -393,12 +417,13 @@ so changing it does not make nights stale.
 **Notes.** They are compact JSON, for example:
 
 ```json
-{"algo":"HYBRID","version":1,"paramsHash":"…","coverage":0.93,"confidence":0.61,"sourceUuids":["…"],"hrSamples":231,"calibrated":false}
+{"algo":"HYBRID","mode":"NIGHT","version":1,"paramsHash":"…","coverage":0.93,"confidence":0.61,"sourceUuids":["…"],"hrSamples":231,"calibrated":false}
 ```
 
 | Field | Meaning |
 |---|---|
 | `algo` | estimator used |
+| `mode` | `NIGHT` or `NAP`: the processing mode of the session (see [Naps](#naps)) |
 | `version` | `ALGO_VERSION` |
 | `paramsHash` | see [Idempotency](#idempotency-versions-and-stale-nights) |
 | `coverage` | share of epochs with heart rate |
@@ -486,7 +511,9 @@ insert. That app is closed source, so only the documented "higher version wins" 
 
 A Room database keeps one row per night in `estimated_nights`, linked to all its source uuids in `night_sources`, plus
 `source_sessions`. Each night row holds the `clientRecordId`, algorithm version, params hash, coverage, confidence,
-status and timestamps.
+status, the processing mode (night or nap; whether a nap was written as asleep / awake only) and timestamps. The
+schema is versioned and migrated in place (version 2 added the mode; rows of sessions shorter than 180 min became
+naps); there is no destructive fallback.
 
 This ledger handles the cases where source sessions change:
 
@@ -583,6 +610,8 @@ All runs use WorkManager.
   columns. The groups are:
   - sources, schedule, written sessions;
   - algorithm, preprocessing, features;
+  - naps (the nap threshold, what is written for a nap, the nap estimator and the nap values of post-processing and
+    of the hybrid decoder; empty values mean "same as nights");
   - rules, HMM emissions / transitions / priors, hybrid;
   - post-processing, personalization, debugging.
 - **"Export JSON"** saves every setting, defaults included, through the system file picker (suggested name
@@ -591,7 +620,9 @@ All runs use WorkManager.
   (estimator, hybrid decoder settings, ...) therefore follow app updates for everything you never changed; a value
   you changed stays as you set it.
 - **"Import JSON"** validates the file first. If anything is wrong, nothing changes and every problem is listed.
-  Unknown keys are ignored and missing keys take their defaults.
+  Unknown keys are ignored and missing keys take their defaults. This includes the three nap thresholds of earlier
+  versions (`features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`, `post.proportionsMinSessionMin`), which
+  the one `napMode.maxSessionMin` replaced.
 - **"Reset to defaults"** resets everything; "Reset to physiology table" resets only the HMM emissions.
 - **"Versions and licences"**, the last card, shows the app version, the algorithm version, the id of the bundled
   model, the licence and the dataset attribution notice (see
@@ -604,6 +635,8 @@ All runs use WorkManager.
 
 The detail screen of a night shows:
 
+- whether the session was processed as a night or a nap, and for a nap that its stages are rough (and, with
+  "Asleep / awake", that only sleep and wake were written);
 - the hypnogram as written;
 - the heart-rate curve;
 - the probabilities and features of an epoch when you tap or drag on the charts;
@@ -613,7 +646,7 @@ Its actions:
 
 - "Compare with RULES" shows how far the simple threshold estimator agrees (kappa, accuracy).
 - "Export CSV" saves `pulsestages-yyyyMMdd-HHmm.csv` with the columns
-  `epoch,start_ms,has_data,hr_raw,hr_smooth,<features…>,p_awake,p_light,p_deep,p_rem,stage`.
+  `epoch,start_ms,has_data,hr_raw,hr_smooth,<features…>,p_awake,p_light,p_deep,p_rem,stage,mode`.
 
 The curves, probabilities and CSV come from a fresh estimate with the current settings. Nothing is written by this,
 and the result can differ from what was written.
@@ -628,21 +661,23 @@ The Compare tab:
 - searches 90 days, 1 year or the whole history;
 - estimates the same nights from heart rate;
 - shows kappa, accuracy, macro F1, the mean error in minutes, per-stage accuracy / precision / F1, a confusion matrix
-  and a per-night list.
+  and a per-night list; when the reference sessions include naps, kappa and accuracy of the nights and of the naps
+  apart, and the list marks the naps.
 
 **"Calibrate"** fits a personal model on the reference nights (details in
 [ALGORITHM.md §10](ALGORITHM.md#10-personalization-personal)):
 
 - It adjusts the classifier's per-stage offsets for HYBRID and the emission means for the HMM.
+- It uses reference nights only; reference naps are left out.
 - The latest 30 % of the nights are held out, and Compare shows kappa before → after on them.
 - The model is stored in Room and used for every later estimate. Earlier nights become stale.
 - It needs Settings → Personalization → "Personal model" (on by default).
 
 **"Reset to global model"** switches the personal model off.
 
-**Unsupervised adaptation.** Without reference nights, the HMM emissions are adapted to your nights every 30 new
-nights. This runs only when the HMM is actually used: estimator HMM, or HYBRID falling back to it. With the default
-HYBRID estimator it does not run.
+**Unsupervised adaptation.** Without reference nights, the HMM emissions are adapted to your nights every 30 new nights
+(naps neither take part nor count). This runs only when the HMM is actually used: estimator HMM, or HYBRID falling back
+to it. With the default HYBRID estimator it does not run.
 
 ## Training, validation and dataset attribution
 

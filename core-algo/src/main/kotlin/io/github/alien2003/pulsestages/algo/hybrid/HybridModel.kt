@@ -163,9 +163,105 @@ data class TrainingInfo(
 )
 
 /**
+ * The trained parts of a hybrid model that the decoder uses: the emission classifier with its standardization and
+ * feature list, the class priors, the gamma bout durations, the bout transitions, the initial bout distribution, the
+ * time-of-night prior and the optional per-stage log-bias. [HybridModel] (the main model of a bundle, fitted on whole
+ * nights) and [NapSubModel] (the bundle's optional nap model) both have them; every vector is in [SleepStage.index]
+ * order, and both are validated by the same rules.
+ */
+interface HybridComponents {
+    /** Must equal [HybridFeatureExtractor.FEATURE_SET_VERSION] to be usable. */
+    val featureSetVersion: Int
+
+    /** Must equal [HybridFeatureExtractor.FEATURE_NAMES] to be usable. */
+    val featureNames: List<String>
+
+    /** Training-set feature means and standard deviations. */
+    val standardization: Standardization
+
+    /** Dense layers of the emission classifier. */
+    val classifier: ClassifierSpec
+
+    /** Training class frequencies; posteriors are divided by them. */
+    val classPriors: List<Double>
+
+    /** Gamma bout-length distributions in minutes. */
+    val durations: StageDurations
+
+    /** `P(next bout stage | current bout stage)`, row = from. */
+    val boutTransitions: List<List<Double>>
+
+    /** Distribution of the first bout's stage. */
+    val initialStage: List<Double>
+
+    /** `P(stage | time bin since the session start)`. */
+    val timePrior: TimePrior
+
+    /** Optional per-stage additive log-bias `[bA, bL, bD, bR]` of the scaled likelihoods (null = no bias). */
+    val stageLogBias: List<Double>?
+
+    /**
+     * Why these components cannot be used with this build ([HybridFeatureExtractor.FEATURE_SET_VERSION] or
+     * [HybridFeatureExtractor.FEATURE_NAMES] differ), or null when they are compatible.
+     */
+    fun compatibilityProblem(): String? =
+        when {
+            featureSetVersion != HybridFeatureExtractor.FEATURE_SET_VERSION -> {
+                "featureSetVersion $featureSetVersion != ${HybridFeatureExtractor.FEATURE_SET_VERSION}"
+            }
+
+            featureNames != HybridFeatureExtractor.FEATURE_NAMES -> {
+                val index = featureNames.indices.firstOrNull { featureNames[it] != HybridFeatureExtractor.FEATURE_NAMES.getOrNull(it) }
+                val position = index ?: featureNames.size
+                "featureNames differ at index $position: '${featureNames.getOrNull(position)}' != " +
+                    "'${HybridFeatureExtractor.FEATURE_NAMES.getOrNull(position)}'"
+            }
+
+            else -> {
+                null
+            }
+        }
+}
+
+/**
+ * The optional nap model of a bundle (key `nap`, docs/INTERCHANGE.md §3): a complete second set of [HybridComponents]
+ * fitted on nap-length sessions, used for sessions of [io.github.alien2003.pulsestages.algo.model.SessionMode.NAP]
+ * instead of the main model (which then also replaces its `stageLogBiasShort` by this model's [stageLogBias]). It shares
+ * the bundle's `schemaVersion`, `classOrder` and `modelId` and is part of the bundle's fingerprint. Personal classifier
+ * deltas are fitted for the main classifier and never apply to it.
+ *
+ * @property featureSetVersion must equal [HybridFeatureExtractor.FEATURE_SET_VERSION] to be usable.
+ * @property featureNames must equal [HybridFeatureExtractor.FEATURE_NAMES] to be usable.
+ * @property standardization training-set feature means and standard deviations.
+ * @property classifier dense layers of the nap emission classifier.
+ * @property classPriors training class frequencies of the nap classifier.
+ * @property durations gamma bout-length distributions of naps, in minutes.
+ * @property boutTransitions bout transitions of naps, row = from.
+ * @property initialStage distribution of a nap's first bout stage.
+ * @property timePrior `P(stage | time bin since the session start)` of naps.
+ * @property stageLogBias optional per-stage log-bias of the nap classifier's scaled likelihoods (null = no bias).
+ * @property training optional provenance of the nap model.
+ */
+@Serializable
+data class NapSubModel(
+    override val featureSetVersion: Int,
+    override val featureNames: List<String>,
+    override val standardization: Standardization,
+    override val classifier: ClassifierSpec,
+    override val classPriors: List<Double>,
+    override val durations: StageDurations,
+    override val boutTransitions: List<List<Double>>,
+    override val initialStage: List<Double>,
+    override val timePrior: TimePrior,
+    override val stageLogBias: List<Double>? = null,
+    val training: TrainingInfo? = null,
+) : HybridComponents
+
+/**
  * The hybrid model bundle (docs/INTERCHANGE.md §3): standardization and weights of the emission classifier, class
  * priors, gamma bout durations, bout transitions, the initial bout distribution, the time-of-night prior and an
- * optional per-stage log-bias of the scaled likelihoods.
+ * optional per-stage log-bias of the scaled likelihoods (the main model, [HybridComponents]), plus an optional nap
+ * model ([nap]).
  *
  * Construction validates the structure (dimensions, probability vectors summing to 1, positive gamma parameters and
  * standard deviations, finite weights) and throws [HybridModelException] otherwise. Whether the bundle fits this
@@ -193,28 +289,32 @@ data class TrainingInfo(
  *   out-of-fold decodes of the training nights so that the decoded stage shares match the true ones (proportion
  *   matching); it belongs to the classifier it corrects, hence to the bundle and its fingerprint.
  * @property stageLogBiasShort optional per-stage log-bias `[bA, bL, bD, bR]` used INSTEAD of [stageLogBias] on
- *   sessions shorter than `hybrid.shortSessionMaxMin` minutes (naps; null = such sessions keep [stageLogBias]).
- *   Fitted like [stageLogBias], on out-of-fold decodes of nap-length sessions cut from the training nights.
+ *   naps (sessions shorter than `napMode.maxSessionMin` minutes) when the bundle has no [nap] model (null = naps keep
+ *   [stageLogBias]). Fitted like [stageLogBias], on out-of-fold decodes of nap-length sessions cut from the training
+ *   nights.
+ * @property nap optional nap model ([NapSubModel]): when present, naps are decoded with it instead of the main model
+ *   and [stageLogBiasShort] is not used; null = naps use the main model with [stageLogBiasShort].
  */
 @Serializable
 data class HybridModel(
     val schemaVersion: Int,
     val modelId: String,
-    val featureSetVersion: Int,
-    val featureNames: List<String>,
-    val standardization: Standardization,
+    override val featureSetVersion: Int,
+    override val featureNames: List<String>,
+    override val standardization: Standardization,
     val classOrder: List<String>,
-    val classifier: ClassifierSpec,
-    val classPriors: List<Double>,
-    val durations: StageDurations,
-    val boutTransitions: List<List<Double>>,
-    val initialStage: List<Double>,
-    val timePrior: TimePrior,
+    override val classifier: ClassifierSpec,
+    override val classPriors: List<Double>,
+    override val durations: StageDurations,
+    override val boutTransitions: List<List<Double>>,
+    override val initialStage: List<Double>,
+    override val timePrior: TimePrior,
     val hmm: HmmEstimates? = null,
     val training: TrainingInfo? = null,
-    val stageLogBias: List<Double>? = null,
+    override val stageLogBias: List<Double>? = null,
     val stageLogBiasShort: List<Double>? = null,
-) {
+    val nap: NapSubModel? = null,
+) : HybridComponents {
     init {
         HybridModelValidator.validate(this)
     }
@@ -225,34 +325,18 @@ data class HybridModel(
     }
 
     /**
-     * SHA-256 (lower-case hex) of the canonical JSON of the bundle (every field, object keys sorted, no whitespace).
-     * It identifies the model in the params hash. Optional fields introduced after the first bundles ([stageLogBias],
-     * [stageLogBiasShort]) are left out when absent, so a bundle without them keeps the fingerprint it always had (and
-     * personal models fitted for it stay valid).
+     * SHA-256 (lower-case hex) of the canonical JSON of the bundle (every field, object keys sorted, no whitespace;
+     * the [nap] model included). It identifies the model in the params hash. Optional fields introduced after the
+     * first bundles ([stageLogBias], [stageLogBiasShort], [nap]) are left out when absent, so a bundle without them
+     * keeps the fingerprint it always had (and personal models fitted for it stay valid).
      */
     fun fingerprint(): String = fingerprintValue
 
     /**
-     * Why this bundle cannot be used with this build ([HybridFeatureExtractor.FEATURE_SET_VERSION] or
-     * [HybridFeatureExtractor.FEATURE_NAMES] differ), or null when it is compatible.
+     * Why the nap model cannot be used with this build ([HybridComponents.compatibilityProblem] of [nap]), or null
+     * when it is compatible or absent.
      */
-    fun compatibilityProblem(): String? =
-        when {
-            featureSetVersion != HybridFeatureExtractor.FEATURE_SET_VERSION -> {
-                "featureSetVersion $featureSetVersion != ${HybridFeatureExtractor.FEATURE_SET_VERSION}"
-            }
-
-            featureNames != HybridFeatureExtractor.FEATURE_NAMES -> {
-                val index = featureNames.indices.firstOrNull { featureNames[it] != HybridFeatureExtractor.FEATURE_NAMES.getOrNull(it) }
-                val position = index ?: featureNames.size
-                "featureNames differ at index $position: '${featureNames.getOrNull(position)}' != " +
-                    "'${HybridFeatureExtractor.FEATURE_NAMES.getOrNull(position)}'"
-            }
-
-            else -> {
-                null
-            }
-        }
+    fun napCompatibilityProblem(): String? = nap?.compatibilityProblem()
 
     /** The bundle as pretty-printed JSON (the format read by [parse]). */
     fun toJson(): String = PRETTY.encodeToString(serializer(), this)
@@ -263,7 +347,7 @@ data class HybridModel(
         const val SCHEMA_VERSION: Int = 1
 
         /** Optional keys that do not enter the fingerprint when they are null (added after schema 1 shipped). */
-        private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias", "stageLogBiasShort")
+        private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias", "stageLogBiasShort", "nap")
 
         private val JSON: Json =
             Json {
@@ -301,26 +385,35 @@ internal object HybridModelValidator {
 
     fun validate(model: HybridModel) {
         ensure(model.schemaVersion == HybridModel.SCHEMA_VERSION) { "unsupported schemaVersion ${model.schemaVersion}" }
-        ensure(model.featureNames.isNotEmpty()) { "featureNames is empty" }
-        ensure(model.featureNames.toSet().size == model.featureNames.size) { "featureNames contains duplicates" }
         ensure(model.classOrder == CLASS_ORDER) { "classOrder must be $CLASS_ORDER, was ${model.classOrder}" }
-        validateStandardization(model.standardization, model.featureNames.size)
-        validateClassifier(model.classifier, model.featureNames.size)
-        probabilities("classPriors", model.classPriors, strictlyPositive = true)
+        validateComponents(model, prefix = "")
+        model.hmm?.emissions?.let { validateEmissions(it) }
+        stageBias("stageLogBiasShort", model.stageLogBiasShort)
+        model.nap?.let { validateComponents(it, prefix = "nap.") }
+    }
+
+    /** The checks shared by the main model and the nap model; [prefix] names the section in the messages. */
+    private fun validateComponents(
+        model: HybridComponents,
+        prefix: String,
+    ) {
+        ensure(model.featureNames.isNotEmpty()) { "${prefix}featureNames is empty" }
+        ensure(model.featureNames.toSet().size == model.featureNames.size) { "${prefix}featureNames contains duplicates" }
+        validateStandardization(model.standardization, model.featureNames.size, prefix)
+        validateClassifier(model.classifier, model.featureNames.size, prefix)
+        probabilities("${prefix}classPriors", model.classPriors, strictlyPositive = true)
         for ((stage, gamma) in SleepStage.SCORED.zip(model.durations.toList())) {
             ensure(gamma.shape > 0 && gamma.shape.isFinite() && gamma.scale > 0 && gamma.scale.isFinite()) {
-                "durations.$stage needs positive finite shape and scale, was $gamma"
+                "${prefix}durations.$stage needs positive finite shape and scale, was $gamma"
             }
         }
-        ensure(model.boutTransitions.size == SleepStage.COUNT) { "boutTransitions must have ${SleepStage.COUNT} rows" }
-        model.boutTransitions.forEachIndexed { i, row -> probabilities("boutTransitions[$i]", row) }
-        probabilities("initialStage", model.initialStage)
-        ensure(model.timePrior.binMinutes > 0 && model.timePrior.binMinutes.isFinite()) { "timePrior.binMinutes must be positive" }
-        ensure(model.timePrior.table.isNotEmpty()) { "timePrior.table is empty" }
-        model.timePrior.table.forEachIndexed { i, row -> probabilities("timePrior.table[$i]", row) }
-        model.hmm?.emissions?.let { validateEmissions(it) }
-        stageBias("stageLogBias", model.stageLogBias)
-        stageBias("stageLogBiasShort", model.stageLogBiasShort)
+        ensure(model.boutTransitions.size == SleepStage.COUNT) { "${prefix}boutTransitions must have ${SleepStage.COUNT} rows" }
+        model.boutTransitions.forEachIndexed { i, row -> probabilities("${prefix}boutTransitions[$i]", row) }
+        probabilities("${prefix}initialStage", model.initialStage)
+        ensure(model.timePrior.binMinutes > 0 && model.timePrior.binMinutes.isFinite()) { "${prefix}timePrior.binMinutes must be positive" }
+        ensure(model.timePrior.table.isNotEmpty()) { "${prefix}timePrior.table is empty" }
+        model.timePrior.table.forEachIndexed { i, row -> probabilities("${prefix}timePrior.table[$i]", row) }
+        stageBias("${prefix}stageLogBias", model.stageLogBias)
     }
 
     private fun stageBias(
@@ -335,36 +428,40 @@ internal object HybridModelValidator {
     private fun validateStandardization(
         standardization: Standardization,
         features: Int,
+        prefix: String,
     ) {
         ensure(standardization.mean.size == features && standardization.std.size == features) {
-            "standardization needs $features means and stds, has ${standardization.mean.size} and ${standardization.std.size}"
+            "${prefix}standardization needs $features means and stds, has ${standardization.mean.size} and ${standardization.std.size}"
         }
-        ensure(standardization.mean.all { it.isFinite() }) { "standardization.mean must be finite" }
-        ensure(standardization.std.all { it > 0 && it.isFinite() }) { "standardization.std must be positive and finite" }
+        ensure(standardization.mean.all { it.isFinite() }) { "${prefix}standardization.mean must be finite" }
+        ensure(standardization.std.all { it > 0 && it.isFinite() }) { "${prefix}standardization.std must be positive and finite" }
     }
 
     private fun validateClassifier(
         classifier: ClassifierSpec,
         features: Int,
+        prefix: String,
     ) {
         val layers = classifier.layers
-        ensure(layers.isNotEmpty()) { "classifier has no layers" }
-        ensure(classifier.type != ClassifierType.LOGREG || layers.size == 1) { "logreg must have exactly one layer, has ${layers.size}" }
+        ensure(layers.isNotEmpty()) { "${prefix}classifier has no layers" }
+        ensure(classifier.type != ClassifierType.LOGREG || layers.size == 1) {
+            "${prefix}logreg must have exactly one layer, has ${layers.size}"
+        }
         var inputs = features
         layers.forEachIndexed { index, layer ->
             val outputs = layer.bias.size
             ensure(outputs > 0 && layer.weights.size == outputs) {
-                "layer $index: ${layer.weights.size} weight rows for $outputs biases"
+                "${prefix}layer $index: ${layer.weights.size} weight rows for $outputs biases"
             }
-            ensure(layer.weights.all { it.size == inputs }) { "layer $index: every weight row needs $inputs inputs" }
+            ensure(layer.weights.all { it.size == inputs }) { "${prefix}layer $index: every weight row needs $inputs inputs" }
             ensure(layer.bias.all { it.isFinite() } && layer.weights.all { row -> row.all { it.isFinite() } }) {
-                "layer $index: weights and biases must be finite"
+                "${prefix}layer $index: weights and biases must be finite"
             }
             val expected = if (index == layers.lastIndex) Activation.SOFTMAX else Activation.RELU
-            ensure(layer.activation == expected) { "layer $index: activation must be $expected, was ${layer.activation}" }
+            ensure(layer.activation == expected) { "${prefix}layer $index: activation must be $expected, was ${layer.activation}" }
             inputs = outputs
         }
-        ensure(inputs == SleepStage.COUNT) { "the output layer must have ${SleepStage.COUNT} units, has $inputs" }
+        ensure(inputs == SleepStage.COUNT) { "${prefix}the output layer must have ${SleepStage.COUNT} units, has $inputs" }
     }
 
     private fun validateEmissions(table: EmissionTable) {

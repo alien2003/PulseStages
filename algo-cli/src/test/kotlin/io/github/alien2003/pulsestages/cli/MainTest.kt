@@ -103,6 +103,45 @@ class MainTest {
     }
 
     @Test
+    fun `features with nap proxies adds the rows of every night's first minutes`() {
+        val records = listOf(record(6201, "a"), record(6202, "b", index = 1))
+        val nights = writeNights(dir.resolve("proxy-nights"), records).toString()
+        val out = dir.resolve("proxy-features.csv")
+        ok("features", "--nights", nights, "--out", out.toString(), "--nap-proxies", "30,60")
+
+        val rows = Files.readAllLines(out).drop(1).map { it.split(',') }
+        val byId = rows.groupBy { it[0] }
+        val order = records.map { it.id } + records.map { "${it.id}-nap30" } + records.map { "${it.id}-nap60" }
+        assertEquals(order, rows.map { it[0] }.distinct())
+        assertEquals(30, byId.getValue("${records[0].id}-nap30").size)
+        assertEquals(60, byId.getValue("${records[1].id}-nap60").size)
+        // A proxy's rows are the features of the cut session (no data after its end), not a slice of the night's rows.
+        val proxy = checkNotNull(NapProxies.cut(records[0], 30.0))
+        val night = NightPreparer.prepare(proxy.input, AlgoParams())
+        val features = HybridFeatureExtractor.extract(night)
+        val header = Files.readAllLines(out).first().split(',')
+        val column = header.indexOf("hoursToEnd")
+        byId.getValue(proxy.id).forEachIndexed { k, row -> assertEquals(Csv.number(features[k][column - 6]), row[column], "epoch $k") }
+    }
+
+    @Test
+    fun `estimate of a nap writes the mode into the CSV and the summary`() {
+        val night = record(6300, "a")
+        val nap = checkNotNull(NapProxies.cut(night, 90.0))
+        val file = writeNights(dir.resolve("nap"), listOf(nap)).resolve("${nap.id}.night.json")
+        val csv = dir.resolve("nap.csv")
+        val result = ok("estimate", "--night", file.toString(), "--estimator", "RULES", "--csv", csv.toString())
+        assertTrue(result.out.contains("mode=NAP") && result.out.contains("estimator=RULES"), result.out)
+        val lines = Files.readAllLines(csv)
+        assertTrue(lines.first().endsWith(",stage,mode"), lines.first())
+        assertTrue(lines.drop(1).all { it.endsWith(",NAP") })
+        val skip = Files.writeString(dir.resolve("skip.json"), """{"napMode": {"outputPolicy": "SKIP"}}""")
+        val skipped = cli("estimate", "--night", file.toString(), "--params", skip.toString(), "--csv", dir.resolve("x.csv").toString())
+        assertEquals(ExitCodes.NOT_ESTIMATED, skipped.code)
+        assertTrue(skipped.err.contains("NAP_SKIPPED"), skipped.err)
+    }
+
+    @Test
     fun `estimate writes the same CSV as the in-app export`() {
         val night = record(6100, "a")
         val file = writeNights(dir.resolve("one"), listOf(night)).resolve("${night.id}.night.json")

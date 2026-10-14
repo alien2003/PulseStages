@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings: the Naps group (AlgoParams.napMode) -->
+    <string name="settings_section_naps">Naps</string>
+    <string name="settings_section_naps_summary">Sessions shorter than the nap threshold: how they are estimated and written</string>
+    <string name="set_nap_max_session_title">Nap threshold</string>
+    <string name="set_nap_max_session_hint">Sessions shorter than this are naps, longer ones nights. Naps are never compared with the heart-rate baseline nor counted for it, and the stage-share check skips them. 0 = no naps: every session is a night. Sessions shorter than the minimum session length of the sources are ignored altogether.</string>
+    <string name="set_nap_output_title">Written for a nap</string>
+    <string name="set_nap_output_hint">Stages: like a night. Asleep / awake: only sleep and awakenings (nap stage estimates are rough). Nothing: naps are not estimated and nothing is written; a session written for a nap earlier is removed when it is recomputed.</string>
+    <string name="option_nap_output_stages">Stages</string>
+    <string name="option_nap_output_sleep_wake">Asleep / awake</string>
+    <string name="option_nap_output_skip">Nothing</string>
+    <string name="set_nap_estimator_title">Estimator for naps</string>
+    <string name="set_nap_estimator_hint">The estimator of naps; the one of nights is set under Algorithm.</string>
+    <string name="settings_sub_nap_post">Post-processing of naps</string>
+    <string name="settings_sub_nap_hybrid">Hybrid decoder for naps</string>
+    <string name="set_nap_check_proportions_title">Check the stage shares of naps</string>
+    <string name="set_nap_check_proportions_hint">Apply the sanity check (and the proportion calibration, when it is on) to naps too. Off by default: the whole-night ranges do not describe a nap, which often has no deep or REM sleep at all.</string>
+    <string name="set_nap_min_deep_title">Minimum DEEP bout of naps</string>
+    <string name="set_nap_min_deep_hint">Shorter deep-sleep bouts of a nap are absorbed by a neighbour. Empty = the value of nights.</string>
+    <string name="set_nap_min_rem_title">Minimum REM bout of naps</string>
+    <string name="set_nap_min_rem_hint">Shorter REM bouts of a nap are absorbed by a neighbour. Empty = the value of nights.</string>
+    <string name="set_nap_min_awake_title">Minimum awakening in naps</string>
+    <string name="set_nap_min_awake_hint">Shorter awakenings inside a nap are absorbed by a neighbour. Empty = the value of nights.</string>
+    <string name="set_nap_sanity_deep_min_title">Minimum DEEP share of naps</string>
+    <string name="set_nap_sanity_deep_min_hint">A nap with less deep sleep is marked low-confidence (only when the stage shares of naps are checked). Empty = the value of nights.</string>
+    <string name="set_nap_sanity_deep_max_title">Maximum DEEP share of naps</string>
+    <string name="set_nap_sanity_deep_max_hint">A nap with more deep sleep is marked low-confidence (only when the stage shares of naps are checked). Empty = the value of nights.</string>
+    <string name="set_nap_sanity_rem_max_title">Maximum REM share of naps</string>
+    <string name="set_nap_sanity_rem_max_hint">A nap with more REM sleep is marked low-confidence (only when the stage shares of naps are checked). Empty = the value of nights.</string>
+    <string name="set_nap_low_conf_threshold_title">Uncertain nap epochs below</string>
+    <string name="set_nap_low_conf_threshold_hint">Epochs of a nap whose most likely stage has a lower probability are uncertain. Empty = the value of nights.</string>
+    <string name="set_nap_low_conf_policy_title">Uncertain nap epochs</string>
+    <string name="set_nap_low_conf_policy_hint">Keep the decoder\'s stage or write light sleep for the uncertain epochs of naps.</string>
+    <string name="set_nap_duration_model_title">Duration model of naps</string>
+    <string name="set_nap_duration_model_hint">How the hybrid decoder models bout lengths in naps.</string>
+    <string name="set_nap_emission_weight_title">Emission weight of naps</string>
+    <string name="set_nap_emission_weight_hint">How strongly the classifier\'s output counts in naps. Empty = the value of nights.</string>
+    <string name="set_nap_time_prior_title">Time-of-night prior of naps</string>
+    <string name="set_nap_time_prior_hint">Weight of the typical stage at this time since the session start, in naps. Empty = the value of nights.</string>
+    <string name="option_same_as_nights">Same as nights</string>
+    <string name="settings_same_as_nights_value">Same as nights: %1$s</string>
+    <!-- Nights list and night detail -->
+    <string name="nights_marker_nap">Nap</string>
+    <string name="nights_filter_label">Show</string>
+    <string name="nights_filter_all">All</string>
+    <string name="nights_filter_nights">Nights</string>
+    <string name="nights_filter_naps">Naps</string>
+    <string name="nights_filter_empty_nights">No nights in the list.</string>
+    <string name="nights_filter_empty_naps">No naps in the list. Sessions shorter than the nap threshold appear here once they are at least as long as the minimum session length of the sources.</string>
+    <string name="night_detail_mode">Processed as</string>
+    <string name="session_mode_night">Night</string>
+    <string name="session_mode_nap">Nap</string>
+    <string name="night_detail_nap_rough">Nap estimates are rough: on test data only about half of the stages of a nap matched the sleep lab, and a short nap is often no better than calling everything light sleep. Take the stages as a rough guide.</string>
+    <string name="night_detail_nap_sleep_wake">Written to Health Connect as asleep / awake only; the stages shown here are the app\'s estimate.</string>
+    <string name="not_estimated_nap_skipped">Naps are not estimated (Settings, Naps).</string>
+    <!-- Home and Compare -->
+    <string name="home_counter_nights">nights written</string>
+    <string name="home_counter_naps">naps written</string>
+    <string name="compare_by_mode_title">Nights and naps apart</string>
+    <string name="compare_mode_metrics">%1$s: kappa %2$s, accuracy %3$s</string>
+</resources>

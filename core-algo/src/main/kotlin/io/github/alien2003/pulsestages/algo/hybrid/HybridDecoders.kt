@@ -33,7 +33,7 @@ internal class DurationTable(
     val only: DoubleArray,
 )
 
-/** Builds the decoders of the hybrid estimator from the model bundle and the parameters. */
+/** Builds the decoders of the hybrid estimator from the model's components (main or nap model) and the parameters. */
 internal object HybridDecoders {
     /** Probabilities are floored here so that every duration stays feasible (log ≈ −690). */
     private const val MIN_PROBABILITY = 1e-300
@@ -96,7 +96,7 @@ internal object HybridDecoders {
      * first epoch is the initial distribution.
      */
     fun hsmm(
-        model: HybridModel,
+        model: HybridComponents,
         params: AlgoParams,
         epochMin: Double,
         relaxSelfTransitions: Boolean,
@@ -129,7 +129,7 @@ internal object HybridDecoders {
      * the diagonal (zeros → ε, renormalized); the same initial distribution as [hsmm].
      */
     fun geometric(
-        model: HybridModel,
+        model: HybridComponents,
         params: AlgoParams,
         epochMin: Double,
         epochs: Int,
@@ -147,7 +147,7 @@ internal object HybridDecoders {
     }
 
     private fun initial(
-        model: HybridModel,
+        model: HybridComponents,
         epsilon: Double,
     ): DoubleArray = logOf(HmmMath.normalize(DoubleArray(SleepStage.COUNT) { maxOf(model.initialStage[it], epsilon) }))
 

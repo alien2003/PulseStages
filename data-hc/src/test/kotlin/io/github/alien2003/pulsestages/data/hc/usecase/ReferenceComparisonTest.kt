@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.hc.usecase
 
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.data.hc.EstimatedSessionWrite
@@ -276,5 +277,31 @@ class ReferenceComparisonTest {
             val result = h.referenceComparison.findReferenceNights(NOON - 7 * DAY_MS, NOON)
 
             assertEquals(BlockedReason.PERMISSION_MISSING, assertInstanceOf(UseCaseResult.Blocked::class.java, result).reason)
+        }
+
+    @Test
+    fun `short reference sessions are compared as naps and the report splits the metrics by mode`() =
+        harnessTest(dir) { h ->
+            h.settings.set { it.copy(sources = it.sources.copy(minSessionMin = 30)) }
+            val night = h.repository.addReference(nightStart(3))
+            val nap = h.repository.addReference(nightStart(2) + 15 * HOUR_MS, durationMs = 120 * MINUTE_MS)
+            val search = success(h.referenceComparison.findReferenceNights(NOON - 30 * DAY_MS, NOON))
+            assertEquals(listOf(night.uuid, nap.uuid), search.nights.map { it.session.uuid })
+
+            val report = h.referenceComparison.compareWithCurrentSettings(search.nights)
+
+            assertEquals(listOf(SessionMode.NIGHT, SessionMode.NAP), report.nights.map { it.mode })
+            assertTrue(report.mixesModes)
+            assertEquals(listOf(SessionMode.NIGHT, SessionMode.NAP), report.modes)
+            val nights = report.forMode(SessionMode.NIGHT)
+            val naps = report.forMode(SessionMode.NAP)
+            assertEquals(1, nights.scoredNights)
+            assertEquals(1, naps.scoredNights)
+            assertEquals(report.pooled, nights.pooled + naps.pooled)
+            // Without the nap mode both sessions are nights.
+            val noNaps = AlgoParams().copy(napMode = AlgoParams().napMode.copy(maxSessionMin = 0.0))
+            val all = h.referenceComparison.compare(search.nights, noNaps)
+            assertEquals(listOf(SessionMode.NIGHT), all.modes)
+            assertTrue(!all.mixesModes)
         }
 }

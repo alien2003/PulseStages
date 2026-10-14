@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 
@@ -16,7 +17,7 @@ enum class NightStatus {
     /** Our session with stages is in Health Connect. */
     WRITTEN,
 
-    /** Not estimated (no heart rate / low coverage / too short); the reason is in `statusReason`. */
+    /** Not estimated (no heart rate / low coverage / too short / a nap skipped by the nap policy); see `statusReason`. */
     NOT_ESTIMATED,
 
     /** Estimation or writing failed; the reason is in `statusReason`. */
@@ -67,10 +68,15 @@ enum class NightStatus {
  * @property warnings estimation warnings (stored as a JSON array of [WarningCode] names; unknown names are dropped).
  * @property nadirBpm lowest smoothed heart rate of the night, if known.
  * @property hrSamples number of heart-rate samples used.
- * @property stages the stages exactly as written (after awakeAsLight mapping), stored compactly as
- *   `[[startMs,endMs,"DEEP"],...]` in column `stagesJson`.
+ * @property stages the estimated stages after the awakeAsLight mapping, stored compactly as `[[startMs,endMs,"DEEP"],...]`
+ *   in column `stagesJson`: exactly what was written, except for a nap written with the SLEEP_WAKE output
+ *   ([sleepWakeOnly]), whose LIGHT / DEEP / REM / UNKNOWN were written as Health Connect's generic "sleeping" stage.
  * @property createdAt when the row was created.
  * @property updatedAt when the row was last changed.
+ * @property mode whether the session was processed as a night or as a nap (`napMode.maxSessionMin` of the settings it
+ *   was processed with; schema version 2, NIGHT for the rows of version 1).
+ * @property sleepWakeOnly the nap's record holds only AWAKE and SLEEPING stages (`napMode.outputPolicy` SLEEP_WAKE);
+ *   [stages] and the minute columns keep the estimated stages (schema version 2).
  */
 @Suppress("LongParameterList") // Mirrors the table: one constructor parameter per column.
 @Entity(
@@ -116,6 +122,8 @@ data class EstimatedNightEntity(
     @ColumnInfo(name = "stagesJson") val stages: List<StageInterval> = emptyList(),
     val createdAt: Long,
     val updatedAt: Long,
+    @ColumnInfo(defaultValue = "NIGHT") val mode: SessionMode = SessionMode.NIGHT,
+    @ColumnInfo(defaultValue = "0") val sleepWakeOnly: Boolean = false,
 ) {
     /** True when this night is [NightStatus.WRITTEN] with a different algorithm version or params hash. */
     fun isStale(
@@ -152,6 +160,8 @@ data class EstimatedNightEntity(
  * @property calibrated calibrated flag.
  * @property rulesFallback rules fallback flag.
  * @property updatedAt last change.
+ * @property mode night or nap.
+ * @property sleepWakeOnly a nap written with only AWAKE and SLEEPING stages.
  */
 @Suppress("LongParameterList") // Projection of table columns.
 data class NightSummary(
@@ -179,6 +189,8 @@ data class NightSummary(
     val calibrated: Boolean,
     val rulesFallback: Boolean,
     val updatedAt: Long,
+    val mode: SessionMode = SessionMode.NIGHT,
+    val sleepWakeOnly: Boolean = false,
 ) {
     /** True when this night is [NightStatus.WRITTEN] with a different algorithm version or params hash. */
     fun isStale(

@@ -26,7 +26,10 @@ enum class SourceOutcome {
     /** Part of a night that was estimated and written. */
     ESTIMATED,
 
-    /** Shorter than `minSessionMin` after merging: a nap. */
+    /**
+     * Shorter than the source setting `minSessionMin` after merging: ignored (the name predates the nap mode; a
+     * session between `minSessionMin` and `napMode.maxSessionMin` is estimated as a nap and is ESTIMATED).
+     */
     NAP,
 
     /** Already has stages (skipped unless "recompute all"). */
@@ -230,13 +233,16 @@ data class PersonalModelEntity(
 
 /**
  * Home screen counters. Built from `source_sessions` (found = all except OWN; estimated = ESTIMATED; skipped = NAP +
- * HAS_STAGES + LOWER_PRIORITY_DUPLICATE + NOT_ESTIMATED + FAILED) plus stale WRITTEN nights.
+ * HAS_STAGES + LOWER_PRIORITY_DUPLICATE + NOT_ESTIMATED + FAILED) plus stale WRITTEN nights and the WRITTEN outputs
+ * per mode.
  *
  * @property found source sessions found (not ours).
  * @property estimated source sessions that are part of an estimated night.
  * @property skipped source sessions skipped for any reason (failures included).
  * @property failed source sessions whose processing failed (a subset of [skipped]).
  * @property stale WRITTEN nights with another algorithm version or params hash.
+ * @property nights WRITTEN outputs of nights ([io.github.alien2003.pulsestages.algo.model.SessionMode.NIGHT]).
+ * @property naps WRITTEN outputs of naps ([io.github.alien2003.pulsestages.algo.model.SessionMode.NAP]).
  */
 data class HomeCounters(
     val found: Int,
@@ -244,4 +250,6 @@ data class HomeCounters(
     val skipped: Int,
     val failed: Int,
     val stale: Int,
+    val nights: Int = 0,
+    val naps: Int = 0,
 )

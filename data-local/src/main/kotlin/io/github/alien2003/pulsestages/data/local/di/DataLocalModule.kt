@@ -15,6 +15,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateDao
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightDao
+import io.github.alien2003.pulsestages.data.local.db.LedgerMigrations
 import io.github.alien2003.pulsestages.data.local.db.LogDao
 import io.github.alien2003.pulsestages.data.local.db.NightBaselineDao
 import io.github.alien2003.pulsestages.data.local.db.PersonalModelDao
@@ -147,7 +148,11 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(
         @ApplicationContext context: Context,
-    ): PulseStagesDatabase = Room.databaseBuilder(context, PulseStagesDatabase::class.java, PulseStagesDatabase.FILE_NAME).build()
+    ): PulseStagesDatabase =
+        Room
+            .databaseBuilder(context, PulseStagesDatabase::class.java, PulseStagesDatabase.FILE_NAME)
+            .apply { LedgerMigrations.ALL.forEach { addMigrations(it) } }
+            .build()
 
     /** DAO of `estimated_nights` / `night_sources`. */
     @Provides

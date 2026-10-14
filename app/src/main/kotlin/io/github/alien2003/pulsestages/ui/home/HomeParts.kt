@@ -143,7 +143,10 @@ internal fun SyncOutcome.labelRes(): Int =
         SyncOutcome.CANCELLED -> R.string.sync_outcome_cancelled
     }
 
-/** Found / estimated / skipped / stale (and failed, when any) as number tiles. */
+/**
+ * Found / estimated / skipped / stale (and failed, when any) source sessions, then the written nights and naps apart, as
+ * number tiles.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CounterTiles(counters: HomeCounters) {
@@ -158,6 +161,8 @@ internal fun CounterTiles(counters: HomeCounters) {
         CounterTile(counters.skipped, stringResource(R.string.home_counter_skipped))
         CounterTile(counters.stale, stringResource(R.string.home_counter_stale))
         if (counters.failed > 0) CounterTile(counters.failed, stringResource(R.string.home_counter_failed))
+        CounterTile(counters.nights, stringResource(R.string.home_counter_nights))
+        CounterTile(counters.naps, stringResource(R.string.home_counter_naps))
     }
 }
 

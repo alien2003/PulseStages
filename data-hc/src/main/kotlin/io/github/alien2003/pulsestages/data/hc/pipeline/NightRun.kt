@@ -5,6 +5,9 @@ import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.algo.model.SessionMode
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.EstimatedSessionWrite
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.HcStage
@@ -310,11 +313,19 @@ internal class NightRun(
             )
         }
 
+    /**
+     * Estimates [candidate] in its mode ([NightCandidate.mode]) and writes it; a nap under `napMode.outputPolicy` SKIP
+     * is not estimated and nothing is read for it ([skipNap]).
+     */
     private suspend fun estimateAndWrite(
         candidate: NightCandidate,
         existing: EstimatedNightEntity?,
         related: List<EstimatedNightEntity>,
     ): NightResult {
+        val napMode = settings.algo.napMode
+        if (candidate.mode(settings.algo) == SessionMode.NAP && napMode.outputPolicy == NapOutputPolicy.SKIP) {
+            return skipNap(candidate, existing, related)
+        }
         val input = buildInput(candidate)
         return when (val outcome = withContext(estimationDispatcher) { estimator.estimate(input, settings.algo) }) {
             is EstimationOutcome.Estimated -> write(candidate, existing, related, outcome.estimate)
@@ -415,7 +426,14 @@ internal class NightRun(
         related: List<EstimatedNightEntity>,
         estimate: NightEstimate,
     ): NightResult {
-        val stages = StageMapping.toHcStages(estimate.stages, settings.write.awakeAsLight)
+        val awakeAsLight = settings.write.awakeAsLight
+        val sleepWakeOnly = estimate.mode == SessionMode.NAP && settings.algo.napMode.outputPolicy == NapOutputPolicy.SLEEP_WAKE
+        val stages =
+            if (sleepWakeOnly) {
+                StageMapping.toSleepWakeHcStages(estimate.stages, awakeAsLight)
+            } else {
+                StageMapping.toHcStages(estimate.stages, awakeAsLight)
+            }
         val problems =
             StageMapping.validate(
                 stages,
@@ -431,13 +449,15 @@ internal class NightRun(
 
         val now = clock.millis()
         ledger.nights.recordNight(
-            writtenNight(candidate, existing, estimate, Written(stages, recomputeCount, result)),
+            writtenNight(candidate, existing, estimate, Written(stages, sleepWakeOnly, recomputeCount, result)),
             candidate.fragments.map { it.toSourceRow(SourceOutcome.ESTIMATED, null, candidate.clientRecordId, now) },
         )
         val coverage = SessionText.round3(estimate.coverage)
+        val what = if (estimate.mode == SessionMode.NAP) "nap" else "night"
+        val output = if (sleepWakeOnly) "${stages.size} sleep/wake stages" else "${stages.size} stages"
         logger.i(
             TAG,
-            "wrote ${estimate.estimator} night v$version (${stages.size} stages, coverage $coverage)",
+            "wrote ${estimate.estimator} $what v$version ($output, coverage $coverage)",
             nightKey = candidate.clientRecordId,
         )
         // Under NEVER only nights without an output can be related here (see processNight).
@@ -533,6 +553,7 @@ internal class NightRun(
             notes =
                 SessionText.notes(
                     estimator = estimate.estimator,
+                    mode = estimate.mode,
                     algoVersion = estimate.algoVersion,
                     paramsHash = paramsHash,
                     coverage = estimate.coverage,
@@ -550,7 +571,9 @@ internal class NightRun(
         written: Written,
     ): EstimatedNightEntity {
         val now = clock.millis()
-        val minutes = StageMinutes.of(written.stages)
+        // The estimated stages (after awakeAsLight): for a sleep/wake nap the ledger keeps them, not the two written types.
+        val estimated = StageMapping.toHcStages(estimate.stages, settings.write.awakeAsLight)
+        val minutes = StageMinutes.of(estimated)
         return EstimatedNightEntity(
             clientRecordId = candidate.clientRecordId,
             sourceUuids = candidate.sourceUuids,
@@ -582,10 +605,47 @@ internal class NightRun(
             warnings = estimate.warnings.map { it.code }.distinct(),
             nadirBpm = estimate.nadirBpm,
             hrSamples = estimate.hrSampleCount,
-            stages = StageMapping.toLedgerStages(written.stages),
+            stages = StageMapping.toLedgerStages(estimated),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
+            mode = estimate.mode,
+            sleepWakeOnly = written.sleepWakeOnly,
         )
+    }
+
+    /**
+     * A nap under `napMode.outputPolicy` SKIP: nothing is estimated or written, and nothing is read for it. An output
+     * written for it earlier (another policy, or before it was a nap) is deleted, and so is every output it would
+     * replace if it were written (`related`); the night is recorded NOT_ESTIMATED with the reason `NAP_SKIPPED: …`.
+     */
+    private suspend fun skipNap(
+        candidate: NightCandidate,
+        existing: EstimatedNightEntity?,
+        related: List<EstimatedNightEntity>,
+    ): NightResult {
+        val minutes = candidate.durationMs / MINUTE_MS
+        val reason =
+            "${NotEstimatedReason.NAP_SKIPPED}: nap of $minutes min (shorter than napMode.maxSessionMin = " +
+                "${settings.algo.napMode.maxSessionMin} min) and naps are not written (napMode.outputPolicy = SKIP)"
+        if (existing?.status == NightStatus.WRITTEN) {
+            deleteOutputs(listOf(candidate.clientRecordId))
+            logger.i(
+                TAG,
+                "nap output removed: naps are no longer written (napMode.outputPolicy = SKIP)",
+                nightKey = candidate.clientRecordId,
+            )
+        }
+        val now = clock.millis()
+        val protected = ledger.protectedUuids(candidate.sourceUuids, candidate.clientRecordId)
+        ledger.nights.recordNight(
+            nightWithoutOutput(candidate, existing, NightStatus.NOT_ESTIMATED, reason, existing?.coverage ?: 0.0),
+            candidate.fragments
+                .filter { it.uuid !in protected }
+                .map { it.toSourceRow(SourceOutcome.NOT_ESTIMATED, reason, candidate.clientRecordId, now) },
+        )
+        supersede(related, candidate.clientRecordId)
+        logger.i(TAG, "not estimated: $reason", nightKey = candidate.clientRecordId)
+        return NightResult.NOT_ESTIMATED
     }
 
     private suspend fun notEstimated(
@@ -660,7 +720,7 @@ internal class NightRun(
             hcRecordId = null,
             algoVersion = ALGO_VERSION,
             paramsHash = paramsHash,
-            estimator = settings.algo.estimator,
+            estimator = candidate.mode(settings.algo).let { settings.algo.forMode(it).estimator },
             coverage = coverage,
             recomputeCount = existing?.recomputeCount ?: 0,
             clientRecordVersion = existing?.clientRecordVersion ?: 0,
@@ -668,6 +728,7 @@ internal class NightRun(
             statusReason = reason,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
+            mode = candidate.mode(settings.algo),
         )
     }
 
@@ -696,9 +757,10 @@ internal class NightRun(
         ledger.sources.upsertAll(candidate.fragments.map { it.toSourceRow(SourceOutcome.ESTIMATED, null, candidate.clientRecordId, now) })
     }
 
-    /** What [write] wrote. */
+    /** What [write] wrote ([sleepWakeOnly]: a nap in the SLEEP_WAKE output). */
     private class Written(
         val stages: List<HcStage>,
+        val sleepWakeOnly: Boolean,
         val recomputeCount: Long,
         val result: WriteResult,
     )
@@ -707,6 +769,7 @@ internal class NightRun(
     companion object {
         private const val TAG = "NightPipeline"
         private const val SECOND_MS = 1_000L
+        private const val MINUTE_MS = 60_000L
         private const val VERSION_FACTOR = 1_000L
         private const val MAX_REASON_LENGTH = 500
         private const val STAGED_REASON = "the source session now has its own sleep stages"

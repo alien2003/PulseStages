@@ -7,6 +7,7 @@ import io.github.alien2003.pulsestages.algo.metrics.NightScore
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 import io.github.alien2003.pulsestages.algo.night.PreparedNight
@@ -31,15 +32,20 @@ internal sealed interface NightResult {
     /** The night. */
     val record: NightRecord
 
+    /** Night or nap under the parameter set. */
+    val mode: SessionMode
+
     /** Not scored, with a reason (NO_LABELS, NO_FOLD_MODEL, or a NotEstimatedReason). */
     class Skipped(
         override val record: NightRecord,
+        override val mode: SessionMode,
         val reason: String,
     ) : NightResult
 
     /** Scored against the night's labels. */
     class Scored(
         override val record: NightRecord,
+        override val mode: SessionMode,
         val estimator: EstimatorType,
         val coverage: Double,
         val confidence: Double,
@@ -50,14 +56,19 @@ internal sealed interface NightResult {
 
 /**
  * `evaluate --nights <dir|file> [--estimator RULES|HMM|HYBRID] [--params <json>] [--param-grid <json array>]
- * [--model <bundle> | --fold-models <dir with <subject>.json>] --out <metrics.json> [--per-epoch <csv>]`.
+ * [--model <bundle> | --fold-models <dir with <subject>.json>] [--nap-proxies <minutes,...>] --out <metrics.json>
+ * [--per-epoch <csv>]`.
  *
- * Every night is estimated through SleepStager.run (with its subject's fold model when --fold-models is given) and
- * scored against its labels with IntervalScoring (each label interval split into 30-s chunks, compared with the
- * predicted stage at the chunk midpoint). With --param-grid, every grid entry (a partial AlgoParams patch merged over
- * the base parameters) produces one metrics block; nights are parsed once and their preparation (preprocessing,
- * features, hybrid features and classifier outputs) is shared by all entries with the same preprocessing and
- * feature parameters. Nights are processed in parallel; the output does not depend on the scheduling.
+ * Every night is estimated through SleepStager.run (with its subject's fold model when --fold-models is given; a bundle
+ * with a nap section decodes the naps with it) and scored against its labels with IntervalScoring (each label interval
+ * split into 30-s chunks, compared with the predicted stage at the chunk midpoint). `--estimator` sets the estimator of
+ * nights and naps. `--nap-proxies 30,60,90,120` also evaluates the first L minutes of every night as a nap proxy
+ * ([NapProxies], id `<night id>-nap<L>`, same subject and fold model). Every metrics block also reports its numbers
+ * per mode (`byMode`: NIGHT / NAP, by `napMode.maxSessionMin` of the block's parameters). With --param-grid, every
+ * grid entry (a partial AlgoParams patch merged over the base parameters) produces one metrics block; nights are
+ * parsed once and their preparation (preprocessing, features, hybrid features and classifier outputs) is shared by all
+ * entries with the same preprocessing and feature parameters (and mode). Nights are processed in parallel; the output
+ * does not depend on the scheduling.
  */
 internal object EvaluateCommand {
     private const val CHUNK = 64
@@ -87,8 +98,13 @@ internal object EvaluateCommand {
         out: Appendable,
     ): Int {
         val options =
-            Options("evaluate", args, setOf("nights", "estimator", "params", "param-grid", "model", "fold-models", "out", "per-epoch"))
-        val records = NightFiles.read(options.requiredPath("nights"))
+            Options(
+                "evaluate",
+                args,
+                setOf("nights", "estimator", "params", "param-grid", "model", "fold-models", "nap-proxies", "out", "per-epoch"),
+            )
+        val nights = NightFiles.read(options.requiredPath("nights"))
+        val records = options["nap-proxies"]?.let { NapProxies.withProxies(nights, NapProxies.parseLengths(it)) } ?: nights
         val base = EstimateCommand.withEstimator(ParamsFiles.load(options.path("params")), options["estimator"])
         val patches = options.path("param-grid")?.let { path -> ParamsFiles.grid(path) }
         val grid = patches?.mapIndexed { i, patch -> ParamsFiles.merge(base, patch, "grid entry $i") } ?: listOf(base)
@@ -183,7 +199,10 @@ internal object EvaluateCommand {
                 stager == null -> "NO_FOLD_MODEL"
                 else -> null
             }
-        if (skipReason != null || stager == null) return NightEvaluation(grid.map { NightResult.Skipped(record, skipReason.orEmpty()) }, "")
+        val durationMs = record.input.sessionEndMs - record.input.sessionStartMs
+        if (skipReason != null || stager == null) {
+            return NightEvaluation(grid.map { NightResult.Skipped(record, it.modeOf(durationMs), skipReason.orEmpty()) }, "")
+        }
         val prepared = HashMap<Pair<PreprocessParams, FeatureParams>, PreparedNight>()
         val rows = StringBuilder()
         val results =
@@ -196,7 +215,7 @@ internal object EvaluateCommand {
                         .withParams(params)
                 when (val outcome = stager.run(night)) {
                     is EstimationOutcome.NotEstimated -> {
-                        NightResult.Skipped(record, outcome.reason.name)
+                        NightResult.Skipped(record, night.mode, outcome.reason.name)
                     }
 
                     is EstimationOutcome.Estimated -> {
@@ -204,6 +223,7 @@ internal object EvaluateCommand {
                         if (perEpoch) appendRows(rows, g, record, night, estimate)
                         NightResult.Scored(
                             record = record,
+                            mode = estimate.mode,
                             estimator = estimate.estimator,
                             coverage = estimate.coverage,
                             confidence = estimate.confidence,

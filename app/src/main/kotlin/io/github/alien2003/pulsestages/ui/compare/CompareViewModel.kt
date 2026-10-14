@@ -8,6 +8,7 @@ import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.metrics.ConfusionMatrix
 import io.github.alien2003.pulsestages.algo.metrics.StageMinutesError
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.data.hc.usecase.CalibrationOutcome
 import io.github.alien2003.pulsestages.data.hc.usecase.ReferenceNight
@@ -108,6 +109,8 @@ data class ConfusionRow(
  * @property stages per-stage accuracy and F1.
  * @property matrix the confusion matrix, rows = reference, columns = estimate.
  * @property meanMinutesError mean absolute DEEP / REM / AWAKE minute errors per night, or null.
+ * @property byMode the pooled kappa and accuracy of the nights and of the naps apart, when the reference sessions are of
+ *   both modes (short reference sessions are estimated as naps); empty otherwise.
  */
 @Immutable
 data class CompareMetrics(
@@ -118,6 +121,7 @@ data class CompareMetrics(
     val stages: List<StageMetrics>,
     val matrix: List<ConfusionRow>,
     val meanMinutesError: StageMinutesError?,
+    val byMode: List<ModeMetrics> = emptyList(),
 ) {
     /** Mapping. */
     companion object {
@@ -131,6 +135,15 @@ data class CompareMetrics(
                 stages = stagesOf(report.pooled),
                 matrix = rowsOf(report.pooled),
                 meanMinutesError = report.meanMinutesError,
+                byMode =
+                    if (report.mixesModes) {
+                        report.modes.map { mode ->
+                            val part = report.forMode(mode)
+                            ModeMetrics(mode, part.kappa, part.accuracy, part.scoredNights)
+                        }
+                    } else {
+                        emptyList()
+                    },
             )
 
         /** Per-stage scores of [matrix] in [SleepStage.SCORED] order. */
@@ -151,6 +164,22 @@ data class CompareMetrics(
 }
 
 /**
+ * Pooled metrics of the reference sessions of one mode.
+ *
+ * @property mode nights or naps.
+ * @property kappa Cohen's kappa, or null when undefined.
+ * @property accuracy share of agreeing chunks, or null.
+ * @property scoredNights sessions of [mode] estimated and scored.
+ */
+@Immutable
+data class ModeMetrics(
+    val mode: SessionMode,
+    val kappa: Double?,
+    val accuracy: Double?,
+    val scoredNights: Int,
+)
+
+/**
  * One reference night in the list.
  *
  * @property uuid Health Connect id of the reference session.
@@ -162,6 +191,7 @@ data class CompareMetrics(
  * @property kappa Cohen's kappa of the estimate against the reference, or null (not estimated / undefined).
  * @property accuracy share of agreeing chunks, or null.
  * @property estimator the estimator that produced the stages, or null when the night was not estimated.
+ * @property mode whether the reference session was estimated as a night or as a nap.
  */
 @Immutable
 data class ReferenceNightItem(
@@ -174,6 +204,7 @@ data class ReferenceNightItem(
     val kappa: Double?,
     val accuracy: Double?,
     val estimator: EstimatorType?,
+    val mode: SessionMode = SessionMode.NIGHT,
 ) {
     /** Mapping. */
     companion object {
@@ -193,6 +224,7 @@ data class ReferenceNightItem(
                 kappa = score.kappa,
                 accuracy = score.accuracy,
                 estimator = score.estimator,
+                mode = score.mode,
             )
         }
     }

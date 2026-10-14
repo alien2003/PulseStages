@@ -69,10 +69,14 @@ class DemoReferenceSource
             val today = LocalDate.now(clock.withZone(zone))
             val nights =
                 withContext(estimationDispatcher) {
-                    (0 until DemoData.REFERENCE_COUNT).map { index ->
-                        val daysAgo = DemoData.REFERENCE_COUNT - index + REFERENCE_DAYS_OFFSET
-                        referenceNight(index, DemoData.sessionStart(daysAgo, today, zone))
-                    }
+                    val whole =
+                        (0 until DemoData.REFERENCE_COUNT).map { index ->
+                            val daysAgo = DemoData.REFERENCE_COUNT - index + REFERENCE_DAYS_OFFSET
+                            referenceNight(index, DemoData.sessionStart(daysAgo, today, zone))
+                        }
+                    // A short reference session, compared as a nap.
+                    val napStart = DemoNaps.start(REFERENCE_DAYS_OFFSET, today, zone)
+                    whole + referenceNight(DemoData.REFERENCE_COUNT, napStart, DemoData.REFERENCE_NAP_MINUTES)
                 }
             return UseCaseResult.Success(ReferenceSearch(nights, emptyList(), emptyList(), fromMs, toMs))
         }
@@ -83,14 +87,15 @@ class DemoReferenceSource
             return withContext(estimationDispatcher) {
                 ReferenceReport(
                     nights.map { night ->
+                        val mode = params.modeOf(night.input.sessionEndMs - night.input.sessionStartMs)
                         when (val outcome = stager.run(night.input, params)) {
                             is EstimationOutcome.Estimated -> {
                                 val score = IntervalScoring.score(night.truth, outcome.estimate.stages)
-                                ReferenceNightScore(night, outcome.estimate.estimator, score, null)
+                                ReferenceNightScore(night, outcome.estimate.estimator, score, null, mode)
                             }
 
                             is EstimationOutcome.NotEstimated -> {
-                                ReferenceNightScore(night, null, null, "${outcome.reason}: ${outcome.detail}")
+                                ReferenceNightScore(night, null, null, "${outcome.reason}: ${outcome.detail}", mode)
                             }
                         }
                     },
@@ -146,8 +151,9 @@ class DemoReferenceSource
         private fun referenceNight(
             index: Int,
             startMs: Long,
+            durationMin: Int? = null,
         ): ReferenceNight {
-            val synthetic = DemoData.referenceNight(index, startMs)
+            val synthetic = DemoData.referenceNight(index, startMs, durationMin)
             val input = synthetic.input.copy(baselineNadirBpm = synthetic.baselineBpm - BASELINE_BELOW_BPM)
             val session =
                 HcSleepSession(

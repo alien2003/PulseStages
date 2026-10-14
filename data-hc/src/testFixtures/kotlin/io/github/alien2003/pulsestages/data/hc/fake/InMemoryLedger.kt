@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.hc.fake
 
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateDao
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateEntity
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightDao
@@ -114,6 +115,8 @@ class InMemoryLedger {
             calibrated = calibrated,
             rulesFallback = rulesFallback,
             updatedAt = updatedAt,
+            mode = mode,
+            sleepWakeOnly = sleepWakeOnly,
         )
 
     private val newestFirst = compareByDescending<EstimatedNightEntity> { it.sessionStartMs }.thenByDescending { it.id }
@@ -178,6 +181,11 @@ class InMemoryLedger {
         ): Flow<Int> = observeQuery { nights.values.count { isStale(it, algoVersion, paramsHash) } }
 
         override suspend fun countWithStatus(status: NightStatus): Int = read { nights.values.count { it.status == status } }
+
+        override suspend fun countWithStatusAndMode(
+            status: NightStatus,
+            mode: SessionMode,
+        ): Int = read { nights.values.count { it.status == status && it.mode == mode } }
 
         override suspend fun clientRecordIdsWithOutput(): List<String> =
             read {
@@ -279,6 +287,8 @@ class InMemoryLedger {
                     skipped = rows.count { it.outcome in SKIPPED_OUTCOMES },
                     failed = rows.count { it.outcome == SourceOutcome.FAILED },
                     stale = nights.values.count { isStale(it, algoVersion, paramsHash) },
+                    nights = nights.values.count { it.status == NightStatus.WRITTEN && it.mode == SessionMode.NIGHT },
+                    naps = nights.values.count { it.status == NightStatus.WRITTEN && it.mode == SessionMode.NAP },
                 )
             }
 

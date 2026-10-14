@@ -126,8 +126,9 @@ def decode_between(inp: Inputs, cli: AlgoCli, exp_dir: Path, out: Path, candidat
     """Proxies of ``check_lengths`` + ``lengths`` of every held-out subject decoded with A and with ``candidate``'s
     kind (fold bundle + b_short_g(T) as its stageLogBias, i.e. the bias on every session, as in the experiment);
     returns the records and the reproduction check of ``check_lengths`` against ``exp_dir/results.jsonl``
-    (:class:`NapError` on a mismatch; a build that skips the sanity check below ``post.proportionsMinSessionMin``
-    must reproduce the stored warnings without the ``SANITY_*`` codes of those sessions, :func:`expected_warnings`)."""
+    (:class:`NapError` on a mismatch; a build that skips the sanity check on naps, ``napMode.maxSessionMin``
+    (``post.proportionsMinSessionMin`` before the two modes), must reproduce the stored warnings without the
+    ``SANITY_*`` codes of those sessions, :func:`expected_warnings`)."""
     exp_dir, out = Path(exp_dir), Path(out)
     threshold = int(candidate.split("-")[1])
     fits = {(f["variant"], f["key"], f["T"]): f["bias"] for f in read_json(exp_dir / "fits.json")["fits"]}

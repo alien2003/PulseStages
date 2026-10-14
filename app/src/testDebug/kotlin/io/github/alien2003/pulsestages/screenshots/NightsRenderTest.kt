@@ -5,6 +5,10 @@ package io.github.alien2003.pulsestages.screenshots
 
 import android.app.Application
 import androidx.compose.material3.Text
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -12,6 +16,7 @@ import androidx.lifecycle.SavedStateHandle
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.data.hc.fake.FakeSettingsRepository
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
@@ -35,12 +40,14 @@ import io.github.alien2003.pulsestages.ui.nights.NightDetailRoute
 import io.github.alien2003.pulsestages.ui.nights.NightDetailUiState
 import io.github.alien2003.pulsestages.ui.nights.NightDetailViewModel
 import io.github.alien2003.pulsestages.ui.nights.NightListItem
+import io.github.alien2003.pulsestages.ui.nights.NightsFilter
 import io.github.alien2003.pulsestages.ui.nights.NightsRoute
 import io.github.alien2003.pulsestages.ui.nights.NightsScreen
 import io.github.alien2003.pulsestages.ui.nights.NightsUiState
 import io.github.alien2003.pulsestages.ui.nights.NightsViewModel
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -99,7 +106,7 @@ class NightsRenderTest(
         config.assertAppliedTo(host.resources)
         val nights = (viewModel.state.value as NightsUiState.Loaded).nights
         host.assertNoUnresolvedPlaceholders("demo nights")
-        host.scrollLazyList("demo nights", nights.size)
+        checkFilterAndBadge(viewModel, nights)
 
         val everyStatus = statusItems(nights.first())
         host.showEach(
@@ -110,6 +117,12 @@ class NightsRenderTest(
                 "empty" to NightsUiState.Loaded(emptyList()),
                 "empty demo" to NightsUiState.Loaded(emptyList(), synthetic = true),
                 "every status" to NightsUiState.Loaded(everyStatus + nights),
+                "every status as a nap" to
+                    NightsUiState.Loaded(everyStatus.map { it.copy(summary = it.summary.copy(mode = SessionMode.NAP)) }),
+                "naps filtered" to NightsUiState.Loaded(nights.filter { it.nap }, filter = NightsFilter.NAPS, total = nights.size),
+                "nights filtered" to NightsUiState.Loaded(nights.filterNot { it.nap }, filter = NightsFilter.NIGHTS, total = nights.size),
+                "no naps" to NightsUiState.Loaded(emptyList(), filter = NightsFilter.NAPS, total = 3),
+                "no nights" to NightsUiState.Loaded(emptyList(), filter = NightsFilter.NIGHTS, total = 3),
             ),
             lazyItems = { (it as? NightsUiState.Loaded)?.nights?.size ?: 0 },
         ) { state ->
@@ -118,10 +131,43 @@ class NightsRenderTest(
                 wide = config.wide,
                 selectedId = null,
                 onSelect = {},
+                onFilter = {},
                 detailPane = { id, modifier -> Text(id, modifier) },
             )
         }
     }
+
+    /** The filter row, the nap badge of the demo naps, and the filter through the ViewModel (naps, nights, all). */
+    private fun checkFilterAndBadge(
+        viewModel: NightsViewModel,
+        nights: List<NightListItem>,
+    ) {
+        val resources = host.resources
+        NightsFilter.entries.forEach { filter ->
+            val button =
+                hasText(resources.getString(filterLabel(filter))) and
+                    SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
+            compose.onNode(button).assertExists("filter $filter")
+        }
+        assertTrue("the demo has naps", nights.any { it.nap })
+        val napBadge = hasContentDescription(resources.getString(R.string.nights_marker_nap))
+        assertTrue("the nap badge is shown", compose.onAllNodes(napBadge, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        host.scrollLazyList("demo nights", nights.size)
+        for (filter in listOf(NightsFilter.NAPS, NightsFilter.NIGHTS, NightsFilter.ALL)) {
+            compose.runOnIdle { viewModel.setFilter(filter) }
+            host.waitUntil { (viewModel.state.value as? NightsUiState.Loaded)?.filter == filter }
+            val shown = (viewModel.state.value as NightsUiState.Loaded).nights
+            assertTrue("$filter shows its sessions", shown.isNotEmpty() && shown.all(filter::accepts))
+            host.assertNoUnresolvedPlaceholders("filter $filter")
+        }
+    }
+
+    private fun filterLabel(filter: NightsFilter): Int =
+        when (filter) {
+            NightsFilter.ALL -> R.string.nights_filter_all
+            NightsFilter.NIGHTS -> R.string.nights_filter_nights
+            NightsFilter.NAPS -> R.string.nights_filter_naps
+        }
 
     /** A copy of [item] in every status (every not-estimated reason, too), with the flags and the stale marker. */
     private fun statusItems(item: NightListItem): List<NightListItem> {
@@ -200,6 +246,12 @@ class NightsRenderTest(
         state: NightDetailUiState,
     ) {
         val night = state.night ?: return
+        if (night.mode == SessionMode.NAP) {
+            compose.onNode(hasText(host.resources.getString(R.string.night_detail_nap_rough))).assertExists("$name: nap explanation")
+        }
+        if (night.mode == SessionMode.NAP && night.sleepWakeOnly && night.status == NightStatus.WRITTEN) {
+            compose.onNode(hasText(host.resources.getString(R.string.night_detail_nap_sleep_wake))).assertExists("$name: asleep / awake")
+        }
         if (night.warnings.isNotEmpty()) {
             compose.onNode(hasText(host.resources.getString(R.string.night_detail_warnings))).assertExists("$name: warnings card")
         }
@@ -252,6 +304,8 @@ class NightsRenderTest(
             "exporting and deleting" to loaded.copy(exporting = true, deleting = true),
             "overwrite never" to loaded.copy(overwriteNever = true, synthetic = false),
             "message" to loaded.copy(messages = listOf(UiMessage(UiText.of(R.string.night_export_done, "pulsestages-2026-10-12.csv")))),
+            "nap" to loaded.copy(night = night.copy(mode = SessionMode.NAP)),
+            "nap written as asleep / awake" to loaded.copy(night = night.copy(mode = SessionMode.NAP, sleepWakeOnly = true)),
         ) +
             NotEstimatedReason.entries.map { "not estimated $it" to idle.copy(inspection = InspectionState.NotEstimated(null, it)) } +
             BlockedReason.entries.map { "blocked $it" to idle.copy(inspection = InspectionState.Blocked(it)) } +

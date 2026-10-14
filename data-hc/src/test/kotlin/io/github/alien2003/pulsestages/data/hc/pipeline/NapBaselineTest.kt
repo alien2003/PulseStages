@@ -18,8 +18,9 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
 /**
- * Naps estimated with `minSessionMin` = 30 and the rolling nadir baseline (`features.baselineMinSessionMin`, 180 min):
- * naps neither contribute to the baseline nor get one, in the pipeline and in every other reader of the inputs.
+ * Naps estimated with `minSessionMin` = 30 and the rolling nadir baseline (the nap threshold `napMode.maxSessionMin`,
+ * 180 min, which replaced `features.baselineMinSessionMin`): naps neither contribute to the baseline nor get one, in the
+ * pipeline and in every other reader of the inputs.
  */
 class NapBaselineTest {
     @TempDir
@@ -32,10 +33,10 @@ class NapBaselineTest {
      * Three nights (nadir 49) starting six to four days ago, then a 45-min nap on each of the last three afternoons
      * (nadir 70), then last night; naps are estimated (`minSessionMin` = 30). Returns the starts: nights, naps, last night.
      */
-    private suspend fun PipelineHarness.nightsAndNaps(baselineMinSessionMin: Double? = null): Triple<List<Long>, List<Long>, Long> {
+    private suspend fun PipelineHarness.nightsAndNaps(maxSessionMin: Double? = null): Triple<List<Long>, List<Long>, Long> {
         settings.set { s ->
-            val features = baselineMinSessionMin?.let { s.algo.features.copy(baselineMinSessionMin = it) } ?: s.algo.features
-            s.copy(sources = s.sources.copy(minSessionMin = 30), algo = s.algo.copy(features = features))
+            val napMode = maxSessionMin?.let { s.algo.napMode.copy(maxSessionMin = it) } ?: s.algo.napMode
+            s.copy(sources = s.sources.copy(minSessionMin = 30), algo = s.algo.copy(napMode = napMode))
         }
         val nights = (6 downTo 4).map { nightStart(it) }
         nights.forEach { repository.addNight(OHEALTH, it) }
@@ -76,9 +77,9 @@ class NapBaselineTest {
         }
 
     @Test
-    fun `with baselineMinSessionMin 0 naps count and are compared as before`() =
+    fun `with napMode maxSessionMin 0 naps count and are compared as before`() =
         harnessTest(dir) { h ->
-            val (_, naps, last) = h.nightsAndNaps(baselineMinSessionMin = 0.0)
+            val (_, naps, last) = h.nightsAndNaps(maxSessionMin = 0.0)
 
             h.processRecent()
 
@@ -89,11 +90,11 @@ class NapBaselineTest {
     @Test
     fun `a changed threshold applies to the stored history at once`() =
         harnessTest(dir) { h ->
-            val (_, naps, last) = h.nightsAndNaps(baselineMinSessionMin = 0.0)
+            val (_, naps, last) = h.nightsAndNaps(maxSessionMin = 0.0)
             h.processRecent()
             val ledgerNight = h.ledger.allNights().single { it.sessionStartMs == last }
 
-            h.settings.set { it.copy(algo = it.algo.copy(features = it.algo.features.copy(baselineMinSessionMin = 180.0))) }
+            h.settings.set { it.copy(algo = it.algo.copy(napMode = it.algo.napMode.copy(maxSessionMin = 180.0))) }
 
             assertEquals(49.0, h.ledgerInputs.read(ledgerNight, h.settings.current, h.repository.granted).baselineNadirBpm)
             val napNight = h.ledger.allNights().single { it.sessionStartMs == naps.last() }

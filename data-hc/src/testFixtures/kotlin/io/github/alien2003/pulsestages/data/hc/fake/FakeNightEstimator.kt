@@ -8,10 +8,12 @@ import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightFlags
 import io.github.alien2003.pulsestages.algo.model.NightInput
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.model.StageProbabilities
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightEstimator
 import java.security.MessageDigest
 
@@ -24,7 +26,8 @@ import java.security.MessageDigest
  * (a final partial epoch joins the previous interval). Every estimate carries per-epoch results (mean bpm as the
  * single feature `meanBpm`, a posterior of 0.7 on the chosen stage). [estimateWith] skips the coverage gates; for
  * [EstimatorType.RULES] every threshold is [RULES_SHIFT_BPM] higher, so RULES disagrees with the default on some
- * epochs.
+ * epochs. Modes as in core-algo: the estimate carries the session's mode (`params.modeOf`), a nap under
+ * `napMode.outputPolicy` SKIP is NotEstimated(NAP_SKIPPED), and [reportedType] is reported for nights and naps alike.
  */
 class FakeNightEstimator(
     override val modelId: String? = "fake-model",
@@ -58,7 +61,12 @@ class FakeNightEstimator(
         val epochMs = params.preprocess.epochSec * SECOND_MS
         val labelled = if (inSession.isEmpty()) null else label(input, params, epochMs, shiftBpm = 0.0)
         val coverage = labelled?.coverage ?: 0.0
+        val nap = params.modeOf(input.sessionEndMs - input.sessionStartMs) == SessionMode.NAP
         return when {
+            nap && params.napMode.outputPolicy == NapOutputPolicy.SKIP -> {
+                EstimationOutcome.NotEstimated(NotEstimatedReason.NAP_SKIPPED, coverage, "naps are not estimated")
+            }
+
             labelled == null -> {
                 EstimationOutcome.NotEstimated(NotEstimatedReason.NO_HR_DATA, 0.0, "no heart-rate samples in the session")
             }
@@ -113,6 +121,7 @@ class FakeNightEstimator(
             featureNames = listOf(FEATURE_NAME),
             nadirBpm = inSession.minOfOrNull { it.bpm },
             hrSampleCount = inSession.size,
+            mode = params.modeOf(input.sessionEndMs - input.sessionStartMs),
         )
     }
 

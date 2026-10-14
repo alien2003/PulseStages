@@ -1,7 +1,7 @@
 package io.github.alien2003.pulsestages.algo.params
 
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -34,8 +34,9 @@ class AlgoParamsValidatorTest {
                         epsilon = 0.0,
                     ),
                 rules = base.rules.copy(remMinHrNorm = Double.NaN, calibrationThresholdShift = -0.1),
-                hybrid = base.hybrid.copy(maxBoutMin = 0, priorExponent = -0.5, shortSessionMaxMin = -30.0),
+                hybrid = base.hybrid.copy(maxBoutMin = 0, priorExponent = -0.5),
                 post = base.post.copy(minDeepMin = -5.0, targetRemMin = 0.5),
+                napMode = base.napMode.copy(maxSessionMin = -30.0),
             )
 
         val problems = AlgoParamsValidator.problems(invalid)
@@ -54,9 +55,9 @@ class AlgoParamsValidatorTest {
                 "rules.calibrationThresholdShift",
                 "hybrid.maxBoutMin",
                 "hybrid.priorExponent",
-                "hybrid.shortSessionMaxMin",
                 "post.minDeepMin",
                 "post.targetRemMin",
+                "napMode.maxSessionMin",
             ),
             problems.map { it.path },
         )
@@ -66,40 +67,75 @@ class AlgoParamsValidatorTest {
     }
 
     @Test
-    fun `the nap thresholds accept 0 to 720 minutes`() {
+    fun `the nap threshold accepts 0 to 720 minutes`() {
         val base = AlgoParams()
 
-        fun thresholds(
-            baseline: Double,
-            proportions: Double,
-        ) = base.copy(
-            features = base.features.copy(baselineMinSessionMin = baseline),
-            post = base.post.copy(proportionsMinSessionMin = proportions),
-        )
+        fun threshold(minutes: Double) = base.copy(napMode = base.napMode.copy(maxSessionMin = minutes))
 
-        assertTrue(paths(thresholds(0.0, 0.0)).isEmpty())
-        assertTrue(paths(thresholds(720.0, 720.0)).isEmpty())
-        assertEquals(listOf("features.baselineMinSessionMin", "post.proportionsMinSessionMin"), paths(thresholds(-1.0, 720.5)))
-        assertEquals(listOf("features.baselineMinSessionMin", "post.proportionsMinSessionMin"), paths(thresholds(Double.NaN, 1e9)))
-        assertEquals(
-            "0.0..720.0",
-            AlgoParamsValidator.problems(thresholds(721.0, 0.0)).single().constraint,
-        )
+        assertTrue(paths(threshold(0.0)).isEmpty())
+        assertTrue(paths(threshold(720.0)).isEmpty())
+        assertEquals(listOf("napMode.maxSessionMin"), paths(threshold(-1.0)))
+        assertEquals(listOf("napMode.maxSessionMin"), paths(threshold(Double.NaN)))
+        assertEquals("0.0..720.0", AlgoParamsValidator.problems(threshold(721.0)).single().constraint)
     }
 
     @Test
-    fun `session thresholds compare whole milliseconds rounded up`() {
-        val features = FeatureParams(baselineMinSessionMin = 180.0)
-        assertEquals(10_800_000L, features.baselineMinSessionMs)
-        assertTrue(features.countsForBaseline(10_800_000L))
-        assertFalse(features.countsForBaseline(10_799_999L))
+    fun `nap overrides are checked when set and their pair with the night value`() {
+        val base = AlgoParams()
+
+        fun nap(
+            post: NapPostprocessParams = NapPostprocessParams(),
+            hybrid: NapHybridParams = NapHybridParams(),
+        ) = base.copy(napMode = base.napMode.copy(post = post, hybrid = hybrid))
+
+        assertTrue(paths(nap()).isEmpty())
+        assertTrue(paths(nap(NapPostprocessParams(minDeepMin = 0.0, sanityDeepMin = 0.0, sanityDeepMax = 1.0))).isEmpty())
+        assertEquals(
+            listOf(
+                "napMode.post.minDeepMin",
+                "napMode.post.minRemMin",
+                "napMode.post.minAwakeMin",
+                "napMode.post.sanityRemMax",
+                "napMode.post.lowConfidenceThreshold",
+                "napMode.hybrid.emissionWeight",
+                "napMode.hybrid.timePriorWeight",
+            ),
+            paths(
+                nap(
+                    NapPostprocessParams(
+                        minDeepMin = -1.0,
+                        minRemMin = -1.0,
+                        minAwakeMin = -0.5,
+                        sanityRemMax = 1.5,
+                        lowConfidenceThreshold = 2.0,
+                    ),
+                    NapHybridParams(emissionWeight = -0.1, timePriorWeight = Double.NaN),
+                ),
+            ),
+        )
+        // DEEP min above the night's max (0.35), and the night's min (0.03) above a nap max.
+        val minAbove = AlgoParamsValidator.problems(nap(NapPostprocessParams(sanityDeepMin = 0.5))).single()
+        assertEquals("napMode.post.sanityDeepMin", minAbove.path)
+        assertEquals("<= post.sanityDeepMax (0.35)", minAbove.constraint)
+        val maxBelow = AlgoParamsValidator.problems(nap(NapPostprocessParams(sanityDeepMax = 0.01))).single()
+        assertEquals("napMode.post.sanityDeepMax", maxBelow.path)
+        assertEquals(">= post.sanityDeepMin (0.03)", maxBelow.constraint)
+        val both = AlgoParamsValidator.problems(nap(NapPostprocessParams(sanityDeepMin = 0.4, sanityDeepMax = 0.2))).single()
+        assertEquals("napMode.post.sanityDeepMin", both.path)
+        assertEquals("<= napMode.post.sanityDeepMax (0.2)", both.constraint)
+    }
+
+    @Test
+    fun `the nap threshold compares whole milliseconds rounded up`() {
+        val napMode = NapModeParams(maxSessionMin = 180.0)
+        assertEquals(10_800_000L, napMode.maxSessionMs)
+        assertEquals(SessionMode.NIGHT, napMode.modeOf(10_800_000L))
+        assertEquals(SessionMode.NAP, napMode.modeOf(10_799_999L))
         // A fractional minute rounds up: 0.5 ms more than 1 min needs 60 001 ms.
-        assertEquals(60_001L, FeatureParams(baselineMinSessionMin = 60_000.5 / 60_000.0).baselineMinSessionMs)
-        assertEquals(0L, FeatureParams(baselineMinSessionMin = 0.0).baselineMinSessionMs)
-        assertTrue(FeatureParams(baselineMinSessionMin = 0.0).countsForBaseline(1L))
-        val post = PostprocessParams(proportionsMinSessionMin = 90.0)
-        assertTrue(post.checksProportions(90 * 60_000L))
-        assertFalse(post.checksProportions(90 * 60_000L - 1))
-        assertTrue(PostprocessParams(proportionsMinSessionMin = 0.0).checksProportions(1L))
+        assertEquals(60_001L, NapModeParams(maxSessionMin = 60_000.5 / 60_000.0).maxSessionMs)
+        assertEquals(SessionMode.NAP, NapModeParams(maxSessionMin = 60_000.5 / 60_000.0).modeOf(60_000L))
+        assertEquals(0L, NapModeParams(maxSessionMin = 0.0).maxSessionMs)
+        assertEquals(SessionMode.NIGHT, NapModeParams(maxSessionMin = 0.0).modeOf(1L))
+        assertEquals(SessionMode.NIGHT, NapModeParams(maxSessionMin = Double.NaN).modeOf(1L))
     }
 }

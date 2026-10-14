@@ -133,7 +133,7 @@ data class TimeSpan(
  * @property hrv optional HRV (RMSSD) measurements; empty when not available or not granted.
  * @property forcedAwake intervals inside the session that must be AWAKE (e.g. gaps between merged fragments).
  * @property baselineNadirBpm rolling median of the nadirs of the previous nights, or null if unknown. Ignored for a
- *   session shorter than `features.baselineMinSessionMin` (a nap is never compared with the baseline).
+ *   nap ([SessionMode.NAP], a session shorter than `napMode.maxSessionMin`): a nap is never compared with the baseline.
  */
 data class NightInput(
     val sessionStartMs: Long,
@@ -282,6 +282,27 @@ data class EstimationWarning(
     val detail: String = "",
 )
 
+/**
+ * How a session is processed, decided by its length alone
+ * ([io.github.alien2003.pulsestages.algo.params.NapModeParams.modeOf]: end − start of the merged session, gaps between
+ * fragments included).
+ */
+enum class SessionMode {
+    /**
+     * A whole night: a session at least `napMode.maxSessionMin` long (every session when that is 0). Estimated with the
+     * configured estimator, the bundle's main model and the night parameters; compared with the nadir baseline and
+     * counted for it; the stage-share sanity check applies.
+     */
+    NIGHT,
+
+    /**
+     * A nap: a session shorter than `napMode.maxSessionMin`. Estimated with `napMode.estimator`, the bundle's nap
+     * sub-model when it has one (otherwise the main model with its short-session bias), the night parameters with the
+     * nap overrides of `napMode` and its output policy; never compared with the nadir baseline nor counted for it.
+     */
+    NAP,
+}
+
 /** Which estimator produced the result. */
 enum class EstimatorType {
     /** The threshold rules (section 6): for comparison and as the fallback for sparse data. */
@@ -329,6 +350,8 @@ data class NightFlags(
  * @property featureNames names of the per-epoch feature values in [EpochResult.features].
  * @property nadirBpm lowest smoothed heart rate inside the session, or null without data.
  * @property hrSampleCount heart-rate samples used (in range, inside the analysis window, duplicates collapsed).
+ * @property mode whether the session was processed as a night or as a nap. [params] are the parameters as given; a nap
+ *   was estimated with `params.forMode(SessionMode.NAP)` (the nap overrides of `params.napMode` applied).
  */
 data class NightEstimate(
     val stages: List<StageInterval>,
@@ -344,6 +367,7 @@ data class NightEstimate(
     val featureNames: List<String>,
     val nadirBpm: Double?,
     val hrSampleCount: Int,
+    val mode: SessionMode = SessionMode.NIGHT,
 )
 
 /** Why a night was not estimated. */
@@ -356,6 +380,9 @@ enum class NotEstimatedReason {
 
     /** The session is shorter than `preprocess.minSessionMin`. */
     SESSION_TOO_SHORT,
+
+    /** The session is a nap ([SessionMode.NAP]) and `napMode.outputPolicy` is SKIP: naps are not estimated. */
+    NAP_SKIPPED,
 }
 
 /** Outcome of [io.github.alien2003.pulsestages.algo.SleepStager.run]. */

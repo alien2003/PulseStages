@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.algo
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
@@ -16,9 +17,9 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 
 /**
- * Naps (sessions shorter than `features.baselineMinSessionMin` / `post.proportionsMinSessionMin`, 180 min by default)
- * for every estimator: never compared with the nadir baseline, never checked or calibrated against whole-night stage
- * shares; nights keep both rules, and the thresholds set to 0 restore the behaviour without them.
+ * Naps (sessions shorter than `napMode.maxSessionMin`, 180 min by default) for every estimator: never compared with the
+ * nadir baseline, never checked or calibrated against whole-night stage shares (unless `napMode.post.checkProportions`);
+ * nights keep both rules, and the threshold set to 0 (no nap mode) restores the behaviour without them.
  */
 class NapTest {
     private val stager = SleepStager(SyntheticHybridModels.default)
@@ -57,7 +58,7 @@ class NapTest {
         assertFalse(estimate.flags.elevatedHr, "$case")
         assertFalse(WarningCode.ELEVATED_HR in codes(estimate), "$case")
         // Without the rule the same nap is flagged and its confidence lowered.
-        val off = case.params.copy(features = case.params.features.copy(baselineMinSessionMin = 0.0))
+        val off = case.params.copy(napMode = case.params.napMode.copy(maxSessionMin = 0.0))
         val flagged = estimate(nap, off)
         assertTrue(flagged.flags.elevatedHr, "$case")
         assertTrue(WarningCode.ELEVATED_HR in codes(flagged), "$case")
@@ -76,11 +77,21 @@ class NapTest {
         assertTrue(codes(estimate).none { it.name.startsWith("SANITY_") }, "$case: ${codes(estimate)}")
         assertFalse(WarningCode.PROPORTIONS_CALIBRATED in codes(estimate), "$case")
         assertFalse(estimate.flags.calibrated, "$case")
-        // With the threshold at 0 the night corridors apply to the nap again.
-        val off = strict.copy(post = strict.post.copy(proportionsMinSessionMin = 0.0))
+        // With the threshold at 0 the session is a night and the night corridors apply to it again; with
+        // napMode.post.checkProportions they apply to the nap (with the nap's corridors).
+        val off = strict.copy(napMode = strict.napMode.copy(maxSessionMin = 0.0))
         val checked = estimate(nap, off)
         assertTrue(WarningCode.SANITY_DEEP_LOW in codes(checked), "$case: ${codes(checked)}")
         assertTrue(checked.flags.lowConfidence, "$case")
+        val napChecked = strict.copy(napMode = strict.napMode.copy(post = strict.napMode.post.copy(checkProportions = true)))
+        val withCheck = estimate(nap, napChecked)
+        assertEquals(SessionMode.NAP, withCheck.mode, "$case")
+        assertTrue(WarningCode.SANITY_DEEP_LOW in codes(withCheck), "$case: ${codes(withCheck)}")
+        val napCorridor =
+            napChecked.copy(
+                napMode = napChecked.napMode.copy(post = napChecked.napMode.post.copy(sanityDeepMin = 0.0, sanityDeepMax = 1.0)),
+            )
+        assertTrue(codes(estimate(nap, napCorridor)).none { it.name.startsWith("SANITY_") }, "$case")
     }
 
     @ParameterizedTest

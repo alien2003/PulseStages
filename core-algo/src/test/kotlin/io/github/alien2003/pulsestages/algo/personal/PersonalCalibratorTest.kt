@@ -145,4 +145,30 @@ class PersonalCalibratorTest {
         val unknown = referenceNights(2).map { r -> r.copy(truth = r.truth.map { it.copy(stage = SleepStage.UNKNOWN) }) }
         assertThrows(IllegalArgumentException::class.java) { PersonalCalibrator(model).calibrate(unknown, AlgoParams()) }
     }
+
+    @Test
+    fun `reference naps are left out of the calibration`() {
+        val nights = referenceNights(6)
+        val naps =
+            referenceNights(4, shifted).mapIndexed { i, night ->
+                val end = night.input.sessionStartMs + 90 * 60_000L
+                ReferenceNight(
+                    night.input.copy(
+                        sessionStartMs = night.input.sessionStartMs + (10 + i) * day,
+                        sessionEndMs =
+                            end + (10 + i) * day,
+                    ),
+                    night.truth,
+                )
+            }
+        val params = pinned.copy(estimator = EstimatorType.HYBRID)
+
+        val withNaps = PersonalCalibrator(model).calibrate(nights + naps, params)
+        val nightsOnly = PersonalCalibrator(model).calibrate(nights, params)
+
+        assertEquals(nightsOnly.trainingNights, withNaps.trainingNights)
+        assertEquals(nightsOnly.heldOutNights, withNaps.heldOutNights)
+        assertEquals(nightsOnly.model, withNaps.model)
+        assertThrows(IllegalArgumentException::class.java) { PersonalCalibrator(model).calibrate(naps, params) }
+    }
 }

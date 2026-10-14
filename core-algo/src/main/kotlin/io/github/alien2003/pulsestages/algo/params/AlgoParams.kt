@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.algo.params
 
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import kotlinx.serialization.Serializable
 import kotlin.math.ceil
 
@@ -19,6 +20,7 @@ import kotlin.math.ceil
  * @property hybrid the hybrid estimator's decoder (the weights come from the model bundle).
  * @property post post-processing of every estimator's output.
  * @property personal personalization (calibration on reference nights, periodic EM).
+ * @property napMode the nap mode: which sessions are naps and how they are estimated and written ([NapModeParams]).
  */
 @Serializable
 data class AlgoParams(
@@ -31,7 +33,34 @@ data class AlgoParams(
     val hybrid: HybridParams = HybridParams(),
     val post: PostprocessParams = PostprocessParams(),
     val personal: PersonalParams = PersonalParams(),
-)
+    val napMode: NapModeParams = NapModeParams(),
+) {
+    /** These parameters with [type] as the estimator of nights and of naps (`estimator` and `napMode.estimator`). */
+    fun withEstimator(type: EstimatorType): AlgoParams = copy(estimator = type, napMode = napMode.copy(estimator = type))
+
+    /** The mode of a session lasting [durationMs] ([NapModeParams.modeOf]). */
+    fun modeOf(durationMs: Long): SessionMode = napMode.modeOf(durationMs)
+
+    /**
+     * The parameters in effect for a session of [mode]: these parameters for [SessionMode.NIGHT]; for
+     * [SessionMode.NAP] the estimator `napMode.estimator` and the post-processing and hybrid decoder parameters with the
+     * overrides of `napMode` applied (every other group unchanged, [napMode] included).
+     */
+    fun forMode(mode: SessionMode): AlgoParams =
+        when (mode) {
+            SessionMode.NIGHT -> {
+                this
+            }
+
+            SessionMode.NAP -> {
+                copy(
+                    estimator = napMode.estimator,
+                    post = napMode.post.applyTo(post),
+                    hybrid = napMode.hybrid.applyTo(hybrid),
+                )
+            }
+        }
+}
 
 /** Preprocessing (section 1 of the specification). */
 @Serializable
@@ -89,16 +118,11 @@ data class FeatureParams(
     val cycleMinDistanceMin: Double = 60.0,
     /** Ultradian minima: minimum prominence, bpm. */
     val cycleMinProminenceBpm: Double = 2.0,
-    /** Number of previous nights used for the baseline nadir (used by the caller that computes the baseline). */
-    val baselineNights: Int = 14,
     /**
-     * Sessions shorter than this many minutes are naps for the long-term heart-rate context: their nadir does not
-     * contribute to the rolling baseline (the caller that computes the baseline filters them, [countsForBaseline]),
-     * and they are never compared with it (no elevated-HR check: the estimators ignore a baseline given for such a
-     * session). A daytime nap's nadir is higher than a night's, so it would inflate the baseline and be flagged
-     * itself. 0 restores the behaviour without this rule (every session counts).
+     * Number of previous nights used for the baseline nadir (used by the caller that computes the baseline). Naps
+     * ([SessionMode.NAP], `napMode.maxSessionMin`) never count and are never compared with the baseline.
      */
-    val baselineMinSessionMin: Double = 180.0,
+    val baselineNights: Int = 14,
     /** Nadir above baseline by more than this percentage marks the night as "elevated HR". */
     val elevatedNightPct: Double = 12.0,
     /** On elevated nights the AWAKE threshold is raised by this amount of hrNorm. */
@@ -125,17 +149,7 @@ data class FeatureParams(
     val hrvMaxDistanceMin: Double = 5.0,
     /** Respiratory-rate variability: std of the per-epoch rate in ±[respiratoryHalfWindowEpochs]. */
     val respiratoryHalfWindowEpochs: Int = 5,
-) {
-    /** [baselineMinSessionMin] in whole milliseconds, rounded up (0 for a non-positive or undefined value). */
-    val baselineMinSessionMs: Long get() = minutesToWholeMs(baselineMinSessionMin)
-
-    /**
-     * Whether a session lasting [durationMs] (end − start, merged fragments and their gaps included) is a night for
-     * the rolling nadir baseline: at least [baselineMinSessionMin] long. Only such sessions contribute to the
-     * baseline and are compared with it.
-     */
-    fun countsForBaseline(durationMs: Long): Boolean = durationMs >= baselineMinSessionMs
-}
+)
 
 /**
  * [minutes] as whole milliseconds, rounded up, so that `durationMs >= minutesToWholeMs(minutes)` holds exactly when
@@ -401,8 +415,7 @@ enum class DurationModel {
  * Hybrid estimator (section 8). Model weights are not parameters; they come from the model bundle. The decoder
  * defaults ([durationModel], [timePriorWeight], [emissionWeight], [priorExponent]) are the values chosen by the
  * nested cross-validation of the open-dataset validation ([TrainedDefaults]); the pre-training values were EXPLICIT,
- * 1.0, 1.0 and 1.0. [shortSessionMaxMin] comes from the pre-registered nap experiment (ALGORITHM.md section 13.11;
- * 0 before it).
+ * 1.0, 1.0 and 1.0. Naps may override [durationModel], [emissionWeight] and [timePriorWeight] ([NapHybridParams]).
  */
 @Serializable
 data class HybridParams(
@@ -421,12 +434,6 @@ data class HybridParams(
      * frequent stages), values in between interpolate.
      */
     val priorExponent: Double = TrainedDefaults.HYBRID_PRIOR_EXPONENT,
-    /**
-     * Sessions shorter than this many minutes (naps, and short nights) are decoded with the bundle's short-session
-     * log-bias `stageLogBiasShort` instead of its `stageLogBias` (a bundle without `stageLogBiasShort` keeps
-     * `stageLogBias` for them); 0 disables the rule, every session then uses `stageLogBias`.
-     */
-    val shortSessionMaxMin: Double = TrainedDefaults.HYBRID_SHORT_SESSION_MAX_MIN,
 )
 
 /** What to write for epochs inside long data gaps. */
@@ -453,7 +460,8 @@ enum class LowConfidencePolicy {
 }
 
 /**
- * Post-processing (section 4).
+ * Post-processing (section 4). Naps use these values with the overrides of [NapPostprocessParams]; the sanity check and
+ * the proportion calibration run on naps only with `napMode.post.checkProportions`.
  *
  * @property minDeepMin shorter DEEP bouts (minutes) are absorbed by the neighbour with the higher posterior.
  * @property minRemMin shorter REM bouts (minutes) are absorbed likewise.
@@ -463,10 +471,6 @@ enum class LowConfidencePolicy {
  * @property sanityRemMax a night with more REM than this share is low-confidence.
  * @property sanityDeepMin a night with less DEEP than this share is low-confidence.
  * @property sanityConfidenceFactor night confidence multiplier when a sanity check fails.
- * @property proportionsMinSessionMin the sanity check and the proportion calibration run only for sessions at least
- *   this many minutes long (0 = always). Both compare the stage shares with whole-night ranges, which do not describe a
- *   nap (a 30–90 min nap often has no DEEP or no REM at all), so on naps they would only add misleading
- *   low-confidence flags or push the shares towards a night's.
  * @property targetDeepMin lower end of the DEEP share corridor of the calibration.
  * @property targetDeepMax upper end of the DEEP share corridor.
  * @property targetRemMin lower end of the REM share corridor.
@@ -489,7 +493,6 @@ data class PostprocessParams(
     val sanityRemMax: Double = 0.40,
     val sanityDeepMin: Double = 0.03,
     val sanityConfidenceFactor: Double = 0.7,
-    val proportionsMinSessionMin: Double = 180.0,
     /** Soft calibration of stage proportions towards the target ranges. */
     val calibrateProportions: Boolean = false,
     val targetDeepMin: Double = 0.10,
@@ -501,13 +504,7 @@ data class PostprocessParams(
     val calibrationMaxIterations: Int = 5,
     val lowConfidenceThreshold: Double = 0.45,
     val lowConfidencePolicy: LowConfidencePolicy = LowConfidencePolicy.KEEP,
-) {
-    /**
-     * Whether the sanity check and the proportion calibration apply to a session lasting [durationMs]: at least
-     * [proportionsMinSessionMin] long.
-     */
-    fun checksProportions(durationMs: Long): Boolean = durationMs >= minutesToWholeMs(proportionsMinSessionMin)
-}
+)
 
 /** Personalization (section 10). */
 @Serializable

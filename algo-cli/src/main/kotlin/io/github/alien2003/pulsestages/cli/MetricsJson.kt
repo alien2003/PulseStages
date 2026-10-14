@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.cli
 
 import io.github.alien2003.pulsestages.algo.metrics.ConfusionMatrix
 import io.github.alien2003.pulsestages.algo.metrics.StageMinutes
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import kotlinx.serialization.json.JsonArray
@@ -24,9 +25,11 @@ import kotlinx.serialization.json.put
  * - `meanNightKappa`, `medianNightKappa` over nights with a defined kappa;
  * - `perSubject`: `meanKappa` / `medianKappa` of the per-subject pooled kappas and the per-subject values;
  * - `minutesError`: mean absolute minutes error of DEEP, REM and AWAKE over the evaluated nights;
- * - `perNight`: id, subject, variant, estimator, kappa, accuracy, macroF1, coverage, confidence, scored chunks, the
- *   night's 4×4 confusion matrix (the pooled matrix is their sum, so results of several runs can be combined), truth
- *   and predicted minutes per stage, minute errors and warning codes.
+ * - `byMode`: the same summary (`nights`, `estimatorsUsed`, `warnings`, `pooled`, `meanNightKappa`,
+ *   `medianNightKappa`, `perSubject`, `minutesError`) for the sessions of each mode, `NIGHT` and `NAP`;
+ * - `perNight`: id, subject, variant, mode, estimator, kappa, accuracy, macroF1, coverage, confidence, scored chunks,
+ *   the night's 4×4 confusion matrix (the pooled matrix is their sum, so results of several runs can be combined),
+ *   truth and predicted minutes per stage, minute errors and warning codes.
  * Undefined numbers (e.g. kappa of a night with a single class) are null.
  */
 internal object MetricsJson {
@@ -38,8 +41,6 @@ internal object MetricsJson {
     ): JsonObject {
         val scored = results.filterIsInstance<NightResult.Scored>()
         val skipped = results.filterIsInstance<NightResult.Skipped>()
-        val pooled = scored.fold(ConfusionMatrix.EMPTY) { acc, r -> acc + r.score.confusion }
-        val nightKappas = scored.map { it.score.confusion.kappa }.filter { it.isFinite() }
         return buildJsonObject {
             gridEntry?.let { (index, patch) ->
                 put("index", index)
@@ -49,15 +50,45 @@ internal object MetricsJson {
             put("params", ParamsFiles.JSON.encodeToJsonElement(AlgoParams.serializer(), params))
             put("nights", nights(results.size, scored.size, skipped))
             put("skipped", JsonArray(skipped.map { skippedNight(it) }))
-            put("estimatorsUsed", counts(scored.map { it.estimator.name }))
-            put("warnings", counts(scored.flatMap { r -> r.warnings.map { it.name } }))
-            put("pooled", confusion(pooled))
-            putNumber("meanNightKappa", nightKappas.averageOrNaN())
-            putNumber("medianNightKappa", median(nightKappas))
-            put("perSubject", perSubject(scored))
-            put("minutesError", minutesError(scored))
+            summary(results)
+            put(
+                "byMode",
+                buildJsonObject {
+                    for (mode in SessionMode.entries) {
+                        val ofMode = results.filter { it.mode == mode }
+                        put(
+                            mode.name,
+                            buildJsonObject {
+                                put(
+                                    "nights",
+                                    nights(
+                                        ofMode.size,
+                                        ofMode.count { it is NightResult.Scored },
+                                        ofMode.filterIsInstance<NightResult.Skipped>(),
+                                    ),
+                                )
+                                summary(ofMode)
+                            },
+                        )
+                    }
+                },
+            )
             put("perNight", JsonArray(scored.map { night(it) }))
         }
+    }
+
+    /** estimatorsUsed, warnings, pooled, meanNightKappa, medianNightKappa, perSubject and minutesError of [results]. */
+    private fun JsonObjectBuilder.summary(results: List<NightResult>) {
+        val scored = results.filterIsInstance<NightResult.Scored>()
+        val pooled = scored.fold(ConfusionMatrix.EMPTY) { acc, r -> acc + r.score.confusion }
+        val nightKappas = scored.map { it.score.confusion.kappa }.filter { it.isFinite() }
+        put("estimatorsUsed", counts(scored.map { it.estimator.name }))
+        put("warnings", counts(scored.flatMap { r -> r.warnings.map { it.name } }))
+        put("pooled", confusion(pooled))
+        putNumber("meanNightKappa", nightKappas.averageOrNaN())
+        putNumber("medianNightKappa", median(nightKappas))
+        put("perSubject", perSubject(scored))
+        put("minutesError", minutesError(scored))
     }
 
     private fun nights(
@@ -76,6 +107,7 @@ internal object MetricsJson {
         buildJsonObject {
             put("id", result.record.id)
             put("subject", result.record.subject)
+            put("mode", result.mode.name)
             put("reason", result.reason)
         }
 
@@ -164,6 +196,7 @@ internal object MetricsJson {
             put("id", result.record.id)
             put("subject", result.record.subject)
             put("variant", result.record.variant?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("mode", result.mode.name)
             put("estimator", result.estimator.name)
             putNumber("kappa", confusion.kappa)
             putNumber("accuracy", confusion.accuracy)

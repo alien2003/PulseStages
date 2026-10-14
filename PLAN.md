@@ -16,6 +16,7 @@ from memory.
 | 5a | `:core-algo` (TDD): synthetic generator → preprocessing/features → RULES → HMM → post-processing → metrics → hybrid features, classifier inference, HSMM → facade, params hash, CSV; `:algo-cli` | tests green |
 | 5b | `tools/train`: dataset download (license-checked), OHealth emulation, steps from accelerometer, LOSO training/validation through `:algo-cli`, model bundle → `app/src/main/assets/models/`, numbers → `ALGORITHM.md` | done (run `loso-v2`, after the audit fixes): HYBRID-MLP (α = 1e-4, Walch + BIDSleep with BIDSleep steps coded as algo-cli computes them, EXPLICIT decoder, w_e 0.5, no time prior) κ 0.334 ± 0.133 on Walch PSG (worse 2-min variant, LOSO; 0.317 ± 0.019 over 4 seeds), but 25 % DEEP / 34 % REM predicted vs 14 / 23 % PSG; HMM defaults stay the physiology table (supervised estimates fail the validity gate). Then the pre-registered stage-proportion experiment (`docs/prereg/prereg-bias.md`; runs `bias-base`, `bias-base/bias`, `bias-final`; ALGORITHM.md §13.10): new decoder options `hybrid.priorExponent` (β, stays 1) and the bundle's `stageLogBias` (b); **proportion matching b adopted** — Walch κ 0.339 ± 0.169 (worse variant, mean2min; 0.348 instantaneous), summed per-night minute error 147 vs 219 min (DEEP 33, REM 41, AWAKE 19, LIGHT 53 min), shares DEEP 13–15 % / REM 20–24 % / LIGHT 57–59 % vs PSG 14 / 23 / 57 %, sanity flags 2–7 instead of 11–12 of 31 nights; κ only within noise of the baseline (Δκ +0.003 [−0.037, 0.038] mean2min; inner CV: b lost > 0.01 κ in 4 of 10 groups); cost: BIDSleep κ −0.03 and 12–15 of 253 BIDSleep nights with DEEP < 3 %. Audit fixes: `train.py bias-report` (pairwise B − A, per-code sanity flags, C's BASE fallbacks in 47 of 156 folds), `--allow-other-build` (the final build reproduces the whole experiment byte for byte), pre-registration committed under `docs/prereg/`. Bundle `pulsestages-walch+bidsleep-mlp-bias-final` installed; `TrainedDefaults.kt` regenerated; `ALGORITHM.md` |
 | 5c | Naps: pre-registered nap-proxy evaluation (`docs/prereg/prereg-naps.md`; runs `naps`, `naps-final`, `naps-verify`; ALGORITHM.md §13.11) on the `bias-base` fold artefacts, no retraining | done: proxies = the first 30–180 min of every Walch / BIDSleep night, no data after the end; night-level reproduction 1136 / 1136 decodes identical. Shipped default on Walch nap proxies (worse variant, L 30–120 pooled): accuracy 0.413, summed share error 93 pp, 19–30 % REM predicted where PSG has 1–9 %. b off for naps (B) is worse; **short-session bias b_short below 180 min (C-180) adopted** by the rule: accuracy 0.488, error 72 pp (paired ΔE −12 / −21 pp, Δaccuracy +0.07 / +0.10, CIs exclude 0; κ unchanged within noise, 0.1–0.3); BIDSleep the same direction. Naps stay rough (a 30-min nap is no better than "all LIGHT"; about 4 in 5 flagged low-confidence on the experiment's build, 33–41 % (`LOW_HR_RANGE` only) once the sanity check skips sessions under 180 min). Audit follow-up (post hoc, reporting only, `naps-rerun` / `naps-posthoc`): the committed code reproduces every stored file of `naps` byte for byte; at 150 / 170 min, which T = 180 also covers (short nights under the default 90-min filter), C-180 is no clear gain (ΔE +6 / +8 pp instantaneous, −14 / −10 pp mean2min; too little REM); C-180 vs C-120 within noise; RULES would have won the rule as a candidate (κ ≈ 0). New `hybrid.shortSessionMaxMin` = 180 (TrainedDefaults), bundle `stageLogBiasShort`; bundle `pulsestages-walch+bidsleep-mlp-naps-final` installed; the new build reproduces A on 568 / 568 nights and C-180 on 2840 / 2840 proxies, and so does the build merged with `proportionsMinSessionMin` (`naps-verify-merge`: only the `SANITY_*` codes of the proxies shorter than 180 min are gone) |
+| 5d | Night and nap processing modes (`napMode`, `SessionMode`; ALGORITHM.md §18): one nap threshold replacing three, nap estimator / output policy (STAGES, SLEEP_WAKE, SKIP) / post-processing and decoder overrides, optional nap model in the bundle, ledger schema 2, Naps settings group, nap badge and filter | done: default decodes unchanged (`NapModeRegressionTest`: 767 digests of the previous build; real nights + proxies byte-identical in `algo-cli`; `naps-verify-modes` 568 / 568 nights, 2840 / 2840 proxies); no nap model trained yet |
 | 6 | `:data-local` (Room, DataStore, logger), `:data-hc` (repository, night pipeline, Changes API sync, backfill, fake repository, idempotency tests) | |
 | 7 | `:work` (workers, scheduling, backoff), `:app` (Compose M3 UI, adaptive layouts, permissions, rationale activity, icon) | |
 | 8 | README (en + ru), ALGORITHM.md, CHANGELOG.md, screenshots; full check; install on the phone via `$ADB_WIN` | |
@@ -84,23 +85,26 @@ from memory.
   backfill or recompute requested before the deletion never re-writes the deleted nights.
 - **Spec vs. "prefer what wins on synthetic tests".** Where a choice can be measured on the open PSG dataset, the
   dataset decides (spec §9 forbids tuning on synthetic data); synthetic tests only guard invariants and regressions.
-- **Naps and the elevated-HR baseline** (`algo.features.baselineMinSessionMin`, default 180 min, 0..720, 0 = the old
-  rule). With `minSessionMin` lowered (the user estimates naps from 30 min) a daytime nap's nadir is higher than a
-  night's: it would inflate the 14-night median (fewer correct "elevated" flags on real nights) and be flagged itself.
-  Sessions shorter than the threshold (end − start of the merged session, as `minSessionMin` measures it) therefore
-  (a) do not contribute: their `night_baselines` row is still written, but `NightBaselineDao.recentNadirs` joins
-  `estimated_nights` and counts only rows whose session is long enough (the limit applies after the filter, so the
-  baseline is the last 14 *nights*; a changed threshold applies to the stored history at once; no Room schema change,
-  so no migration), and (b) get `baselineNadirBpm = null` in `NightInputReader`, the one reader used by the pipeline,
-  the night detail, the reference comparison and personalization; `NightPreparer` in `:core-algo` also ignores a
-  baseline handed in for a nap (algo-cli, tests). Part of the params hash (the user has no estimated nights yet).
-- **Naps and the stage-share checks** (`algo.post.proportionsMinSessionMin`, default 180 min, 0..720, 0 = the old
-  rule). The sanity check (DEEP 3–35 %, REM ≤ 40 %) and the optional proportion calibration describe whole nights; a
-  30–90-min nap often has no DEEP or REM, so every such nap would get `SANITY_DEEP_LOW` and a low-confidence flag.
-  Both run only for sessions at least that long. A separate parameter, not `baselineMinSessionMin`: it belongs to the
-  post-processing and is validated / shown there.
+- **Naps and the elevated-HR baseline** (introduced as `algo.features.baselineMinSessionMin`, default 180 min, 0..720, 0
+  = the old rule; now the nap threshold `algo.napMode.maxSessionMin`, see "Two processing modes" below). With
+  `minSessionMin` lowered (the user estimates naps from 30 min) a daytime nap's nadir is higher than a night's: it would
+  inflate the 14-night median (fewer correct "elevated" flags on real nights) and be flagged itself. Sessions shorter
+  than the threshold (end − start of the merged session, as `minSessionMin` measures it) therefore (a) do not
+  contribute: their `night_baselines` row is still written, but `NightBaselineDao.recentNadirs` joins `estimated_nights`
+  and counts only rows whose session is long enough (the limit applies after the filter, so the baseline is the last 14
+  *nights*; a changed threshold applies to the stored history at once; no Room schema change, so no migration), and (b)
+  get `baselineNadirBpm = null` in `NightInputReader`, the one reader used by the pipeline, the night detail, the
+  reference comparison and personalization; `NightPreparer` in `:core-algo` also ignores a baseline handed in for a nap
+  (algo-cli, tests). Part of the params hash (the user has no estimated nights yet).
+- **Naps and the stage-share checks** (introduced as `algo.post.proportionsMinSessionMin`, default 180 min, 0..720, 0 =
+  the old rule; now `algo.napMode.maxSessionMin` with `algo.napMode.post.checkProportions` = false). The sanity check
+  (DEEP 3–35 %, REM ≤ 40 %) and the optional proportion calibration describe whole nights; a 30–90-min nap often has no
+  DEEP or REM, so every such nap would get `SANITY_DEEP_LOW` and a low-confidence flag. Both run only for sessions at
+  least that long. It was first a separate parameter, not `baselineMinSessionMin` (it belongs to the post-processing);
+  the two modes below unified the thresholds.
 - **Naps and the stage correction.** The app skips sessions under its source setting `minSessionMin` (90 min); a user
-  who lowers it gets naps estimated. Sessions shorter than `hybrid.shortSessionMaxMin` = 180 min use the bundle's
+  who lowers it gets naps estimated. Sessions shorter than `hybrid.shortSessionMaxMin` = 180 min (now
+  `napMode.maxSessionMin`) use the bundle's
   `stageLogBiasShort` instead of the whole-night `stageLogBias` (pre-registered nap experiment, ALGORITHM.md §13.11).
   It lives in the bundle for the same reason as b (a statistic of the classifier it corrects); the threshold is an
   AlgoParams value. A bundle without `stageLogBiasShort` keeps b on short sessions. With the default `minSessionMin`
@@ -121,8 +125,42 @@ from memory.
   ending < 30 min before bedtime becomes the first fragment of the night (it cannot be told from a night split at an
   awakening; the merged nadir is the night's; `mergeGapMin` = 0 keeps them apart). Coverage gates are shares of the
   session and work the same on a 30-min nap. `LOW_HR_RANGE` stays (a nap's small P50 − P10 really makes hrNorm
-  unreliable). Population EM (HMM only, not with the default HYBRID bundle) still pools naps. Details: ALGORITHM.md
-  §4, §8, §9.
+  unreliable). Population EM (HMM only, not with the default HYBRID bundle) still pooled naps; since the two
+  processing modes it uses nights only. Details: ALGORITHM.md §4, §8, §9.
+- **Two processing modes, night and nap** (`algo.napMode`, `SessionMode`; ALGORITHM.md §18). Three thresholds of
+  180 min each separated naps from nights (`features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`,
+  `post.proportionsMinSessionMin`); a session could be a nap for one rule and a night for another, and nothing else
+  could differ between the two. They are replaced by one threshold `napMode.maxSessionMin` (180 min from
+  `TrainedDefaults`, 0..720, 0 = no naps; strictly shorter = nap; the source setting `minSessionMin` stays the global
+  minimum) and a nap gets its own estimator (`napMode.estimator`, HYBRID), output policy (`napMode.outputPolicy`:
+  STAGES / SLEEP_WAKE / SKIP, default STAGES), post-processing overrides (`napMode.post`: minimum bouts, sanity
+  corridors, `checkProportions` = false, low-confidence threshold and policy) and HYBRID decoder overrides
+  (`napMode.hybrid`: duration model, emission and time-prior weights). Decisions:
+  - **Behaviour is unchanged by default.** All three old thresholds defaulted to 180, so one threshold of 180 decodes
+    every session as before; this was proved on synthetic sessions (`NapModeRegressionTest`, 767 digests recorded with
+    the previous build) and on the real nights and nap proxies of `tools/train` (old vs new `algo-cli`, per-epoch
+    output byte-identical; `train.py naps-verify --out-run naps-verify-modes`). Settings files with the old keys load
+    with them ignored (no migration: no value other than the shared default was ever recommended).
+  - **Overrides are nullable** (null = the night's value) rather than copies of the night's defaults, so a parameter
+    patch (θ_g grid, a user setting) moves naps with nights unless a nap value is set, and the defaults need no
+    duplication. The nap estimator is not nullable: HYBRID is the validated choice for naps (§13.11), and `--estimator`
+    of `algo-cli` sets both.
+  - **Nap model in the bundle, optional.** `HybridModel.nap` (`NapSubModel`) carries a complete second set of
+    components, validated like the main ones, part of the fingerprint only when present (the shipped bundle keeps its
+    fingerprint). Without it naps are decoded by the main model with `stageLogBiasShort`, exactly as before; an
+    incompatible nap section sends naps (only) to the HMM fallback. Personal bias deltas are fitted on nights for the
+    main model and are never applied to a nap model. No nap model is shipped until one passes the pre-registered nap
+    protocol (`docs/prereg/prereg-naps.md`); `algo-cli --fold-models` takes fold bundles with their own nap sections
+    so that check stays out-of-fold.
+  - **SLEEP_WAKE writes AWAKE / SLEEPING only** (Health Connect's generic sleeping stage for LIGHT, DEEP, REM and
+    no-data spans), for readers that want naps without a rough stage breakdown; the ledger row keeps the estimated
+    stages (`sleepWakeOnly` = true) so the night detail still shows them. **SKIP** is checked before any data is read:
+    the session is NOT_ESTIMATED with `NAP_SKIPPED` and an earlier output for it is deleted on the next run.
+  - **Ledger schema 2** (`estimated_nights.mode`, `sleepWakeOnly`; migration 1 → 2 with an exported schema and a
+    migration test; rows of sessions shorter than 180 min, the version-1 threshold, become naps). The notes JSON has
+    `"mode"`; the night detail, reference comparison and personalization take the mode of the session; calibration
+    and population EM use nights only; Compare splits kappa / accuracy by mode when the reference sessions include
+    naps; Home counts written nights and naps apart; the Nights list has a nap badge and an All / Nights / Naps filter.
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 

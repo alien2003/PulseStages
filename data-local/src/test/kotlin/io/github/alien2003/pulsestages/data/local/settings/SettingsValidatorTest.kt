@@ -6,6 +6,9 @@ import io.github.alien2003.pulsestages.algo.params.FeatureParams
 import io.github.alien2003.pulsestages.algo.params.Gaussian
 import io.github.alien2003.pulsestages.algo.params.HmmParams
 import io.github.alien2003.pulsestages.algo.params.MeanBouts
+import io.github.alien2003.pulsestages.algo.params.NapHybridParams
+import io.github.alien2003.pulsestages.algo.params.NapModeParams
+import io.github.alien2003.pulsestages.algo.params.NapPostprocessParams
 import io.github.alien2003.pulsestages.algo.params.PersonalParams
 import io.github.alien2003.pulsestages.algo.params.PostprocessParams
 import io.github.alien2003.pulsestages.algo.params.PreprocessParams
@@ -213,25 +216,39 @@ class SettingsValidatorTest {
     }
 
     @Test
-    fun `the nap thresholds accept 0 to 720 minutes`() {
-        fun thresholds(
-            baseline: Double,
-            proportions: Double,
-        ) = algo {
-            copy(
-                features = features.copy(baselineMinSessionMin = baseline),
-                post = post.copy(proportionsMinSessionMin = proportions),
-            )
-        }
+    fun `the nap threshold accepts 0 to 720 minutes and the nap overrides their ranges`() {
+        fun nap(change: NapModeParams.() -> NapModeParams) = algo { copy(napMode = napMode.change()) }
+
+        val p = "algo.napMode"
         assertAll(
-            { assertValid(thresholds(0.0, 0.0)) },
-            { assertValid(thresholds(720.0, 720.0)) },
-            { assertValid(thresholds(30.0, 90.5)) },
-            { assertRejected(thresholds(-1.0, 180.0), "algo.features.baselineMinSessionMin") },
-            { assertRejected(thresholds(720.5, 180.0), "algo.features.baselineMinSessionMin") },
-            { assertRejected(thresholds(Double.NaN, 180.0), "algo.features.baselineMinSessionMin", SettingsErrorCode.NOT_FINITE) },
-            { assertRejected(thresholds(180.0, -0.5), "algo.post.proportionsMinSessionMin") },
-            { assertRejected(thresholds(180.0, 721.0), "algo.post.proportionsMinSessionMin") },
+            { assertValid(nap { copy(maxSessionMin = 0.0) }) },
+            { assertValid(nap { copy(maxSessionMin = 720.0) }) },
+            { assertValid(nap { copy(maxSessionMin = 90.5) }) },
+            { assertRejected(nap { copy(maxSessionMin = -1.0) }, "$p.maxSessionMin") },
+            { assertRejected(nap { copy(maxSessionMin = 720.5) }, "$p.maxSessionMin") },
+            { assertRejected(nap { copy(maxSessionMin = Double.NaN) }, "$p.maxSessionMin", SettingsErrorCode.NOT_FINITE) },
+            { assertValid(nap { copy(post = NapPostprocessParams(minDeepMin = 0.0, sanityDeepMin = 0.0, sanityDeepMax = 1.0)) }) },
+            { assertRejected(nap { copy(post = NapPostprocessParams(minDeepMin = -1.0)) }, "$p.post.minDeepMin") },
+            { assertRejected(nap { copy(post = NapPostprocessParams(minRemMin = -1.0)) }, "$p.post.minRemMin") },
+            { assertRejected(nap { copy(post = NapPostprocessParams(minAwakeMin = -1.0)) }, "$p.post.minAwakeMin") },
+            { assertRejected(nap { copy(post = NapPostprocessParams(sanityRemMax = 1.5)) }, "$p.post.sanityRemMax") },
+            { assertRejected(nap { copy(post = NapPostprocessParams(lowConfidenceThreshold = -0.1)) }, "$p.post.lowConfidenceThreshold") },
+            { assertRejected(nap { copy(hybrid = NapHybridParams(emissionWeight = -1.0)) }, "$p.hybrid.emissionWeight") },
+            { assertRejected(nap { copy(hybrid = NapHybridParams(timePriorWeight = -1.0)) }, "$p.hybrid.timePriorWeight") },
+            // The nap DEEP corridor with the night's other end (0.03..0.35) must not be reversed.
+            {
+                assertRejected(
+                    nap { copy(post = NapPostprocessParams(sanityDeepMin = 0.5)) },
+                    "$p.post.sanityDeepMin",
+                    SettingsErrorCode.MIN_ABOVE_MAX,
+                )
+            },
+            {
+                assertRejected(
+                    nap { copy(post = NapPostprocessParams(sanityDeepMax = 0.01)) },
+                    "$p.post.sanityDeepMax",
+                )
+            },
         )
     }
 
@@ -293,7 +310,6 @@ class SettingsValidatorTest {
             { assertRejected(algo { copy(hybrid = hybrid.copy(timePriorWeight = -1.0)) }, "algo.hybrid.timePriorWeight") },
             { assertRejected(algo { copy(hybrid = hybrid.copy(emissionWeight = -1.0)) }, "algo.hybrid.emissionWeight") },
             { assertRejected(algo { copy(hybrid = hybrid.copy(priorExponent = -0.25)) }, "algo.hybrid.priorExponent") },
-            { assertRejected(algo { copy(hybrid = hybrid.copy(shortSessionMaxMin = -1.0)) }, "algo.hybrid.shortSessionMaxMin") },
             { assertRejected(algo { copy(rules = rules.copy(remMinT = 1.5)) }, "algo.rules.remMinT") },
             {
                 assertRejected(

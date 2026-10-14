@@ -2,7 +2,9 @@ package io.github.alien2003.pulsestages.ui.settings
 
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.params.DurationModel
 import io.github.alien2003.pulsestages.algo.params.EmissionTable
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.fake.FakeSettingsRepository
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
@@ -118,25 +120,50 @@ class SettingsViewModelTest {
             }
 
         @Test
-        fun `the nap thresholds are minutes from 0 to 720 and make nights stale`() =
+        fun `the nap threshold is minutes from 0 to 720 and makes nights stale`() =
             runTest(main.dispatcher) {
                 val vm = viewModel()
-                vm.onEdit(SettingsEdit.Text("algo.features.baselineMinSessionMin", "30"))
-                vm.onEdit(SettingsEdit.Text("algo.post.proportionsMinSessionMin", "0"))
-                assertEquals(30.0, repository.current.algo.features.baselineMinSessionMin)
-                assertEquals(0.0, repository.current.algo.post.proportionsMinSessionMin)
+                vm.onEdit(SettingsEdit.Text("algo.napMode.maxSessionMin", "30"))
+                assertEquals(30.0, repository.current.algo.napMode.maxSessionMin)
                 assertTrue(
                     vm.state.value.messages
                         .any { it.action != null },
                     "part of the params hash: recompute offered",
                 )
 
-                vm.onEdit(SettingsEdit.Text("algo.features.baselineMinSessionMin", "721"))
+                vm.onEdit(SettingsEdit.Text("algo.napMode.maxSessionMin", "721"))
 
-                assertEquals(30.0, repository.current.algo.features.baselineMinSessionMin)
-                val problem = vm.problemsOf("algo.features.baselineMinSessionMin").single() as FieldProblem.Invalid
+                assertEquals(30.0, repository.current.algo.napMode.maxSessionMin)
+                val problem = vm.problemsOf("algo.napMode.maxSessionMin").single() as FieldProblem.Invalid
                 assertEquals(SettingsErrorCode.OUT_OF_RANGE, problem.error.code)
                 assertEquals("0.0..720.0", problem.error.constraint)
+            }
+
+        @Test
+        fun `a nap override takes a number, an empty field means the night's value`() =
+            runTest(main.dispatcher) {
+                val vm = viewModel()
+                val path = "algo.napMode.post.minDeepMin"
+                val spec = checkNotNull(SettingsCatalog.spec(path)) as OptionalDoubleSpec
+                assertEquals("", vm.state.value.textOf(spec), "no override: an empty field")
+                assertEquals(repository.current.algo.post.minDeepMin, spec.inherited(repository.current))
+
+                vm.onEdit(SettingsEdit.Text(path, "12,5"))
+                assertEquals(12.5, repository.current.algo.napMode.post.minDeepMin)
+                vm.onEdit(SettingsEdit.Text(path, "twelve"))
+                assertEquals(listOf(FieldProblem.NotANumber(integer = false)), vm.problemsOf(path))
+                assertEquals(12.5, repository.current.algo.napMode.post.minDeepMin, "an invalid text is not stored")
+                vm.onEdit(SettingsEdit.Text(path, "-3"))
+                assertEquals(SettingsErrorCode.OUT_OF_RANGE, (vm.problemsOf(path).single() as FieldProblem.Invalid).error.code)
+                vm.onEdit(SettingsEdit.Text(path, "  "))
+                assertEquals(null, repository.current.algo.napMode.post.minDeepMin, "empty again: the night's value")
+
+                vm.onEdit(SettingsEdit.Choice("algo.napMode.hybrid.durationModel", "GEOMETRIC"))
+                assertEquals(DurationModel.GEOMETRIC, repository.current.algo.napMode.hybrid.durationModel)
+                vm.onEdit(SettingsEdit.Choice("algo.napMode.hybrid.durationModel", SAME_AS_NIGHTS_KEY))
+                assertEquals(null, repository.current.algo.napMode.hybrid.durationModel)
+                vm.onEdit(SettingsEdit.Choice("algo.napMode.outputPolicy", "SKIP"))
+                assertEquals(NapOutputPolicy.SKIP, repository.current.algo.napMode.outputPolicy)
             }
 
         @Test

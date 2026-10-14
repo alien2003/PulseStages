@@ -120,6 +120,27 @@ class DoubleSpec(
 ) : SettingSpec
 
 /**
+ * A decimal number that may be left empty, edited with a number field: an empty field stores null, which for the nap
+ * overrides means "the night's value"; the field then shows that value ([inherited]) as its placeholder.
+ *
+ * @property read current value, or null.
+ * @property write settings with the new value (null = empty field).
+ * @property inherited the value that applies while the field is empty (the night's value).
+ * @property bounds human-readable accepted values, or null.
+ * @property unit unit shown with the value, if any.
+ */
+class OptionalDoubleSpec(
+    override val path: String,
+    override val title: UiText,
+    override val hint: UiText,
+    val read: (AppSettings) -> Double?,
+    val write: (AppSettings, Double?) -> AppSettings,
+    val inherited: (AppSettings) -> Double,
+    val bounds: UiText? = null,
+    val unit: UiText? = null,
+) : SettingSpec
+
+/**
  * A local time of day in minutes after midnight, edited with a time picker.
  *
  * @property read current value.

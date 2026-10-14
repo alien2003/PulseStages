@@ -47,6 +47,7 @@ import io.github.alien2003.pulsestages.ui.settings.ChoiceSpec
 import io.github.alien2003.pulsestages.ui.settings.ChoiceStyle
 import io.github.alien2003.pulsestages.ui.settings.DoubleSpec
 import io.github.alien2003.pulsestages.ui.settings.IntSpec
+import io.github.alien2003.pulsestages.ui.settings.OptionalDoubleSpec
 import io.github.alien2003.pulsestages.ui.settings.RangeSpec
 import io.github.alien2003.pulsestages.ui.settings.SettingSpec
 import io.github.alien2003.pulsestages.ui.settings.SettingsActions
@@ -302,6 +303,7 @@ class SettingsRenderTest(
         when (spec) {
             is IntSpec -> spec.unit
             is DoubleSpec -> spec.unit
+            is OptionalDoubleSpec -> spec.unit
             else -> null
         }
 
@@ -314,7 +316,9 @@ class SettingsRenderTest(
                     .first { it.key == spec.read(settings.current) }
                     .label
                     .resolve(resources)
-            compose.onNode(hasText(current) and !hasAnyAncestor(isPopup())).performScrollTo().performClick()
+            // Several dropdowns may show the same option ("Same as nights"): the field is found by its label too.
+            val title = spec.title.resolve(resources)
+            compose.onNode(hasText(current) and hasText(title) and !hasAnyAncestor(isPopup())).performScrollTo().performClick()
             host.idle()
             spec.options.forEach { option ->
                 compose.onNode(hasText(option.label.resolve(resources)) and hasAnyAncestor(isPopup())).assertExists()
@@ -369,6 +373,10 @@ class SettingsRenderTest(
 
                 is DoubleSpec -> {
                     invalidDouble(spec, typo)
+                }
+
+                is OptionalDoubleSpec -> {
+                    SettingsEdit.Text(spec.path, if (typo) "0,5," else "-1000000")
                 }
 
                 is TextSpec -> {

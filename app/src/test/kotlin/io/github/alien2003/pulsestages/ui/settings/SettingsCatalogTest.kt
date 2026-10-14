@@ -68,6 +68,7 @@ class SettingsCatalogTest {
             is ChoiceSpec -> spec.write(s, spec.options.first { it.key != spec.read(s) }.key)
             is IntSpec -> spec.write(s, spec.read(s) + 2)
             is DoubleSpec -> spec.write(s, spec.read(s) + 0.25)
+            is OptionalDoubleSpec -> spec.write(s, (spec.read(s) ?: spec.inherited(s)) + 0.25)
             is TimeSpec -> spec.write(s, (spec.read(s) + 1) % MINUTES_PER_DAY)
             is TextSpec -> spec.write(s, "Stages {version}")
             is RangeSpec -> spec.write(s, spec.readMin(s) - 0.01, spec.readMax(s) + 0.01)
@@ -82,6 +83,7 @@ class SettingsCatalogTest {
             is ChoiceSpec -> assertNotEquals(spec.read(defaults), spec.read(changed), spec.path)
             is IntSpec -> assertEquals(spec.read(defaults) + 2, spec.read(changed), spec.path)
             is DoubleSpec -> assertTrue(abs(spec.read(defaults) + 0.25 - spec.read(changed)) < 1e-12, spec.path)
+            is OptionalDoubleSpec -> assertTrue(abs(spec.inherited(defaults) + 0.25 - checkNotNull(spec.read(changed))) < 1e-12, spec.path)
             is TimeSpec -> assertEquals((spec.read(defaults) + 1) % MINUTES_PER_DAY, spec.read(changed), spec.path)
             is TextSpec -> assertEquals("Stages {version}", spec.read(changed), spec.path)
             is RangeSpec -> assertTrue(spec.readMin(changed) < spec.readMin(defaults) && spec.readMax(changed) > spec.readMax(defaults))
@@ -107,6 +109,38 @@ class SettingsCatalogTest {
                 mapOf(prefix to element)
             }
         }
+
+    @Test
+    fun `the nap overrides are empty by default and inherit the night's values`() {
+        val overrides = SettingsCatalog.specsByPath.values.filterIsInstance<OptionalDoubleSpec>()
+        assertTrue(overrides.size >= 9, "every numeric nap override has an optional field: ${overrides.map { it.path }}")
+        overrides.forEach { spec ->
+            assertTrue(spec.path.startsWith("algo.napMode."), spec.path)
+            assertEquals(null, spec.read(defaults), spec.path)
+            val night = spec.path.removePrefix("algo.napMode.").substringBefore('.')
+            assertTrue(night == "post" || night == "hybrid", spec.path)
+        }
+        val choices =
+            SettingsCatalog.specsByPath.values
+                .filterIsInstance<ChoiceSpec>()
+                .filter { it.path.startsWith("algo.napMode.") }
+        assertEquals(
+            setOf(
+                "algo.napMode.outputPolicy",
+                "algo.napMode.estimator",
+                "algo.napMode.post.lowConfidencePolicy",
+                "algo.napMode.hybrid.durationModel",
+            ),
+            choices.map { it.path }.toSet(),
+        )
+        assertEquals(
+            SAME_AS_NIGHTS_KEY,
+            checkNotNull(SettingsCatalog.spec("algo.napMode.hybrid.durationModel") as ChoiceSpec).read(defaults),
+        )
+        assertTrue(SettingsCatalog.spec("algo.features.baselineMinSessionMin") == null, "the old thresholds are gone")
+        assertTrue(SettingsCatalog.spec("algo.hybrid.shortSessionMaxMin") == null)
+        assertTrue(SettingsCatalog.spec("algo.post.proportionsMinSessionMin") == null)
+    }
 
     private companion object {
         const val MINUTES_PER_DAY = 1440

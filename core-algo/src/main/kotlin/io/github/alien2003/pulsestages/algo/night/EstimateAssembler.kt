@@ -8,6 +8,7 @@ import io.github.alien2003.pulsestages.algo.model.EstimationWarning
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightFlags
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.StageProbabilities
 import io.github.alien2003.pulsestages.algo.post.PostprocessContext
 import io.github.alien2003.pulsestages.algo.post.PostprocessResult
@@ -26,8 +27,8 @@ internal class ExtraFeatures(
 /** Builds the [NightEstimate] from a prepared night and its post-processed labels. */
 internal object EstimateAssembler {
     /**
-     * The post-processing context of [night]; the stage-share checks run only for a session of at least
-     * `post.proportionsMinSessionMin` ([io.github.alien2003.pulsestages.algo.params.PostprocessParams.checksProportions]).
+     * The post-processing context of [night]; the stage-share checks run on every night and on a nap only with
+     * `napMode.post.checkProportions`.
      */
     fun context(night: PreparedNight): PostprocessContext =
         PostprocessContext(
@@ -35,7 +36,7 @@ internal object EstimateAssembler {
             night.sessionDataMask,
             night.forcedAwakeMask,
             night.coverage,
-            checkProportions = night.params.post.checksProportions(night.input.sessionEndMs - night.input.sessionStartMs),
+            checkProportions = night.mode == SessionMode.NIGHT || night.params.napMode.post.checkProportions,
         )
 
     /**
@@ -86,9 +87,9 @@ internal object EstimateAssembler {
             coverage = night.coverage,
             confidence = confidence(night, post),
             perEpoch = perEpoch,
-            params = night.params,
+            params = night.configuredParams,
             algoVersion = ALGO_VERSION,
-            paramsHash = ParamsHasher.hash(night.params),
+            paramsHash = ParamsHasher.hash(night.configuredParams),
             estimator = type,
             warnings = night.warnings + estimatorWarnings + post.warnings,
             flags =
@@ -101,6 +102,7 @@ internal object EstimateAssembler {
             featureNames = if (extra == null) BaseFeatures.NAMES else BaseFeatures.NAMES + extra.names,
             nadirBpm = night.statistics.nadirBpm.takeUnless { it.isNaN() },
             hrSampleCount = pre.sampleCount,
+            mode = night.mode,
         )
     }
 }

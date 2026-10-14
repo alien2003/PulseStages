@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.data.hc.usecase
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.personal.CalibrationResult
 import io.github.alien2003.pulsestages.algo.personal.PersonalCalibrator
@@ -133,13 +134,15 @@ sealed interface EmRunResult {
  * - [calibrate]: supervised calibration on reference nights with core-algo's [PersonalCalibrator] (classifier bias
  *   deltas for the bundled hybrid model, HMM emission means); the model is stored as the active CALIBRATED model and
  *   the kappa before / after on the held-out (latest) reference nights is returned. Refused while personalization is
- *   switched off (the model would not be applied).
+ *   switched off (the model would not be applied). Reference naps (sessions shorter than `napMode.maxSessionMin`) are
+ *   left out: the calibration fits the night model.
  * - [resetToGlobal]: deactivates every personal model.
  * - [maybeRunPopulationEm]: when `personal.enabled` and the estimates use the HMM emissions (estimator HMM, or HYBRID
- *   without a compatible bundle, which falls back to the HMM), every `personal.emEveryNights` newly estimated nights (counted
- *   against [SyncStateStore]'s `lastEmAdaptationNightCount`) the inputs of the latest [EM_MAX_NIGHTS] estimated nights
- *   are re-read from Health Connect and core-algo's [PopulationEmAdapter] adapts the HMM emissions (starting from the
- *   active EM model, shrunk towards the global table); the result is stored as the active EM model. While a CALIBRATED
+ *   without a compatible bundle, which falls back to the HMM), every `personal.emEveryNights` newly estimated nights
+ *   (naps neither count nor take part; counted against [SyncStateStore]'s `lastEmAdaptationNightCount`) the inputs
+ *   of the latest [EM_MAX_NIGHTS] estimated nights are re-read from Health Connect and core-algo's
+ *   [PopulationEmAdapter] adapts the HMM emissions (starting from the active EM model, shrunk towards the global
+ *   table); the result is stored as the active EM model. While a CALIBRATED
  *   model is active, EM is skipped: the supervised calibration is more trustworthy than unsupervised EM, and EM would
  *   move its means away from the labelled data (and σ adapted around other means would not fit the calibrated means).
  *   When the counter is due but the reads fail (quota, permission), the counter is not advanced, so the next run tries
@@ -184,7 +187,16 @@ class PersonalizationService
             params: AlgoParams,
         ): CalibrationOutcome {
             val bundle = hybridModels.hybridModel()
-            val nights = referenceNights.map { it.toCalibrationNight() }
+            val nights =
+                referenceNights
+                    .filter { params.modeOf(it.input.sessionEndMs - it.input.sessionStartMs) == SessionMode.NIGHT }
+                    .map { it.toCalibrationNight() }
+            if (nights.isEmpty()) {
+                return CalibrationOutcome.NotCalibrated(
+                    "no reference nights: every reference session is a nap (shorter than napMode.maxSessionMin = " +
+                        "${params.napMode.maxSessionMin} min), and naps are not used for calibration",
+                )
+            }
             return try {
                 val result = withContext(estimationDispatcher) { PersonalCalibrator(bundle).calibrate(nights, params) }
                 val id = store.saveActive(result.model, PersonalModelKind.CALIBRATED)
@@ -347,18 +359,21 @@ class PersonalizationService
             private const val TAG = "Personalization"
 
             /**
-             * Whether estimates with [params] use the HMM emission μ/σ that population EM adapts: estimator HMM, or
-             * HYBRID when [bundle] is missing or incompatible with this build (HYBRID then falls back to the HMM). RULES
-             * and HYBRID with a usable bundle never use them.
+             * Whether estimates with [params] use the HMM emission μ/σ that population EM adapts: the estimator of the
+             * nights or of the naps (`napMode.estimator`) is HMM, or HYBRID when [bundle] is missing or incompatible with
+             * this build (HYBRID then falls back to the HMM). RULES and HYBRID with a usable bundle never use them. EM
+             * itself learns from nights only (naps are left out, see [PopulationEmAdapter]).
              */
             fun usesHmmEmissions(
                 params: AlgoParams,
                 bundle: HybridModel?,
             ): Boolean =
-                when (params.estimator) {
-                    EstimatorType.HMM -> true
-                    EstimatorType.HYBRID -> bundle == null || bundle.compatibilityProblem() != null
-                    EstimatorType.RULES -> false
+                listOf(params.estimator, params.napMode.estimator).distinct().any { estimator ->
+                    when (estimator) {
+                        EstimatorType.HMM -> true
+                        EstimatorType.HYBRID -> bundle == null || bundle.compatibilityProblem() != null
+                        EstimatorType.RULES -> false
+                    }
                 }
 
             /** Population EM uses at most this many of the latest estimated nights. */

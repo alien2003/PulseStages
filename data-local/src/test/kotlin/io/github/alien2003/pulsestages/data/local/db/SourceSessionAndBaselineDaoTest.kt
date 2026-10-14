@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.local.db
 
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.local.testutil.DatabaseTest
 import io.github.alien2003.pulsestages.data.local.testutil.FlowRecorder
 import io.github.alien2003.pulsestages.data.local.testutil.HOUR_MS
@@ -103,9 +104,13 @@ class SourceSessionDaoTest : DatabaseTest() {
             val nights = db.estimatedNightDao()
             nights.upsert(night("ps:fresh", startMs = 0, algoVersion = 1, paramsHash = "h"))
             nights.upsert(night("ps:stale", startMs = 24 * HOUR_MS, algoVersion = 1, paramsHash = "old"))
+            nights.upsert(night("ps:nap", startMs = 48 * HOUR_MS, hours = 1, paramsHash = "h").copy(mode = SessionMode.NAP))
+            nights.upsert(
+                night("ps:skipped-nap", startMs = 72 * HOUR_MS, hours = 1, status = NightStatus.NOT_ESTIMATED).copy(mode = SessionMode.NAP),
+            )
 
             assertEquals(
-                HomeCounters(found = 8, estimated = 2, skipped = 5, failed = 1, stale = 1),
+                HomeCounters(found = 8, estimated = 2, skipped = 5, failed = 1, stale = 1, nights = 2, naps = 1),
                 dao.observeHomeCounters(1, "h").first(),
             )
         }
@@ -122,7 +127,7 @@ class SourceSessionDaoTest : DatabaseTest() {
 
             val last = recorder.awaitMatching { it.stale == 1 }
             recorder.cancel()
-            assertEquals(HomeCounters(found = 1, estimated = 1, skipped = 0, failed = 0, stale = 1), last)
+            assertEquals(HomeCounters(found = 1, estimated = 1, skipped = 0, failed = 0, stale = 1, nights = 1, naps = 0), last)
         }
 }
 

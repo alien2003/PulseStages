@@ -10,7 +10,7 @@ import kotlin.math.ln
  * [logSoftmax] so that tiny posteriors never underflow to 0.
  */
 internal class DenseNetwork(
-    model: HybridModel,
+    model: HybridComponents,
 ) {
     private val mean = model.standardization.mean.toDoubleArray()
     private val std = model.standardization.std.toDoubleArray()

@@ -126,9 +126,21 @@ class SettingsTextsTest(
                     )
                 base +
                     when (spec) {
-                        is ChoiceSpec -> spec.options.map { "${spec.path} option ${it.key}" to it.label }
-                        is TextSpec -> listOf("${spec.path} placeholder" to spec.placeholder)
-                        else -> emptyList()
+                        is ChoiceSpec -> {
+                            spec.options.map { "${spec.path} option ${it.key}" to it.label }
+                        }
+
+                        is TextSpec -> {
+                            listOf("${spec.path} placeholder" to spec.placeholder)
+                        }
+
+                        is OptionalDoubleSpec -> {
+                            listOf("${spec.path} placeholder" to UiText.of(R.string.settings_same_as_nights_value, "0.45"))
+                        }
+
+                        else -> {
+                            emptyList()
+                        }
                     }
             }
         assertTrue("every choice of the catalog", specs.filterIsInstance<ChoiceSpec>().size >= 5)
@@ -139,18 +151,8 @@ class SettingsTextsTest(
     fun `units, values with units and accepted-values texts resolve`() {
         val texts =
             specs.flatMap { spec ->
-                val unit: UiText? =
-                    when (spec) {
-                        is IntSpec -> spec.unit
-                        is DoubleSpec -> spec.unit
-                        else -> null
-                    }
-                val bounds: UiText? =
-                    when (spec) {
-                        is IntSpec -> spec.range?.let { UiText.of(R.string.bounds_range, it.first.toString(), it.last.toString()) }
-                        is DoubleSpec -> spec.bounds
-                        else -> null
-                    }
+                val unit = unitOf(spec)
+                val bounds = boundsOf(spec)
                 listOfNotNull(
                     unit?.let { "${spec.path} unit" to it },
                     unit?.let { "${spec.path} value with unit" to UiText.of(R.string.format_value_unit, "42", it) },
@@ -223,6 +225,22 @@ class SettingsTextsTest(
         assertResolves(texts)
     }
 
+    private fun unitOf(spec: SettingSpec): UiText? =
+        when (spec) {
+            is IntSpec -> spec.unit
+            is DoubleSpec -> spec.unit
+            is OptionalDoubleSpec -> spec.unit
+            else -> null
+        }
+
+    private fun boundsOf(spec: SettingSpec): UiText? =
+        when (spec) {
+            is IntSpec -> spec.range?.let { UiText.of(R.string.bounds_range, it.first.toString(), it.last.toString()) }
+            is DoubleSpec -> spec.bounds
+            is OptionalDoubleSpec -> spec.bounds
+            else -> null
+        }
+
     /** Settings with an invalid value for [spec] (several kinds where the type allows). */
     private fun invalidCandidates(spec: SettingSpec): List<AppSettings> {
         val s = defaults
@@ -237,6 +255,10 @@ class SettingsTextsTest(
             }
 
             is DoubleSpec -> {
+                listOf(-1e9, -1.0, 0.0, 1e9, Double.NaN, Double.POSITIVE_INFINITY).map { spec.write(s, it) }
+            }
+
+            is OptionalDoubleSpec -> {
                 listOf(-1e9, -1.0, 0.0, 1e9, Double.NaN, Double.POSITIVE_INFINITY).map { spec.write(s, it) }
             }
 

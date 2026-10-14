@@ -53,7 +53,9 @@ abstract class SourceSessionDao {
             "('NAP', 'HAS_STAGES', 'LOWER_PRIORITY_DUPLICATE', 'NOT_ESTIMATED', 'FAILED')) AS skipped, " +
             "(SELECT COUNT(*) FROM source_sessions WHERE outcome = 'FAILED') AS failed, " +
             "(SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND " +
-            "(algoVersion != :algoVersion OR paramsHash != :paramsHash)) AS stale",
+            "(algoVersion != :algoVersion OR paramsHash != :paramsHash)) AS stale, " +
+            "(SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND mode = 'NIGHT') AS nights, " +
+            "(SELECT COUNT(*) FROM estimated_nights WHERE status = 'WRITTEN' AND mode = 'NAP') AS naps",
     )
     abstract fun observeHomeCounters(
         algoVersion: Int,
@@ -75,9 +77,9 @@ abstract class SourceSessionDao {
 
 /**
  * Nadirs of estimated nights (`night_baselines`) and the rolling baseline derived from them. Every WRITTEN night with a
- * nadir has a row, naps included; the baseline counts only the rows whose night lasted at least the minimum session
- * length (`features.baselineMinSessionMin`, compared with the session of the night's `estimated_nights` row), so a
- * changed threshold applies to the stored history without a recompute.
+ * nadir has a row, naps included; the baseline counts only the rows whose night lasted at least the nap threshold
+ * (`napMode.maxSessionMin`, compared with the session of the night's `estimated_nights` row, not with its stored
+ * `mode`), so a changed threshold applies to the stored history without a recompute.
  */
 @Dao
 abstract class NightBaselineDao {

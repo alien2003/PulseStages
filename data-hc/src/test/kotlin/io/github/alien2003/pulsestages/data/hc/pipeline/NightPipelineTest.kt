@@ -87,7 +87,7 @@ class NightPipelineTest {
 
             val notes = Json.parseToJsonElement(written.notes.orEmpty()).jsonObject
             assertEquals(
-                listOf("algo", "version", "paramsHash", "coverage", "confidence", "sourceUuids", "hrSamples", "calibrated"),
+                listOf("algo", "mode", "version", "paramsHash", "coverage", "confidence", "sourceUuids", "hrSamples", "calibrated"),
                 notes.keys.toList(),
             )
             assertEquals("HYBRID", notes.getValue("algo").jsonPrimitive.content)

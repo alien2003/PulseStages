@@ -79,12 +79,13 @@ private val USAGE =
     """
     Usage: algo-cli <command> [options]   (formats: docs/INTERCHANGE.md)
     Commands:
-      features      --nights <dir|file> --out <features.csv> [--params <json>]
-                    per-epoch hybrid features + labels for training
+      features      --nights <dir|file> --out <features.csv> [--params <json>] [--nap-proxies <minutes,...>]
+                    per-epoch hybrid features + labels for training (with the nap proxies' rows)
       evaluate      --nights <dir|file> [--estimator RULES|HMM|HYBRID] [--params <json>] [--param-grid <json array>]
-                    [--model <bundle.json> | --fold-models <dir with <subject>.json>] --out <metrics.json>
-                    [--per-epoch <predictions.csv>]
-                    score every night against its labels; one metrics block per grid entry
+                    [--model <bundle.json> | --fold-models <dir with <subject>.json>] [--nap-proxies <minutes,...>]
+                    --out <metrics.json> [--per-epoch <predictions.csv>]
+                    score every night (and nap proxy) against its labels; one metrics block per grid entry,
+                    split by mode (byMode: NIGHT / NAP); a bundle's nap section decodes the naps
       estimate      --night <file> [--id <night id>] [--estimator ...] [--model <bundle.json>] [--params <json>]
                     --csv <out.csv>
                     estimate one night and write the in-app CSV export

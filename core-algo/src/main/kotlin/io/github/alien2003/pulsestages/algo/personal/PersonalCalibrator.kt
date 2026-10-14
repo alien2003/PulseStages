@@ -13,6 +13,7 @@ import io.github.alien2003.pulsestages.algo.metrics.EpochLabels
 import io.github.alien2003.pulsestages.algo.metrics.IntervalScoring
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
@@ -58,6 +59,9 @@ data class CalibrationResult(
 /**
  * Supervised personal calibration on reference nights (section 10 of the specification, the "Calibrate" button).
  *
+ * Only nights take part: reference sessions that are naps under `params.napMode` ([SessionMode.NAP]) are left out of
+ * training and of the held-out kappas (the calibration fits the night model; naps are decoded differently).
+ *
  * 1. Split: the reference nights are ordered by session start; the latest `round(n · calibrationHoldout)` (at least
  *    one and at most n − 1 when n ≥ 2 and the share is positive) are held out, the rest are training nights.
  * 2. Training epochs: session epochs with heart-rate data, a reference stage ([EpochLabels.majority]) and not forced
@@ -84,12 +88,17 @@ class PersonalCalibrator(
         nights: List<ReferenceNight>,
         params: AlgoParams,
     ): CalibrationResult {
-        val ordered = nights.sortedBy { it.input.sessionStartMs }
+        val ordered =
+            nights
+                .filter { params.modeOf(it.input.sessionEndMs - it.input.sessionStartMs) == SessionMode.NIGHT }
+                .sortedBy { it.input.sessionStartMs }
         val heldOutCount = heldOutCount(ordered.size, params.personal.calibrationHoldout)
         val training = ordered.subList(0, ordered.size - heldOutCount)
         val heldOut = ordered.subList(ordered.size - heldOutCount, ordered.size)
         val labelled = training.map { LabelledNight.of(it, params) }
-        require(labelled.any { it.epochs.isNotEmpty() }) { "the training reference nights have no labelled epochs with heart-rate data" }
+        require(labelled.any { it.epochs.isNotEmpty() }) {
+            "the training reference nights (naps left out) have no labelled epochs with heart-rate data"
+        }
         val strength = params.personal.calibrationRegularization.coerceAtLeast(0.0)
         val compatible = hybridModel?.takeIf { it.compatibilityProblem() == null }
         val deltas = compatible?.let { BiasFit(it, labelled, strength).fit() }

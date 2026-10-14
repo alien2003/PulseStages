@@ -36,6 +36,7 @@ object AlgoParamsValidator {
         checker.hybrid(params.hybrid)
         checker.post(params.post)
         checker.personal(params.personal)
+        checker.napMode(params.napMode, params.post)
         return checker.problems.toList()
     }
 
@@ -98,7 +99,6 @@ private fun Checker.features(v: FeatureParams) {
     greaterThan("$p.cycleMinDistanceMin", v.cycleMinDistanceMin, 0.0)
     atLeast("$p.cycleMinProminenceBpm", v.cycleMinProminenceBpm, 0.0)
     int("$p.baselineNights", v.baselineNights, MIN_BASELINE_NIGHTS..MAX_BASELINE_NIGHTS)
-    inRange("$p.baselineMinSessionMin", v.baselineMinSessionMin, 0.0..MAX_SESSION_THRESHOLD_MIN)
     atLeast("$p.elevatedNightPct", v.elevatedNightPct, 0.0)
     atLeast("$p.elevatedAwakeShift", v.elevatedAwakeShift, 0.0)
     inRange("$p.elevatedConfidenceFactor", v.elevatedConfidenceFactor, UNIT)
@@ -186,7 +186,6 @@ private fun Checker.hybrid(v: HybridParams) {
     atLeast("$p.emissionWeight", v.emissionWeight, 0.0)
     atLeast("$p.elevatedAwakeFactor", v.elevatedAwakeFactor, 0.0)
     atLeast("$p.priorExponent", v.priorExponent, 0.0)
-    atLeast("$p.shortSessionMaxMin", v.shortSessionMaxMin, 0.0)
 }
 
 private fun Checker.post(v: PostprocessParams) {
@@ -200,7 +199,6 @@ private fun Checker.post(v: PostprocessParams) {
     inRange("$p.sanityDeepMin", v.sanityDeepMin, UNIT)
     notAbove("$p.sanityDeepMin", v.sanityDeepMin, "$p.sanityDeepMax", v.sanityDeepMax)
     inRange("$p.sanityConfidenceFactor", v.sanityConfidenceFactor, UNIT)
-    inRange("$p.proportionsMinSessionMin", v.proportionsMinSessionMin, 0.0..MAX_SESSION_THRESHOLD_MIN)
     inRange("$p.targetDeepMin", v.targetDeepMin, UNIT)
     inRange("$p.targetDeepMax", v.targetDeepMax, UNIT)
     notAbove("$p.targetDeepMin", v.targetDeepMin, "$p.targetDeepMax", v.targetDeepMax)
@@ -211,6 +209,46 @@ private fun Checker.post(v: PostprocessParams) {
     inRange("$p.calibrationStep", v.calibrationStep, UNIT)
     int("$p.calibrationMaxIterations", v.calibrationMaxIterations, ITERATIONS)
     inRange("$p.lowConfidenceThreshold", v.lowConfidenceThreshold, UNIT)
+}
+
+/** The nap mode; a relation between two values is checked when a nap override is involved ([night] = the night's). */
+private fun Checker.napMode(
+    v: NapModeParams,
+    night: PostprocessParams,
+) {
+    val p = "napMode"
+    inRange("$p.maxSessionMin", v.maxSessionMin, 0.0..MAX_SESSION_THRESHOLD_MIN)
+    val post = v.post
+    post.minDeepMin?.let { atLeast("$p.post.minDeepMin", it, 0.0) }
+    post.minRemMin?.let { atLeast("$p.post.minRemMin", it, 0.0) }
+    post.minAwakeMin?.let { atLeast("$p.post.minAwakeMin", it, 0.0) }
+    post.sanityDeepMin?.let { inRange("$p.post.sanityDeepMin", it, UNIT) }
+    post.sanityDeepMax?.let { inRange("$p.post.sanityDeepMax", it, UNIT) }
+    post.sanityRemMax?.let { inRange("$p.post.sanityRemMax", it, UNIT) }
+    napDeepCorridor(post, night)
+    post.lowConfidenceThreshold?.let { inRange("$p.post.lowConfidenceThreshold", it, UNIT) }
+    v.hybrid.emissionWeight?.let { atLeast("$p.hybrid.emissionWeight", it, 0.0) }
+    v.hybrid.timePriorWeight?.let { atLeast("$p.hybrid.timePriorWeight", it, 0.0) }
+}
+
+/** The nap DEEP corridor (overrides, else the night's values) must not be reversed; reported at the override. */
+private fun Checker.napDeepCorridor(
+    post: NapPostprocessParams,
+    night: PostprocessParams,
+) {
+    val low = post.sanityDeepMin ?: night.sanityDeepMin
+    val high = post.sanityDeepMax ?: night.sanityDeepMax
+    if (!low.isFinite() || !high.isFinite() || low <= high) return
+    when {
+        post.sanityDeepMin != null -> {
+            val maxPath = if (post.sanityDeepMax != null) "napMode.post.sanityDeepMax" else "post.sanityDeepMax"
+            add("napMode.post.sanityDeepMin", low.toString(), "<= $maxPath ($high)")
+        }
+
+        post.sanityDeepMax != null -> {
+            add("napMode.post.sanityDeepMax", high.toString(), ">= post.sanityDeepMin ($low)")
+        }
+    }
 }
 
 private fun Checker.personal(v: PersonalParams) {

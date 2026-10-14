@@ -3,6 +3,7 @@
 
 package io.github.alien2003.pulsestages.demo
 
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.data.hc.fake.FakeSettingsRepository
@@ -36,11 +37,20 @@ class DemoSourcesTest {
             val nights = source.nights().first()
             val hash = source.currentParamsHash().first()
 
-            assertEquals(DemoData.NIGHT_COUNT, nights.size)
+            assertEquals(DemoData.SESSION_COUNT, nights.size)
             assertEquals(nights.sortedByDescending { it.sessionStartMs }, nights, "newest first")
             assertEquals(nights.size, nights.map { it.id }.distinct().size, "unique list keys")
             assertTrue(nights.all { it.sourcePackage == DEMO_SOURCE_PACKAGE })
-            val byDaysAgo = nights.associateBy { it.clientRecordId.removePrefix("ps:demo-").toInt() }
+            val (naps, whole) = nights.partition { it.mode == SessionMode.NAP }
+            assertEquals(
+                DemoNaps.LENGTHS.keys
+                    .map { DemoData.clientRecordId(it, nap = true) }
+                    .toSet(),
+                naps.map { it.clientRecordId }.toSet(),
+            )
+            assertEquals(DemoData.NIGHT_COUNT, whole.size)
+            assertTrue(naps.all { it.status == NightStatus.WRITTEN }, "the demo naps are estimated")
+            val byDaysAgo = whole.associateBy { it.clientRecordId.removePrefix("ps:demo-").toInt() }
             assertTrue(checkNotNull(byDaysAgo[2]).elevatedHr, "elevated heart rate")
             assertTrue(checkNotNull(byDaysAgo[5]).isStale(1, hash), "stale")
             assertEquals(NightStatus.NOT_ESTIMATED, byDaysAgo[9]?.status, "not estimated")
@@ -84,11 +94,13 @@ class DemoSourcesTest {
             val source = DemoReferenceSource(settings, noBundle, StandardTestDispatcher(testScheduler), TestClock(NOON))
             val search = (source.findReferenceNights(0, NOON) as UseCaseResult.Success).value
 
-            assertEquals(DemoData.REFERENCE_COUNT, search.nights.size)
+            assertEquals(DemoData.REFERENCE_SESSION_COUNT, search.nights.size)
             assertTrue(search.nights.all { it.session.packageName == DEMO_REFERENCE_PACKAGE && it.truth.isNotEmpty() })
             val report = source.compare(search.nights)
-            assertEquals(DemoData.REFERENCE_COUNT, report.scoredNights)
+            assertEquals(DemoData.REFERENCE_SESSION_COUNT, report.scoredNights)
             assertNotNull(report.kappa)
+            assertTrue(report.mixesModes, "the short reference session is compared as a nap")
+            assertEquals(1, report.forMode(SessionMode.NAP).scoredNights)
             assertNull(source.activeModel().first())
 
             assertInstanceOf(CalibrationOutcome.Calibrated::class.java, source.calibrate(search.nights))

@@ -123,7 +123,8 @@ def session_accuracy(confusion) -> float | None:
 
 
 def short_session(length_min: float, threshold_min: float) -> bool:
-    """Sessions strictly shorter than the threshold are short (the Kotlin ``hybrid.shortSessionMaxMin`` rule)."""
+    """Sessions strictly shorter than the threshold are short (the Kotlin nap rule, ``napMode.maxSessionMin``; the
+    experiment's build called it ``hybrid.shortSessionMaxMin``)."""
     return length_min < threshold_min
 
 
@@ -138,10 +139,16 @@ def candidate_kind(candidate: str, length_min: float) -> str:
 
 
 def sanity_check_min_session_min(metrics: Mapping) -> float:
-    """``post.proportionsMinSessionMin`` of the effective parameters that an ``algo-cli evaluate`` metrics block
-    reports (``params``): the build runs the stage-share sanity check only on sessions at least this many minutes
-    long. 0 when the field is absent: builds before that rule, the nap experiment's among them, checked every session."""
-    post = (metrics.get("params") or {}).get("post") or {}
+    """The session length (minutes) below which the build that wrote an ``algo-cli evaluate`` metrics block skips the
+    stage-share sanity check, read from the effective parameters it reports (``params``): ``napMode.maxSessionMin``
+    (naps are not checked unless ``napMode.post.checkProportions``; 0 then) on builds with the two processing modes,
+    ``post.proportionsMinSessionMin`` on the builds between the nap experiment and the modes, and 0 when neither is
+    present: builds before that rule, the nap experiment's among them, checked every session."""
+    params = metrics.get("params") or {}
+    nap = params.get("napMode")
+    if nap is not None:
+        return 0.0 if (nap.get("post") or {}).get("checkProportions") else float(nap.get("maxSessionMin") or 0.0)
+    post = params.get("post") or {}
     return float(post.get("proportionsMinSessionMin") or 0.0)
 
 
@@ -789,7 +796,8 @@ def final_model(inp: Inputs, cli: AlgoCli, exp_dir: Path, base_run: Path, out_di
     out-of-fold proxies (L < T) of every Walch subject, both headline variants pooled, each decoded by its own outer
     fold bundle without b at the final decoder parameters of ``base_run`` (``bias-final``: its summary's
     ``selection.decoderParams`` and trained_defaults' priorExponent); the bundle is ``base_run``'s final bundle plus
-    ``stageLogBiasShort``; trained_defaults gains ``hybrid.shortSessionMaxMin`` = T."""
+    ``stageLogBiasShort``; trained_defaults gains ``napMode.maxSessionMin`` = T (the nap threshold; the experiment's
+    build called it ``hybrid.shortSessionMaxMin``)."""
     s = read_json(Path(exp_dir) / "summary.json")
     adopted = s["decision"]["adopted"]
     if adopted == "A":
@@ -844,16 +852,16 @@ def final_model(inp: Inputs, cli: AlgoCli, exp_dir: Path, base_run: Path, out_di
         b = with_stage_log_bias_short(b, bias)
     b["modelId"] = f"pulsestages-{CONFIGS[inp.config].pool}-{inp.clf}-{name}"
     note = (f"nap experiment (docs/prereg/prereg-naps.md) on run {inp.cfg.run}: candidate {adopted} "
-            f"({CANDIDATE_LABEL[adopted]}) adopted; sessions shorter than hybrid.shortSessionMaxMin = {threshold} min")
+            f"({CANDIDATE_LABEL[adopted]}) adopted; sessions shorter than napMode.maxSessionMin = {threshold} min")
     note += (f" use stageLogBiasShort, fitted on the LOSO out-of-fold nap proxies (L in {lengths} min) of the "
              f"{report.HEADLINE_DATASET} subjects (both headline variants pooled) so that their decoded stage shares "
              f"match the PSG shares" if bias is not None else " are decoded without stageLogBias")
     b["training"] = dict(b["training"], notes=b["training"]["notes"] + "; " + note)
     path = write_bundle(out_dir / "final" / "hybrid_model.json", b)
-    defaults = deep_merge(base_defaults, {"hybrid": {"shortSessionMaxMin": float(threshold)}})
+    defaults = deep_merge(base_defaults, {"napMode": {"maxSessionMin": float(threshold)}})
     write_json(out_dir / "trained_defaults.json", defaults)
     sel = dict(base_summary["selection"])
-    sel["shortSessionMaxMin"] = {"note": f"pre-registered nap experiment (docs/prereg/prereg-naps.md), candidate "
+    sel["napMode"] = {"note": f"pre-registered nap experiment (docs/prereg/prereg-naps.md), candidate "
                                          f"{adopted}: sessions shorter than {threshold} min use the bundle's "
                                          f"stageLogBiasShort" if bias is not None else
                                          f"pre-registered nap experiment, candidate {adopted}: no stageLogBias on "
@@ -874,14 +882,15 @@ def final_model(inp: Inputs, cli: AlgoCli, exp_dir: Path, base_run: Path, out_di
 
 def verify_implementation(inp: Inputs, cli: AlgoCli, exp_dir: Path, out_dir: Path, final_bundle: Path | None = None,
                           jobs: int = 4) -> dict:
-    """With a build that implements ``hybrid.shortSessionMaxMin`` / ``stageLogBiasShort`` and its defaults: every
-    fold bundle carrying b_g AND b_short_g(T) of the adopted C-T, decoded with the DEFAULT shortSessionMaxMin (not
-    passed), must reproduce A on all nights and C-T on all proxies session by session; the final bundle must be
-    accepted on every night and proxy (resubstitution, not a validation result).
+    """With a build that implements the nap threshold (``napMode.maxSessionMin``; ``hybrid.shortSessionMaxMin`` on the
+    builds before the two processing modes) / ``stageLogBiasShort`` and its defaults: every fold bundle carrying b_g
+    AND b_short_g(T) of the adopted C-T (no nap section), decoded with the DEFAULT threshold (not passed), must
+    reproduce A on all nights and C-T on all proxies session by session; the final bundle must be accepted on every
+    night and proxy (resubstitution, not a validation result).
 
-    A build whose sanity check skips sessions shorter than ``post.proportionsMinSessionMin`` (read from the
-    parameters its metrics report, :func:`sanity_check_min_session_min`; added after the experiment) must reproduce
-    the stored confusion matrices and every other warning, without the ``SANITY_*`` codes of those shorter sessions
+    A build whose sanity check skips sessions shorter than a threshold (naps, read from the parameters its metrics
+    report, :func:`sanity_check_min_session_min`; added after the experiment) must reproduce the stored confusion
+    matrices and every other warning, without the ``SANITY_*`` codes of those shorter sessions
     (:func:`expected_warnings`). The summary counts the sessions that lost such codes and gives the build's
     low-confidence rate of the adopted candidate per dataset, variant and proxy length."""
     exp_dir, out_dir = Path(exp_dir), Path(out_dir)

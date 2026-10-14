@@ -56,11 +56,8 @@ object SettingsLimits {
     /** `algo.features.baselineNights` (a baseline needs at least 3 nights). */
     val baselineNights: IntRange = 3..365
 
-    /**
-     * `algo.features.baselineMinSessionMin` and `algo.post.proportionsMinSessionMin`, minutes (0 = every session; 12 h
-     * like [minSessionMin]).
-     */
-    val sessionThresholdMin: ClosedFloatingPointRange<Double> = 0.0..720.0
+    /** `algo.napMode.maxSessionMin`, minutes (0 = no naps, every session is a night; 12 h like [minSessionMin]). */
+    val napMaxSessionMin: ClosedFloatingPointRange<Double> = 0.0..720.0
 
     /** `algo.hmm.emIterations` and `algo.post.calibrationMaxIterations`. */
     val iterations: IntRange = 0..50

@@ -57,6 +57,10 @@ val prepareRobolectricDependencies =
 
 tasks.withType<Test>().configureEach {
     dependsOn(prepareRobolectricDependencies)
+    // The exported Room schemas: LedgerMigrationTest builds databases of older versions from them.
+    val schemas = layout.projectDirectory.dir("schemas")
+    inputs.dir(schemas).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("roomSchemas")
+    systemProperty("pulsestages.roomSchemas", schemas.asFile.absolutePath)
     inputs.files(prepareRobolectricDependencies).withPropertyName("robolectricDependencies").withNormalizer(ClasspathNormalizer::class.java)
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)

@@ -7,9 +7,11 @@ import io.github.alien2003.pulsestages.algo.hybrid.DenseLayer
 import io.github.alien2003.pulsestages.algo.hybrid.GammaDuration
 import io.github.alien2003.pulsestages.algo.hybrid.HybridFeatureExtractor
 import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
+import io.github.alien2003.pulsestages.algo.hybrid.NapSubModel
 import io.github.alien2003.pulsestages.algo.hybrid.StageDurations
 import io.github.alien2003.pulsestages.algo.hybrid.Standardization
 import io.github.alien2003.pulsestages.algo.hybrid.TimePrior
+import io.github.alien2003.pulsestages.algo.hybrid.TrainingInfo
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 
 /** Small hand-made bundles for unit tests. */
@@ -66,4 +68,26 @@ object MinimalBundles {
                 ),
         )
     }
+}
+
+/** Nap sections ([NapSubModel]) for tests. */
+object NapModels {
+    /** A nap section with the components of [model] and the log-bias [stageLogBias] (default: the model's own). */
+    fun from(
+        model: HybridModel,
+        stageLogBias: List<Double>? = model.stageLogBias,
+    ): NapSubModel =
+        NapSubModel(
+            featureSetVersion = model.featureSetVersion,
+            featureNames = model.featureNames,
+            standardization = model.standardization,
+            classifier = model.classifier,
+            classPriors = model.classPriors,
+            durations = model.durations,
+            boutTransitions = model.boutTransitions,
+            initialStage = model.initialStage,
+            timePrior = model.timePrior,
+            stageLogBias = stageLogBias,
+            training = TrainingInfo(notes = "test nap model from ${model.modelId}"),
+        )
 }

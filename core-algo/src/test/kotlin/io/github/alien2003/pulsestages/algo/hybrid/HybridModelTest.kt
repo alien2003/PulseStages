@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.algo.hybrid
 
 import io.github.alien2003.pulsestages.algo.Fingerprints
 import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
+import io.github.alien2003.pulsestages.algo.testing.NapModels
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -103,8 +104,8 @@ class HybridModelTest {
                 explicitNulls = true
             }
         val full = canonical.encodeToJsonElement(HybridModel.serializer(), model).jsonObject
-        assertTrue("stageLogBias" in full && "stageLogBiasShort" in full)
-        assertEquals(Fingerprints.of(JsonObject(full - "stageLogBias" - "stageLogBiasShort")), model.fingerprint())
+        assertTrue("stageLogBias" in full && "stageLogBiasShort" in full && "nap" in full)
+        assertEquals(Fingerprints.of(JsonObject(full - "stageLogBias" - "stageLogBiasShort" - "nap")), model.fingerprint())
 
         val biased = model.copy(stageLogBias = listOf(0.3, -0.2, -0.5, 0.4))
         val parsed = HybridModel.parse(biased.toJson())
@@ -210,5 +211,70 @@ class HybridModelTest {
         assertTrue(problem.contains("index 5") && problem.contains("somethingElse"), problem)
         val shorter = MinimalBundles.logreg(featureNames = HybridFeatureExtractor.FEATURE_NAMES.dropLast(1)).compatibilityProblem()
         assertTrue(shorter.orEmpty().contains("index ${HybridFeatureExtractor.FEATURE_NAMES.size - 1}"), shorter)
+    }
+
+    @Test
+    fun `the optional nap section parses, round-trips and enters the fingerprint`() {
+        assertNull(model.nap)
+        assertTrue("nap" !in tree, "absent from the JSON of a bundle without it")
+        val nap =
+            NapModels.from(
+                MinimalBundles.logreg(hrNormWeight = listOf(1.0, 0.2, -1.0, 0.5)),
+                stageLogBias = listOf(0.1, 0.2, -0.1, -0.2),
+            )
+        val withNap = model.copy(nap = nap)
+        val parsed = HybridModel.parse(withNap.toJson())
+        assertEquals(withNap, parsed)
+        assertEquals(nap, parsed.nap)
+        assertEquals(withNap.fingerprint(), parsed.fingerprint())
+        assertNotEquals(model.fingerprint(), withNap.fingerprint())
+        assertNotEquals(withNap.fingerprint(), model.copy(nap = nap.copy(stageLogBias = null)).fingerprint())
+        assertNotEquals(withNap.fingerprint(), model.copy(nap = nap.copy(classPriors = listOf(0.2, 0.4, 0.2, 0.2))).fingerprint())
+        // The nap section's keys are just as order-independent, and its training info is optional.
+        val reordered = HybridModel.parse(reversedKeys(Json.parseToJsonElement(withNap.toJson())).toString())
+        assertEquals(withNap.fingerprint(), reordered.fingerprint())
+        assertNull(HybridModel.parse(model.copy(nap = nap.copy(training = null)).toJson()).nap?.training)
+        assertNull(withNap.napCompatibilityProblem())
+        assertNull(model.napCompatibilityProblem())
+    }
+
+    @Test
+    fun `the nap section is validated like the main model, with nap-prefixed reasons`() {
+        val napTree = Json.parseToJsonElement(model.copy(nap = NapModels.from(model, stageLogBias = List(4) { 0.0 })).toJson()).jsonObject
+
+        fun napMutated(
+            vararg path: Any,
+            value: JsonElement?,
+        ): String = replaced(napTree, listOf("nap") + path.toList(), value).toString()
+
+        assertInvalid(napMutated("featureNames", 1, value = JsonPrimitive("hrNorm")), "nap.featureNames contains duplicates")
+        assertInvalid(napMutated("standardization", "std", 3, value = JsonPrimitive(0.0)), "nap.standardization.std")
+        assertInvalid(napMutated("classifier", "layers", 0, "activation", value = JsonPrimitive("relu")), "nap.layer 0: activation")
+        assertInvalid(napMutated("classifier", "layers", 0, "bias", value = JsonArray(List(3) { JsonPrimitive(0.0) })), "nap.layer 0")
+        assertInvalid(napMutated("classPriors", 0, value = JsonPrimitive(0.3)), "nap.classPriors must sum to 1")
+        assertInvalid(napMutated("boutTransitions", 2, 1, value = JsonPrimitive(0.5)), "nap.boutTransitions[2] must sum to 1")
+        assertInvalid(napMutated("initialStage", value = JsonArray(List(3) { JsonPrimitive(1.0 / 3) })), "nap.initialStage must have 4")
+        assertInvalid(napMutated("durations", "DEEP", "shape", value = JsonPrimitive(0.0)), "nap.durations.DEEP")
+        assertInvalid(napMutated("timePrior", "binMinutes", value = JsonPrimitive(0.0)), "nap.timePrior.binMinutes")
+        assertInvalid(napMutated("stageLogBias", value = JsonArray(List(3) { JsonPrimitive(0.1) })), "nap.stageLogBias must have 4")
+        assertInvalid(napMutated("timePrior", value = null), "malformed")
+        assertThrows(
+            HybridModelException::class.java,
+        ) { model.copy(nap = NapModels.from(model, stageLogBias = listOf(0.0, Double.NaN, 0.0, 0.0))) }
+    }
+
+    @Test
+    fun `an incompatible nap section is a valid bundle whose naps cannot use it`() {
+        val renamed = HybridFeatureExtractor.FEATURE_NAMES.toMutableList().also { it[3] = "elsewhere" }
+        val bundle = model.copy(nap = NapModels.from(MinimalBundles.logreg(featureNames = renamed)))
+        assertNull(bundle.compatibilityProblem())
+        assertTrue(bundle.napCompatibilityProblem().orEmpty().contains("index 3"), bundle.napCompatibilityProblem())
+        assertTrue(
+            model
+                .copy(nap = NapModels.from(model).copy(featureSetVersion = 9))
+                .napCompatibilityProblem()
+                .orEmpty()
+                .contains("9"),
+        )
     }
 }

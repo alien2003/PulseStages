@@ -119,3 +119,55 @@ def test_prior_exponent_is_rendered():
     assert "priorExponent" in data_class_fields("HybridParams")
     with pytest.raises(DefaultsError, match="priorExponent"):
         render({"estimator": "HYBRID", "hybrid": dict(HYBRID, priorExponent=-1.0)}, SELECTION, "r", "2026", "x")
+
+
+def _flat(src):
+    return " ".join(line.strip(" */") for line in src.splitlines())
+
+
+def test_nap_mode_defaults_are_rendered():
+    # a run that chose no nap rule: 180 min (the threshold of the baseline / sanity rules before the modes),
+    # the night's estimator, and no nap decoder overrides
+    src = render({"estimator": "HYBRID", "hybrid": HYBRID}, SELECTION, "r", "2026", "x")
+    assert "const val NAP_MAX_SESSION_MIN: Double = 180.0" in src
+    assert "val NAP_ESTIMATOR: EstimatorType = EstimatorType.HYBRID" in src
+    for name in ("NAP_HYBRID_EMISSION_WEIGHT", "NAP_HYBRID_TIME_PRIOR_WEIGHT"):
+        assert f"val {name}: Double? = null" in src
+    assert "val NAP_HYBRID_DURATION_MODEL: DurationModel? = null" in src
+    assert "HYBRID_SHORT_SESSION_MAX_MIN" not in src
+    # the nap experiment's runs stored the threshold as hybrid.shortSessionMaxMin: read as napMode.maxSessionMin
+    sel = dict(SELECTION, shortSessionMaxMin={"note": "candidate C-180"})
+    legacy = render({"estimator": "HYBRID", "hybrid": dict(HYBRID, shortSessionMaxMin=150.0)}, sel, "r", "2026", "x")
+    assert "const val NAP_MAX_SESSION_MIN: Double = 150.0" in legacy and "candidate C-180" in _flat(legacy)
+    # a run with the modes chooses every nap value
+    nap = {"maxSessionMin": 120.0, "estimator": "RULES",
+           "hybrid": {"durationModel": "GEOMETRIC", "emissionWeight": 0.3, "timePriorWeight": 1.0}}
+    sel = dict(SELECTION, napMode={"note": "nap model run"})
+    chosen = render({"estimator": "HYBRID", "hybrid": HYBRID, "napMode": nap}, sel, "r", "2026", "x")
+    assert "const val NAP_MAX_SESSION_MIN: Double = 120.0" in chosen and "nap model run" in _flat(chosen)
+    assert "val NAP_ESTIMATOR: EstimatorType = EstimatorType.RULES" in chosen
+    assert "val NAP_HYBRID_DURATION_MODEL: DurationModel? = DurationModel.GEOMETRIC" in chosen
+    assert "val NAP_HYBRID_EMISSION_WEIGHT: Double? = 0.3" in chosen
+    assert "val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double? = 1.0" in chosen
+    assert max(len(line) for line in chosen.splitlines()) <= 140
+    # the Kotlin side has exactly these fields
+    assert {"maxSessionMin", "estimator", "hybrid"} <= set(data_class_fields("NapModeParams"))
+    assert data_class_fields("NapHybridParams") == ["durationModel", "emissionWeight", "timePriorWeight"]
+    assert "shortSessionMaxMin" not in data_class_fields("HybridParams")
+
+
+@pytest.mark.parametrize("nap,msg", [
+    ({"maxSessionMin": -1.0}, "0..720"),
+    ({"maxSessionMin": 900.0}, "0..720"),
+    ({"estimator": "HSMM"}, "napMode.estimator"),
+    ({"hybrid": {"durationModel": "SEMI"}}, "napMode.hybrid.durationModel"),
+    ({"hybrid": {"emissionWeight": -0.5}}, "napMode.hybrid.emissionWeight"),
+    ({"post": {}}, "napMode.post"),
+])
+def test_invalid_nap_defaults(nap, msg):
+    with pytest.raises(DefaultsError, match=msg):
+        render({"estimator": "HYBRID", "hybrid": HYBRID, "napMode": nap}, SELECTION, "r", "2026", "x")
+    with pytest.raises(DefaultsError, match="both given"):
+        render({"estimator": "HYBRID", "hybrid": dict(HYBRID, shortSessionMaxMin=1.0), "napMode": {"maxSessionMin": 2.0}},
+               SELECTION, "r", "2026", "x")
+

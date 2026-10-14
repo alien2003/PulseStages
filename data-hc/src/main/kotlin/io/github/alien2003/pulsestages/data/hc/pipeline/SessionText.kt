@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.data.hc.pipeline
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.hc.R
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -65,12 +66,14 @@ object SessionText {
 
     /**
      * Compact JSON notes with the keys in this order:
-     * `{"algo":"HYBRID","version":1,"paramsHash":"…","coverage":0.93,"confidence":0.61,"sourceUuids":[…],
-     * "hrSamples":231,"calibrated":false}`. Numbers are rounded to three decimals (half up; non-finite → 0).
+     * `{"algo":"HYBRID","mode":"NIGHT","version":1,"paramsHash":"…","coverage":0.93,"confidence":0.61,"sourceUuids":[…],
+     * "hrSamples":231,"calibrated":false}` (`mode`: NIGHT or NAP). Numbers are rounded to three decimals (half up;
+     * non-finite → 0).
      */
     @Suppress("LongParameterList") // One parameter per notes field.
     fun notes(
         estimator: EstimatorType,
+        mode: SessionMode,
         algoVersion: Int,
         paramsHash: String,
         coverage: Double,
@@ -81,6 +84,7 @@ object SessionText {
     ): String =
         buildJsonObject {
             put("algo", estimator.name)
+            put("mode", mode.name)
             put("version", algoVersion)
             put("paramsHash", paramsHash)
             put("coverage", round3(coverage))

@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.algo.hybrid
 
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StepsSample
 import io.github.alien2003.pulsestages.algo.model.TimeSpan
@@ -107,7 +108,7 @@ class HybridEmissionsTest {
     }
 
     @Test
-    fun `sessions shorter than shortSessionMaxMin use the short-session log-bias, all others the whole-night one`() {
+    fun `naps (shorter than napMode maxSessionMin) use the short-session log-bias, nights the whole-night one`() {
         val start = synthetic.input.sessionStartMs
         val night = synthetic.input.copy(steps = emptyList())
         val nap = night.copy(sessionEndMs = start + 90 * minute)
@@ -119,11 +120,14 @@ class HybridEmissionsTest {
                 Triple(nap, 180.0, short),
                 Triple(nap, 90.1, short),
                 Triple(nap, 90.0, whole), // 90 min is not shorter than 90
-                Triple(nap, 0.0, whole), // 0 = off
+                Triple(nap, 0.0, whole), // 0 = no nap mode
                 Triple(night, 180.0, whole), // a whole night
             )
         for ((input, threshold, expected) in cases) {
-            val params = AlgoParams().let { it.copy(hybrid = it.hybrid.copy(emissionWeight = 0.8, shortSessionMaxMin = threshold)) }
+            val params =
+                AlgoParams().let {
+                    it.copy(hybrid = it.hybrid.copy(emissionWeight = 0.8), napMode = it.napMode.copy(maxSessionMin = threshold))
+                }
             val prepared = NightPreparer.prepare(input, params)
             val rows = HybridEmissions(prepared, bundle, DenseNetwork(bundle), null).withOffsets(zero)
             val asWritten = model.copy(stageLogBias = expected)
@@ -132,10 +136,11 @@ class HybridEmissionsTest {
         // A bundle without stageLogBiasShort keeps its stageLogBias on short sessions (and no bias without either).
         val none = List(SleepStage.COUNT) { 0.0 }
         val shortOnly = model.copy(stageLogBiasShort = short)
-        assertEquals(whole, HybridEmissions.stageBias(model.copy(stageLogBias = whole), 90.0, 180.0).toList())
-        assertEquals(none, HybridEmissions.stageBias(model, 90.0, 180.0).toList())
-        assertEquals(short, HybridEmissions.stageBias(shortOnly, 30.0, 180.0).toList())
-        assertEquals(none, HybridEmissions.stageBias(shortOnly, 400.0, 180.0).toList())
+        assertEquals(whole, HybridEmissions.mainModelBias(model.copy(stageLogBias = whole), SessionMode.NAP))
+        assertEquals(null, HybridEmissions.mainModelBias(model, SessionMode.NAP))
+        assertEquals(short, HybridEmissions.mainModelBias(shortOnly, SessionMode.NAP))
+        assertEquals(null, HybridEmissions.mainModelBias(shortOnly, SessionMode.NIGHT))
+        assertEquals(List(SleepStage.COUNT) { 0.0 }, none)
     }
 
     @Test

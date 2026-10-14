@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.usecase
 
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.personal.PersonalModelKind
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticPerson
@@ -166,13 +167,13 @@ class PersonalizationServiceTest {
         harnessTest(dir) { h ->
             h.emEvery(4)
             h.estimateNights(fromDaysAgo = 4)
-            h.settings.set { it.copy(algo = it.algo.copy(estimator = EstimatorType.RULES)) }
+            h.settings.set { it.copy(algo = it.algo.withEstimator(EstimatorType.RULES)) }
 
             assertEquals(EmRunResult.NotUsed, h.personalization.maybeRunPopulationEm(inBackground = false))
             assertTrue(h.ledger.allModels().isEmpty(), "no model: the params hash stays, no night becomes stale")
             assertEquals(0, h.lastEmCount(), "the count is kept for when the HMM is used again")
 
-            h.settings.set { it.copy(algo = it.algo.copy(estimator = EstimatorType.HYBRID)) }
+            h.settings.set { it.copy(algo = it.algo.withEstimator(EstimatorType.HYBRID)) }
             assertInstanceOf(
                 EmRunResult.Adapted::class.java,
                 h.personalization.maybeRunPopulationEm(inBackground = false),
@@ -181,11 +182,14 @@ class PersonalizationServiceTest {
         }
 
     @Test
-    fun `the HMM emissions are used by HMM and by HYBRID without a usable bundle only`() {
+    fun `the HMM emissions are used by HMM and by HYBRID without a usable bundle only, for nights or naps`() {
         val params = AlgoParams()
-        assertTrue(PersonalizationService.usesHmmEmissions(params.copy(estimator = EstimatorType.HMM), bundle = null))
-        assertTrue(PersonalizationService.usesHmmEmissions(params.copy(estimator = EstimatorType.HYBRID), bundle = null))
-        assertFalse(PersonalizationService.usesHmmEmissions(params.copy(estimator = EstimatorType.RULES), bundle = null))
+        assertTrue(PersonalizationService.usesHmmEmissions(params.withEstimator(EstimatorType.HMM), bundle = null))
+        assertTrue(PersonalizationService.usesHmmEmissions(params.withEstimator(EstimatorType.HYBRID), bundle = null))
+        assertFalse(PersonalizationService.usesHmmEmissions(params.withEstimator(EstimatorType.RULES), bundle = null))
+        // The naps' estimator counts as well: RULES nights with HMM naps use the HMM emissions.
+        val hmmNaps = params.withEstimator(EstimatorType.RULES).let { it.copy(napMode = it.napMode.copy(estimator = EstimatorType.HMM)) }
+        assertTrue(PersonalizationService.usesHmmEmissions(hmmNaps, bundle = null))
     }
 
     @Test
@@ -248,5 +252,24 @@ class PersonalizationServiceTest {
                     .getActive()
                     ?.kind,
             )
+        }
+
+    @Test
+    fun `calibration and population EM use nights only`() =
+        harnessTest(dir) { h ->
+            val nights = h.referenceNights(3)
+            // Every reference session is a nap when the nap threshold is above the night length.
+            h.settings.set { it.copy(algo = it.algo.copy(napMode = it.algo.napMode.copy(maxSessionMin = 720.0))) }
+            val outcome = assertInstanceOf(CalibrationOutcome.NotCalibrated::class.java, h.personalization.calibrate(nights))
+            assertTrue(outcome.detail.contains("nap"), outcome.detail)
+            assertTrue(h.ledger.allModels().isEmpty())
+
+            // Written naps neither count towards emEveryNights nor take part.
+            h.settings.set { it.copy(algo = it.algo.withEstimator(EstimatorType.HMM).copy(napMode = AlgoParams().napMode)) }
+            h.emEvery(2)
+            h.estimateNights(fromDaysAgo = 1)
+            val written = h.ledger.allNights().single { it.status == NightStatus.WRITTEN }
+            h.ledger.putNight(written.copy(mode = SessionMode.NAP))
+            assertEquals(EmRunResult.NotDue(0, 2), h.personalization.maybeRunPopulationEm(inBackground = false))
         }
 }

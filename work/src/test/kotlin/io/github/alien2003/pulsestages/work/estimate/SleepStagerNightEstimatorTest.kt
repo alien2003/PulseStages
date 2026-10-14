@@ -5,14 +5,18 @@ import io.github.alien2003.pulsestages.algo.hybrid.HybridModel
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
+import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.algo.personal.PersonalModel
 import io.github.alien2003.pulsestages.algo.personal.PersonalModelKind
 import io.github.alien2003.pulsestages.algo.personal.PersonalProvenance
 import io.github.alien2003.pulsestages.algo.personal.StageDimValues
 import io.github.alien2003.pulsestages.algo.synthetic.SyntheticNightGenerator
 import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
+import io.github.alien2003.pulsestages.algo.testing.NapModels
 import io.github.alien2003.pulsestages.data.hc.fake.InMemoryLedger
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
 import io.github.alien2003.pulsestages.data.hc.fake.TestClock
@@ -68,6 +72,26 @@ class SleepStagerNightEstimatorTest {
                 ParamsHasher.hash(params, modelFingerprint = null, personalFingerprint = null, extra = extra),
                 estimator.paramsHash(params, extra),
             )
+        }
+
+    @Test
+    fun `a nap is estimated as a nap, with the bundle's nap model when it has one, and SKIP declines it`() =
+        runTest {
+            val nap = night.input.copy(sessionEndMs = night.input.sessionStartMs + 90 * 60_000L)
+            val main = MinimalBundles.logreg()
+            val withNap = main.copy(nap = NapModels.from(MinimalBundles.logreg(hrNormWeight = listOf(0.5, 1.0, -0.5, 0.2))))
+
+            val plain = assertInstanceOf(EstimationOutcome.Estimated::class.java, estimator(main).estimate(nap, params)).estimate
+            val napModel = assertInstanceOf(EstimationOutcome.Estimated::class.java, estimator(withNap).estimate(nap, params)).estimate
+
+            assertEquals(SessionMode.NAP, plain.mode)
+            assertEquals(SessionMode.NAP, napModel.mode)
+            assertEquals(EstimatorType.HYBRID, napModel.estimator)
+            assertTrue(plain.perEpoch.map { it.posterior } != napModel.perEpoch.map { it.posterior }, "the nap model decodes the nap")
+            val skip = params.copy(napMode = params.napMode.copy(outputPolicy = NapOutputPolicy.SKIP))
+            val skipped = assertInstanceOf(EstimationOutcome.NotEstimated::class.java, estimator(withNap).estimate(nap, skip))
+            assertEquals(NotEstimatedReason.NAP_SKIPPED, skipped.reason)
+            assertTrue(logger.lines.isEmpty() || logger.lines.none { it.level >= LogLevel.WARN })
         }
 
     @Test

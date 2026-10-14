@@ -1,7 +1,9 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import androidx.health.connect.client.records.SleepSessionRecord
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.TimeSpan
+import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.di.OwnPackageName
 import io.github.alien2003.pulsestages.data.local.db.SourceOutcome
@@ -42,6 +44,12 @@ data class NightCandidate(
 ) {
     /** Length of the merged session. */
     val durationMs: Long get() = endMs - startMs
+
+    /**
+     * Night or nap: the merged session's length ([durationMs], gaps between fragments included) against
+     * `napMode.maxSessionMin` of [params] ([AlgoParams.modeOf]).
+     */
+    fun mode(params: AlgoParams): SessionMode = params.modeOf(durationMs)
 }
 
 /**
@@ -182,7 +190,8 @@ object NightKeys {
  * 3. per package, sessions sorted by start are merged while the gap to the merged end is `< mergeGapMin` (overlaps
  *    included); gaps become forced-AWAKE spans; the zone offsets are the first fragment's start offset and the
  *    last-ending fragment's end offset (fallback: [zoneOffsets]);
- * 4. merged nights shorter than `minSessionMin` are naps (NAP);
+ * 4. merged nights shorter than `minSessionMin` are ignored (outcome NAP, a persisted name from before the nap mode;
+ *    sessions from `minSessionMin` up to `napMode.maxSessionMin` are estimated as naps, see [NightCandidate.mode]);
  * 5. nights of different packages that overlap by more than 50 % of the shorter one are duplicates: the night whose
  *    package comes first in `sourcePriority` (unlisted packages last, then by name) is kept, the others are
  *    LOWER_PRIORITY_DUPLICATE. Sessions skipped in step 2 take part as well (merged and nap-filtered per package like
@@ -235,7 +244,7 @@ class NightCandidateBuilder
                         packageName = nap.packageName,
                         sessions = nap.fragments,
                         outcome = SourceOutcome.NAP,
-                        reason = "nap: ${nap.durationMs / MINUTE_MS} min < minSessionMin ${sources.minSessionMin} min",
+                        reason = "too short: ${nap.durationMs / MINUTE_MS} min < minSessionMin ${sources.minSessionMin} min (ignored)",
                     )
                 }
 

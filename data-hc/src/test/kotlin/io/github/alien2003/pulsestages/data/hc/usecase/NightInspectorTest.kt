@@ -126,7 +126,8 @@ class NightInspectorTest {
             val lines = export.content.trimEnd('\n').split('\n')
             assertEquals(8 * 60 + 1, lines.size)
             assertTrue(lines.first().contains(FakeNightEstimator.FEATURE_NAME))
-            assertTrue(lines.first().endsWith("p_awake,p_light,p_deep,p_rem,stage"))
+            assertTrue(lines.first().endsWith("p_awake,p_light,p_deep,p_rem,stage,mode"))
+            assertTrue(lines.drop(1).all { it.endsWith(",NIGHT") })
             assertEquals("pulsestages-20261011-2300.csv", export.fileName)
         }
 

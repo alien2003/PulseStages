@@ -265,12 +265,15 @@ class EdgeCaseTest {
         fun variants(): List<Variant> {
             val base = AlgoParams()
             return listOf(
-                Variant("RULES", base.copy(estimator = EstimatorType.RULES)),
-                Variant("HMM", base.copy(estimator = EstimatorType.HMM)),
-                Variant("HYBRID/EXPLICIT", base.copy(estimator = EstimatorType.HYBRID)),
+                Variant("RULES", base.withEstimator(EstimatorType.RULES)),
+                Variant("HMM", base.withEstimator(EstimatorType.HMM)),
+                Variant("HYBRID/EXPLICIT", base.withEstimator(EstimatorType.HYBRID)),
                 Variant(
                     "HYBRID/GEOMETRIC",
-                    base.copy(estimator = EstimatorType.HYBRID, hybrid = base.hybrid.copy(durationModel = DurationModel.GEOMETRIC)),
+                    base
+                        .withEstimator(
+                            EstimatorType.HYBRID,
+                        ).let { it.copy(hybrid = it.hybrid.copy(durationModel = DurationModel.GEOMETRIC)) },
                 ),
             )
         }

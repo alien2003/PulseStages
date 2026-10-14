@@ -43,10 +43,12 @@ def _keys(obj, skip=("emissions", "meanBouts", "transitions")):
 
 def test_bundle_keys_match_interchange_doc():
     b = _make("mlp")
-    assert list(b) == [k for k in bundle.TOP_LEVEL_KEYS if k not in bundle.STAGE_BIAS_KEYS]   # optional, absent
+    assert list(b) == [k for k in bundle.TOP_LEVEL_KEYS if k not in (*bundle.STAGE_BIAS_KEYS, "nap")]   # optional
     biased = bundle.with_stage_log_bias_short(bundle.with_stage_log_bias(b, [0.1, 0.0, -0.2, 0.1]), [0.0, 0.2, 0.1, -0.3])
-    assert list(biased) == list(bundle.TOP_LEVEL_KEYS)
-    assert _keys(biased) == bundle_doc_keys()
+    full = bundle.with_nap_model(biased, bundle.nap_section(bundle.with_stage_log_bias(_make("lr"), [0.0, 0.1, 0.0, -0.1])))
+    assert list(full) == list(bundle.TOP_LEVEL_KEYS)
+    assert list(full["nap"]) == list(bundle.NAP_KEYS)
+    assert _keys(full) == bundle_doc_keys()
     assert b["classOrder"] == ["AWAKE", "LIGHT", "DEEP", "REM"] and b["schemaVersion"] == 1
     assert [layer["activation"] for layer in b["classifier"]["layers"]] == ["relu", "relu", "softmax"]
 
@@ -91,6 +93,12 @@ def test_round_trip(tmp_path):
     (lambda b: b.update(stageLogBias=[0.0, 0.1, float("inf"), 0.0]), "stageLogBias"),
     (lambda b: b.update(stageLogBiasShort=[0.0, 0.1, 0.2]), "stageLogBiasShort"),
     (lambda b: b.update(stageLogBiasShort=[0.0, float("nan"), 0.0, 0.0]), "stageLogBiasShort"),
+    (lambda b: b.update(nap=[]), "nap must be a JSON object"),
+    (lambda b: b.update(nap={"featureNames": NAMES}), "nap: missing keys"),
+    (lambda b: b.update(nap={**bundle.nap_section(_make()), "modelId": "x"}), "nap: unknown keys"),
+    (lambda b: b.update(nap={**bundle.nap_section(_make()), "classPriors": [0.5, 0.5, 0.5, 0.5]}), "nap.classPriors"),
+    (lambda b: b.update(nap={**bundle.nap_section(_make()), "stageLogBias": [0.0]}), "nap.stageLogBias"),
+    (lambda b: b.update(nap={**bundle.nap_section(_make()), "featureNames": ["a", "a", "b", "c"]}), "nap.featureNames"),
 ])
 def test_validation_rejects(mutate, msg):
     b = copy.deepcopy(_make())
@@ -121,3 +129,23 @@ def test_stage_log_bias_round_trip(tmp_path):
     p = bundle.write_bundle(tmp_path / "b.json", biased)
     assert bundle.read_bundle(p) == biased
     assert bundle.with_stage_log_bias(biased, None) == b
+
+
+def test_nap_section_round_trip_and_helpers(tmp_path):
+    b = bundle.with_stage_log_bias_short(bundle.with_stage_log_bias(_make(), [0.1, 0.0, -0.2, 0.1]), [0.0, 0.2, 0.1, -0.3])
+    nap_model = bundle.with_stage_log_bias(_make("mlp", hmm=False), [0.0, 0.3, 0.0, -0.3])
+    nap = bundle.nap_section(nap_model, training={"notes": "nap model"})
+    assert list(nap) == [k for k in bundle.NAP_KEYS]
+    assert nap["classifier"] == nap_model["classifier"] and nap["stageLogBias"] == [0.0, 0.3, 0.0, -0.3]
+    with_nap = bundle.with_nap_model(b, nap)
+    assert list(with_nap)[-1] == "nap" and with_nap["stageLogBiasShort"] == b["stageLogBiasShort"]
+    p = bundle.write_bundle(tmp_path / "nap.json", with_nap)
+    assert bundle.read_bundle(p) == with_nap
+    assert bundle.with_nap_model(with_nap, None) == b
+    # replacing a bias keeps the nap section (and its position last)
+    again = bundle.with_stage_log_bias(with_nap, [0.0, 0.0, 0.0, 0.0])
+    assert list(again)[-1] == "nap" and again["nap"] == with_nap["nap"]
+    assert list(bundle.with_stage_log_bias_short(with_nap, None))[-1] == "nap"
+    without_bias = bundle.nap_section(_make())
+    assert "stageLogBias" not in without_bias
+

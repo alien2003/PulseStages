@@ -11,6 +11,7 @@ import io.github.alien2003.pulsestages.algo.hmm.emissionTableOf
 import io.github.alien2003.pulsestages.algo.hmm.forState
 import io.github.alien2003.pulsestages.algo.hmm.isHrNormOrdered
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
@@ -24,7 +25,7 @@ import kotlin.math.sqrt
  * @property model the EM personal model, or null when nothing was adapted (no usable night, no iterations, or the
  *   first iteration already broke the order constraint) — the caller then keeps its current model.
  * @property nightsUsed nights that entered the E-steps.
- * @property nightsSkipped nights without heart rate, below minCoverage or with elevated heart rate.
+ * @property nightsSkipped naps and nights without heart rate, below minCoverage or with elevated heart rate.
  * @property iterations accepted EM iterations.
  * @property orderViolated an iteration broke μ_DEEP < μ_LIGHT < μ_REM < μ_AWAKE on hrNorm; adaptation stopped and the
  *   starting table was kept (as in the per-night EM).
@@ -71,8 +72,9 @@ internal class PopulationEmIterations(
  * Unsupervised population-level EM over many of the user's nights (section 10 of the specification: every
  * `personal.emEveryNights` nights, adapt μ/σ of the HMM emissions with shrinkage to the global parameters).
  *
- * Nights are prepared with the parameters; nights without heart rate, below `preprocess.minCoverage` or with
- * elevated heart rate are skipped. Starting from the base personal model's table (or the global table
+ * Nights are prepared with the parameters; naps ([SessionMode.NAP] under `params.napMode`: every nap is on its own
+ * hrNorm scale and is decoded differently), nights without heart rate, below `preprocess.minCoverage` or with elevated
+ * heart rate are skipped. Starting from the base personal model's table (or the global table
  * `params.hmm.emissions`), `hmm.emIterations` Baum–Welch iterations pool the posteriors of the full HMM (transitions,
  * cycle prior, step rules, forced epochs; no per-night adaptation) over all nights and update every μ and σ with MAP
  * shrinkage to the GLOBAL table with strength τ = `personal.emPriorStrength`:
@@ -172,7 +174,8 @@ object PopulationEmAdapter {
     ): UsableNight? {
         val night = NightPreparer.prepare(input, params)
         val usable =
-            night.preprocessed.sampleCount > 0 &&
+            night.mode == SessionMode.NIGHT &&
+                night.preprocessed.sampleCount > 0 &&
                 night.coverage >= params.preprocess.minCoverage &&
                 !night.statistics.elevated
         return if (usable) UsableNight(EmissionModel(night, params), TransitionModel(params.hmm, night.grid).logHmm()) else null

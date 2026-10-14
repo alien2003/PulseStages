@@ -1,8 +1,9 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.TimeSpan
-import io.github.alien2003.pulsestages.algo.params.FeatureParams
+import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightEntity
 import io.github.alien2003.pulsestages.data.local.db.NightBaselineDao
@@ -62,10 +63,11 @@ data class NightSpan(
  * gaps, and the rolling baseline nadir of the nights before it. Throws
  * [io.github.alien2003.pulsestages.data.hc.HealthDataException] on Health Connect errors.
  *
- * Naps and the baseline (`features.baselineMinSessionMin`, 180 min by default): a session shorter than that gets no
- * baseline (it is never compared with it, so it is never flagged "elevated heart rate"), and the baseline of a longer
- * one is the median nadir of the previous sessions that were at least that long (a nap's higher daytime nadir would
- * inflate it). Every reader of an estimation input (pipeline, night detail, reference comparison, personalization)
+ * Naps and the baseline (`napMode.maxSessionMin`, 180 min by default): a nap, a session shorter than that, gets no
+ * baseline (it is never compared with it, so it is never flagged "elevated heart rate"), and the baseline of a night is
+ * the median nadir of the previous sessions that were at least that long (a nap's higher daytime nadir would inflate
+ * it; the stored session length decides, not the mode a night was estimated with, so a changed threshold applies to
+ * the history at once). Every reader of an estimation input (pipeline, night detail, reference comparison, personalization)
  * goes through this class, so the rule is the same everywhere.
  */
 class NightInputReader
@@ -105,17 +107,17 @@ class NightInputReader
                 respiratoryRate = if (respiratory) repository.readRespiratoryRate(fromMs, toMs, packages) else emptyList(),
                 hrv = if (hrv) repository.readHrv(fromMs, toMs, packages) else emptyList(),
                 forcedAwake = span.forcedAwake,
-                baselineNadirBpm = baselineFor(span, params.features),
+                baselineNadirBpm = baselineFor(span, params),
             )
         }
 
         /** The baseline nadir for [span], or null for a nap (see the class documentation) or without enough nights. */
         private suspend fun baselineFor(
             span: NightSpan,
-            features: FeatureParams,
+            params: AlgoParams,
         ): Double? =
-            if (features.countsForBaseline(span.durationMs)) {
-                baselines.baselineBefore(span.startMs, features.baselineNights, features.baselineMinSessionMs)
+            if (params.modeOf(span.durationMs) == SessionMode.NIGHT) {
+                baselines.baselineBefore(span.startMs, params.features.baselineNights, params.napMode.maxSessionMs)
             } else {
                 null
             }

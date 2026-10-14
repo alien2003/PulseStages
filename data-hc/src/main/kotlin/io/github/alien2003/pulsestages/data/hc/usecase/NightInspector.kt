@@ -9,6 +9,7 @@ import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.data.hc.di.EstimationDispatcher
@@ -43,6 +44,9 @@ data class NightInspection(
 ) {
     /** The estimate, or null when the night is not estimable with the current parameters. */
     val estimate: NightEstimate? get() = (outcome as? EstimationOutcome.Estimated)?.estimate
+
+    /** Night or nap under the current parameters ([AlgoParams.modeOf] of the session length). */
+    val mode: SessionMode get() = params.modeOf(input.sessionEndMs - input.sessionStartMs)
 
     /**
      * The written output was made with another algorithm version or params hash (it may differ from [estimate]); the
@@ -114,9 +118,11 @@ data class CsvExport(
 /**
  * The night detail screen's view of one night: re-reads the night's inputs from Health Connect (the session, package
  * and fragments recorded in the ledger, the current `hrSources` policy and settings) and runs the estimator WITHOUT
- * writing anything. [inspect] returns the full estimate (per-epoch posteriors and features), [compareWith] runs a
- * second estimator (RULES by default) on the same input and measures the agreement, [exportCsv] produces the
- * per-epoch CSV. Reads in the foreground (the screen is visible). Never throws except for cancellation.
+ * writing anything, in the session's mode under the current settings (a nap with the nap estimator, overrides and nap
+ * model; a nap under the SKIP policy is reported as not estimated, NAP_SKIPPED). [inspect] returns the full estimate
+ * (per-epoch posteriors and features), [compareWith] runs a second estimator (RULES by default) on the same input and
+ * measures the agreement, [exportCsv] produces the per-epoch CSV. Reads in the foreground (the screen is visible).
+ * Never throws except for cancellation.
  */
 class NightInspector
     @Inject

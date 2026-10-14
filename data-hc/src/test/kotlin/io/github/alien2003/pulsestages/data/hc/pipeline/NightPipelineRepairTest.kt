@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.data.hc.EstimatedSessionWrite
 import io.github.alien2003.pulsestages.data.hc.HcStage
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
@@ -41,7 +42,18 @@ class NightPipelineRepairTest {
             val start = nightStart(1)
             val first = h.repository.addNight(OHEALTH, start, durationMs = 4 * HOUR_MS)
             val oldCid = NightKeys.clientRecordId(listOf(first.uuid))
-            val notes = SessionText.notes(EstimatorType.HYBRID, 1, "old", 1.0, 0.5, listOf(first.uuid), 120, calibrated = false)
+            val notes =
+                SessionText.notes(
+                    EstimatorType.HYBRID,
+                    SessionMode.NIGHT,
+                    1,
+                    "old",
+                    1.0,
+                    0.5,
+                    listOf(first.uuid),
+                    120,
+                    calibrated = false,
+                )
             h.repository.preloadOwnSession(ownWrite(oldCid, first.startMs, first.endMs, notes))
             // Another night of ours that only touches this one (less than half of the shorter overlaps) stays.
             val neighbour = ownWrite("ps:neighbour", start + 6 * HOUR_MS, start + 14 * HOUR_MS, "{}")

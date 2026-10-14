@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.data.local.db
 
 import android.database.sqlite.SQLiteConstraintException
 import androidx.room.withTransaction
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.data.local.testutil.DatabaseTest
 import io.github.alien2003.pulsestages.data.local.testutil.FlowRecorder
@@ -45,6 +46,36 @@ class EstimatedNightDaoTest : DatabaseTest() {
             assertEquals(1001L, stored.clientRecordVersion)
             assertEquals(listOf(WarningCode.DATA_GAPS), stored.warnings)
             assertEquals(1, dao.observeSummaries().first().size)
+        }
+
+    @Test
+    fun modeAndSleepWakeOnlyRoundTripAndDefaultToANightWithEveryStage() =
+        runTest {
+            dao.upsert(night("ps:night", startMs = 0))
+            dao.upsert(night("ps:nap", startMs = 24 * HOUR_MS, hours = 1).copy(mode = SessionMode.NAP, sleepWakeOnly = true))
+
+            val night = checkNotNull(dao.findByClientRecordId("ps:night"))
+            val nap = checkNotNull(dao.findByClientRecordId("ps:nap"))
+            assertEquals(SessionMode.NIGHT, night.mode)
+            assertEquals(false, night.sleepWakeOnly)
+            assertEquals(SessionMode.NAP, nap.mode)
+            assertEquals(true, nap.sleepWakeOnly)
+            val summaries = dao.observeSummaries().first().associateBy { it.clientRecordId }
+            assertEquals(SessionMode.NAP, summaries.getValue("ps:nap").mode)
+            assertEquals(true, summaries.getValue("ps:nap").sleepWakeOnly)
+            assertEquals(SessionMode.NIGHT, summaries.getValue("ps:night").mode)
+            // A row inserted without the new columns (as version 1 wrote them) reads as a night with every stage.
+            db.openHelper.writableDatabase.execSQL(
+                "INSERT INTO estimated_nights (clientRecordId, sourceUuids, sourcePackage, sessionStartMs, sessionEndMs, " +
+                    "startZoneOffsetSec, endZoneOffsetSec, algoVersion, paramsHash, estimator, coverage, confidence, recomputeCount, " +
+                    "clientRecordVersion, status, awakeMin, lightMin, deepMin, remMin, unknownMin, elevatedHr, lowConfidence, " +
+                    "calibrated, rulesFallback, warnings, hrSamples, stagesJson, createdAt, updatedAt) " +
+                    "VALUES ('ps:raw', '[]', 'p', 0, 1, 0, 0, 1, 'h', 'HMM', 0, 0, 0, 0, 'WRITTEN', 0, 0, 0, 0, 0, 0, 0, 0, 0, " +
+                    "'[]', 0, '[]', 0, 0)",
+            )
+            val raw = checkNotNull(dao.findByClientRecordId("ps:raw"))
+            assertEquals(SessionMode.NIGHT, raw.mode)
+            assertEquals(false, raw.sleepWakeOnly)
         }
 
     @Test

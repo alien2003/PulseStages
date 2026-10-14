@@ -12,7 +12,8 @@ import java.util.Locale
 
 /**
  * `estimate --night <file> [--id <night id>] [--estimator RULES|HMM|HYBRID] [--model <bundle>] [--params <json>]
- * --csv <out.csv>`: estimates one night through SleepStager.run and writes the in-app CSV export (CsvExporter).
+ * --csv <out.csv>`: estimates one night through SleepStager.run and writes the in-app CSV export (CsvExporter, with the
+ * session's mode); `--estimator` sets the estimator of nights and naps.
  */
 internal object EstimateCommand {
     private const val PERCENT = 100.0
@@ -42,8 +43,9 @@ internal object EstimateCommand {
                 val summary =
                     String.format(
                         Locale.ROOT,
-                        "night=%s estimator=%s coverage=%.1f%% confidence=%.3f warnings=%s -> %s",
+                        "night=%s mode=%s estimator=%s coverage=%.1f%% confidence=%.3f warnings=%s -> %s",
                         record.id,
+                        estimate.mode,
                         estimate.estimator,
                         estimate.coverage * PERCENT,
                         estimate.confidence,
@@ -61,7 +63,10 @@ internal object EstimateCommand {
         }
     }
 
-    /** [params] with the estimator named [name] (RULES, HMM or HYBRID), unchanged when [name] is null. */
+    /**
+     * [params] with the estimator named [name] (RULES, HMM or HYBRID) for nights and naps (`estimator` and
+     * `napMode.estimator`), unchanged when [name] is null.
+     */
     fun withEstimator(
         params: AlgoParams,
         name: String?,
@@ -70,7 +75,7 @@ internal object EstimateCommand {
         val estimator =
             EstimatorType.entries.firstOrNull { it.name == name.uppercase(Locale.ROOT) }
                 ?: throw CliException("unknown estimator '$name' (RULES, HMM or HYBRID)", ExitCodes.USAGE)
-        return params.copy(estimator = estimator)
+        return params.withEstimator(estimator)
     }
 
     /** Parses the bundle in [path]. */

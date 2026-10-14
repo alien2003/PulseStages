@@ -5,6 +5,7 @@ import io.github.alien2003.pulsestages.algo.features.BaseFeatures
 import io.github.alien2003.pulsestages.algo.features.NightStatistics
 import io.github.alien2003.pulsestages.algo.model.EstimationWarning
 import io.github.alien2003.pulsestages.algo.model.NightInput
+import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.preprocess.EpochGrid
@@ -34,13 +35,13 @@ internal class NightCache {
 
 /**
  * Everything the estimators share for one night: the preprocessed heart rate, the night statistics and the base
- * features, all computed with [params].
+ * features, all computed with [params], and the session's [mode].
  */
 class PreparedNight internal constructor(
     /** The night as given by the caller. */
     val input: NightInput,
-    /** Parameters used for the preparation. */
-    val params: AlgoParams,
+    /** The parameters as given by the caller ([NightPreparer.prepare], [withParams]); part of the params hash. */
+    val configuredParams: AlgoParams,
     /** Preprocessed heart rate. */
     val preprocessed: PreprocessedNight,
     /** Night-level statistics (P10/P50/nadir/elevated). */
@@ -50,17 +51,32 @@ class PreparedNight internal constructor(
     internal val cache: NightCache = NightCache(),
 ) {
     /**
-     * This night with the parameters [params]. When the preprocessing and feature parameters are unchanged the
-     * preprocessing, statistics, features and cached hybrid features/classifier outputs are reused (only decoder and
-     * post-processing parameters differ); otherwise the night is prepared again from [input].
+     * Night or nap: decided by the session length (end − start) and `configuredParams.napMode.maxSessionMin`
+     * ([AlgoParams.modeOf]).
+     */
+    val mode: SessionMode = configuredParams.modeOf(input.sessionEndMs - input.sessionStartMs)
+
+    /**
+     * The parameters in effect for this session: [configuredParams] for a night, for a nap with the nap overrides of
+     * `napMode` applied ([AlgoParams.forMode]). The estimators and the post-processing read these.
+     */
+    val params: AlgoParams = configuredParams.forMode(mode)
+
+    /**
+     * This night with the parameters [params] (as given; the mode is decided again). When the preprocessing and
+     * feature parameters and the mode are unchanged the preprocessing, statistics, features and cached hybrid
+     * features/classifier outputs are reused (only decoder, post-processing or nap-override parameters differ);
+     * otherwise the night is prepared again from [input].
      */
     fun withParams(params: AlgoParams): PreparedNight =
         when {
-            params == this.params -> {
+            params == configuredParams -> {
                 this
             }
 
-            params.preprocess == this.params.preprocess && params.features == this.params.features -> {
+            params.preprocess == configuredParams.preprocess &&
+                params.features == configuredParams.features &&
+                params.modeOf(input.sessionEndMs - input.sessionStartMs) == mode -> {
                 PreparedNight(input, params, preprocessed, statistics, features, cache)
             }
 
@@ -122,15 +138,16 @@ class PreparedNight internal constructor(
 object NightPreparer {
     /**
      * Preprocesses [input] and computes its statistics and base features with [params]. The input's baseline nadir is
-     * used only for a session that counts for the baseline
-     * ([io.github.alien2003.pulsestages.algo.params.FeatureParams.countsForBaseline]): a nap is never elevated.
+     * used only for a night ([SessionMode.NIGHT], [AlgoParams.modeOf]): a nap is never compared with the baseline, so it
+     * is never elevated.
      */
     fun prepare(
         input: NightInput,
         params: AlgoParams,
     ): PreparedNight {
         val preprocessed = Preprocessor.preprocess(input, params.preprocess)
-        val baseline = input.baselineNadirBpm.takeIf { params.features.countsForBaseline(input.sessionEndMs - input.sessionStartMs) }
+        val night = params.modeOf(input.sessionEndMs - input.sessionStartMs) == SessionMode.NIGHT
+        val baseline = input.baselineNadirBpm.takeIf { night }
         val statistics = NightStatistics.compute(preprocessed, params.features, baseline)
         val features = BaseFeatureExtractor.extract(input, preprocessed, statistics, params.features)
         return PreparedNight(input, params, preprocessed, statistics, features)
