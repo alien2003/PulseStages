@@ -20,6 +20,8 @@ on:
   # request would wait forever for required checks. The "changes" job skips the jobs instead, and GitHub counts a
   # skipped job as a passed check.
   pull_request:
+  # Manual run of the full CI on any branch (Actions tab -> CI -> Run workflow).
+  workflow_dispatch:
 
 permissions:
   contents: read
