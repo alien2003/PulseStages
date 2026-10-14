@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide
+    url: https://github.com/alien2003/PulseStages/blob/main/docs/user-guide.md
+    about: Installation, permissions, every screen, troubleshooting and frequently asked questions.
+  - name: Documentation index
+    url: https://github.com/alien2003/PulseStages/blob/main/docs/README.md
+    about: All documents, including the settings reference, Health Connect details and privacy.
+  - name: Accuracy and validation
+    url: https://github.com/alien2003/PulseStages/blob/main/ALGORITHM.md#13-results
+    about: How accurate the estimates are for nights and naps, measured on open datasets.
+  - name: Report a security vulnerability
+    url: https://github.com/alien2003/PulseStages/security/policy
+    about: Do not open a public issue. The security policy explains how to report privately.

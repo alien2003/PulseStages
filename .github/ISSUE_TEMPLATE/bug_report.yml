@@ -1,0 +1,136 @@
+name: Bug report
+description: Something in the app, the build or the training tools does not work as documented.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Please write in English.
+
+        - **Security problems must not be reported here.** Follow [SECURITY.md](https://github.com/alien2003/PulseStages/blob/main/SECURITY.md) instead.
+        - **Issues are public.** Do not paste health data. Read the log before you attach it.
+        - The stages are estimates, not measurements. One night that looks wrong is not necessarily a bug; the validated accuracy is in [ALGORITHM.md, section 13](https://github.com/alien2003/PulseStages/blob/main/ALGORITHM.md#13-results).
+        - [CONTRIBUTING.md](https://github.com/alien2003/PulseStages/blob/main/CONTRIBUTING.md#reporting-a-bug) explains every field below.
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Copy the line from Settings → "Versions and licences" ("Version … · algorithm … · model …").
+      placeholder: "Version 0.1.0 · algorithm 1 · model …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      options:
+        - Release APK from the Releases page
+        - Debug APK from the Releases page
+        - CI artifact or dry-run build
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      description: Phone model, Android version and, if the phone maker has its own system (for example ColorOS), its version.
+      placeholder: "OPPO Find N6, Android 16, ColorOS 16.0.10"
+    validations:
+      required: true
+
+  - type: input
+    id: health-connect
+    attributes:
+      label: Health Connect
+      description: On Android 9–13, the version of the Health Connect app. On Android 14 and later it is part of the system; write "built in".
+      placeholder: "built in"
+    validations:
+      required: false
+
+  - type: input
+    id: sources
+    attributes:
+      label: Sleep sources
+      description: Which apps wrote the sleep sessions and heart rate (for example OHealth), in the order shown on the Sources screen.
+      placeholder: "OHealth"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Permissions or Health Connect status
+        - Estimating or writing nights (Home, automatic runs)
+        - Naps
+        - Backfill or recompute
+        - Nights list or night detail
+        - Compare or calibration
+        - Settings, export or import
+        - Sources
+        - Log
+        - Deleting data
+        - Building from source or CI
+        - Training tools (tools/train)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the problem. Quote the exact text of any message the app showed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Tap …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Set Settings → Debugging → "Log level" to Debug, reproduce the problem, then open Settings → Log, select the levels and tap the share icon ("Share log"). Attach `pulsestages-log.txt` (drag it into this field) or paste the relevant lines between lines of three backticks. Remove anything you do not want to publish.
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Optional. Check them for personal data first.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and the troubleshooting section of the user guide.
+          required: true
+        - label: This report contains no health data that I do not want to publish.
+          required: true

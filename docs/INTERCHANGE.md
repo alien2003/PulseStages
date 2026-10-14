@@ -224,7 +224,7 @@ A bundle whose `featureSetVersion` or `featureNames` differ from this build's `H
 unusable: the estimator falls back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. The `hmm` section is informational
 (the HMM always uses `AlgoParams.hmm`; the training pipeline may turn those estimates into the defaults).
 
-Decoding (ALGO_DESIGN.md "Hybrid"): zero bout transitions off the diagonal and zero initial probabilities are replaced
+Decoding ([ALGORITHM.md §7](../ALGORITHM.md#7-hybrid-estimator-hybrid)): zero bout transitions off the diagonal and zero initial probabilities are replaced
 by `hmm.epsilon` (rows renormalized); the diagonal of `boutTransitions` is used as given (0 = a bout is never followed
 by a bout of the same stage, so a bout cannot exceed `maxBoutMin`), except that a night with no feasible
 segmentation (e.g. a forced-awake span longer than `maxBoutMin`) is decoded again with the diagonal floored at ε.
@@ -246,7 +246,7 @@ Conventions shared by training and decoding (they must not drift apart):
   AlgoParams (a deliberate deviation from "every number is a parameter": the weights are only valid for exactly
   these features). Changing one means a new feature-set version and a retrained bundle.
 
-## 4. Personal model (`PersonalModel.toJson()`, stored by :data-local in `personal_models.json`)
+## 4. Personal model (`PersonalModel.toJson()`, stored by :data-local in the Room table `personal_models`)
 
 ```json
 {

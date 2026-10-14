@@ -5,235 +5,163 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release tags are `vMAJOR.MINOR.PATCH`, and
 `vMAJOR.MINOR.PATCH-alpha.N`, `-beta.N` or `-rc.N` for pre-releases. The release workflow derives versionName and
-versionCode from the tag and takes the release notes from the tag's section of this file (see README, "GitHub: CI and
-releases").
+versionCode from the tag and publishes the tag's section of this file as the release notes, so links inside a version
+section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
-### Changed
+## [0.1.0] - 2026-10-14
 
-- **Naps get their own model.** The bundled model (`pulsestages-walch+bidsleep-mlp-nap-model-final`) now has a nap
-  model: a classifier with its own bout lengths, transitions and stage correction, trained on nap-length pieces of the
-  validation nights (the first 30–170 min, and pieces that end with an awakening). It decodes every nap, i.e. every
-  session shorter than the nap threshold (180 min), including short nights of 90–180 min under the default source
-  filter. Chosen by a pre-registered leave-one-subject-out test (ALGORITHM.md §13.12, `docs/prereg/prereg-nap-model.md`,
-  committed before the test ran): on the PSG nap pieces accuracy 0.50 → 0.61, summed stage-share error 70 → 53 points,
-  κ 0.17 → 0.36 compared with the previous night model plus short-session correction, and better than calling
-  everything light sleep. Nap estimates remain rough (README, "Naps"). The nap decoder settings ("Duration model of naps",
-  "Emission weight of naps", "Time-of-night prior of naps") now default to the validated values (explicit, 0.5, 0: the
-  same as nights, but no longer following a change of the night settings). "Written for a nap" stays **Stages** by
-  default, now as the outcome of the same pre-registered test. **Nights are estimated exactly as before** (checked
-  night by night and per epoch against the previous bundle). A personal calibration is now keyed by the night model
-  alone (the bundle without its nap parts and metadata), so this and later nap-model updates keep a calibration made
-  with the same night model; a calibration made with an earlier key still applies only to the bundle it was made with. Because the bundle and the defaults changed, every
-  estimate's params hash changes and the app offers to recompute.
-- **Nights and naps are two processing modes** (ALGORITHM.md §18, README "Naps"). One threshold, Settings → **Naps**
-  → "Nap threshold" (`napMode.maxSessionMin`, 180 min; 0 = no naps), decides whether a session is a nap or a night;
-  it replaces the three 180-min thresholds `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and
-  `post.proportionsMinSessionMin` of the entries below (a settings file with the old keys loads with them ignored).
-  The source setting "Minimum session length" stays the minimum below which sessions are ignored. A nap may get its
-  own estimator ("Estimator for naps"; by default "Same as nights", so a settings file with `algo.estimator` HMM or
-  RULES still estimates its short sessions with that estimator), what is written for it ("Written for a nap":
-  **Stages**, as before; **Asleep / awake**, only AWAKE and SLEEPING in Health Connect; **Nothing**, not estimated and
-  not written: a skipped nap removes only its own earlier records and nights of the same sleep, never another app's
-  overlapping night, which is estimated instead; it is not retried for late heart rate, and after switching back
-  "Recompute stale" writes it), and its
-  own values of the minimum bouts, the stage-share corridors and whether they are checked (off), the uncertain-epoch
-  threshold and policy, and the hybrid decoder (duration model, emission and time-prior weights); empty = the
-  value of nights. The model bundle may carry a nap model (`nap` section, docs/INTERCHANGE.md) that decodes naps
-  instead of the main model; the bundled model has none, so naps are decoded as before. **With the default settings
-  every night and nap is estimated exactly as before** (checked on synthetic sessions against the previous build, and
-  on the validation nights and nap segments: byte-identical output). Calibration on reference nights and the
-  unsupervised adaptation use nights only.
-- **Nights list**: a **Nap** badge and a filter (All / Nights / Naps); a nap skipped under **Nothing** is not shown as
-  a problem. **Night detail** says whether the session was processed as a night or a nap, and for a written nap that
-  its stages are rough; for a nap written as asleep / awake the hypnogram is labelled as the app's estimate and the
-  epoch details show the written value (asleep / awake). **Home** counts written nights and naps apart. **Compare**
-  shows kappa and accuracy of nights and naps apart when the reference sessions include naps. **Settings**: the group
-  **Naps** holds the threshold, "Written for a nap" and "Estimator for naps" (menus); the nap values of the algorithm
-  are in the collapsed group "Naps: algorithm". Wherever a choice's labels do not fit side by side (a translation, a
-  large font), it is shown as a list of radio buttons instead of segmented buttons.
-- The notes of every written session have `"mode"` (`NIGHT` / `NAP`); the CSV export has a last column `mode`;
-  `algo-cli evaluate` reports metrics by mode (`byMode`), evaluates nap proxies (`--nap-proxies 30,60,90,120`) and
-  takes fold bundles with nap sections (`--fold-models`); `--estimator` sets the estimator of nights and naps.
-- The ledger database moves to schema version 2 (the mode of every session, and whether a nap was written as asleep /
-  awake only). The migration keeps every row; rows of sessions shorter than 180 min become naps.
-- **Demo mode** (debug builds only) is a switch in Settings → "Debug build" instead of a second launcher icon
-  ("PulseStages demo"). The Nights list, the night detail and Compare follow it at once, without a restart
-  (background estimation and the Home actions keep working with the real data); every build has a single launcher
-  icon. The switch is a per-device debug convenience in its own preferences file, not a setting (not exported, not
-  part of the params hash). `ReleaseApkTest` checks that the minified release APK has no demo class, resource or text.
-- **Naps and the elevated-heart-rate baseline**: naps, sessions shorter than the nap threshold (180 min, now
-  `napMode.maxSessionMin`, above; 0 = as before) no longer enter the rolling nadir baseline and are never compared with
-  it, so estimated daytime naps neither inflate the baseline of the nights nor get flagged "elevated heart rate"
-  themselves. Their nadir is still stored; the baseline query counts only long enough sessions, so a changed threshold
-  applies to the whole history.
-- **Naps and the stage-share checks**: the sanity check and the proportion calibration run only for nights (sessions
-  of at least the nap threshold, 180 min; 0 = as before; for naps with "Check the stage shares of naps"); naps no
-  longer get `SANITY_DEEP_LOW` and a low-confidence flag for having no deep sleep.
-- **Naps get their own stage correction.** Sessions shorter than 180 min (the nap threshold; 0 = off) are decoded with
-  the bundle's new short-session log-bias `stageLogBiasShort` instead of the whole-night `stageLogBias`. Chosen by a
-  pre-registered evaluation on nap-length segments of the validation nights (ALGORITHM.md §13.11): accuracy 0.41 → 0.49,
-  summed stage-share error 93 → 72 points, most of the false REM in naps removed. Sessions of 180 min or more are
-  decoded exactly as before; with the default "Minimum session length" (90 min), short nights of 90–180 min also get the
-  short-session correction. The pre-registered evaluation covered sessions up to 120 min; a post-hoc check at 150 and
-  170 min found no clear gain (share error better on one sampling variant, worse on the other; too little REM). Nap
-  estimates remain rough (README, "Naps"). In the evaluation about 4 in 5 naps were flagged low-confidence, mostly by
-  the stage-share sanity check; since that check now skips sessions shorter than 180 min (above), only a too-small
-  heart-rate range flags a nap (about 1 in 3 to 2 in 5 of the evaluated 30–120-min naps; the stages are the same). New
-  bundle `pulsestages-walch+bidsleep-mlp-naps-final` (same classifier); because the bundle and AlgoParams changed,
-  earlier estimates get a new params hash and are offered for recomputation, and the classifier part of a personal
-  calibration fitted for the previous bundle is ignored until you calibrate again.
-- **Source priority**: a session lying mostly inside a longer session of another app while covering at most half of
-  it (e.g. a 40-min fragment) is a piece of that night and no longer replaces it, whatever the priority — as long as
-  that longer session is used itself; a piece of a session that lost to another night is weighed by priority as before.
-- The nap mode (`napMode`, including the nap threshold) is part of the params hash: nights estimated before are
-  offered for recomputation.
+First release. PulseStages estimates sleep stages (awake, light, deep, REM) from the heart rate that OHealth (OPPO
+Watch) writes to Health Connect, and writes them back to Health Connect as a separate sleep session marked as an
+estimate. The stages are estimated, not measured: on the open validation data, agreement with the sleep lab is fair
+for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epochs right); see
+[ALGORITHM.md §13](https://github.com/alien2003/PulseStages/blob/v0.1.0/ALGORITHM.md#13-results) and the
+[limitations](https://github.com/alien2003/PulseStages/blob/v0.1.0/ALGORITHM.md#16-limitations). Start with the
+[user guide](https://github.com/alien2003/PulseStages/blob/v0.1.0/docs/user-guide.md).
 
 ### Added
 
-- Tests of the two processing modes at every layer: the mode boundaries and the one threshold, the nap overrides and
-  output policies, the nap model of the bundle (parsing, validation, fingerprint, fallback), the ledger migration
-  against the exported schemas, the pipeline (SLEEP_WAKE stages, SKIP, recompute), the UI state of the badge, filter
-  and counters, render tests of the Naps group, the badge and the filter, and a regression test that compares 767
-  estimates with the ones recorded on the build before the two modes.
-- Render tests of every Settings group (every field, option, the HMM tables and the About card) and of every other
-  screen in its main states, in English and Russian, at font scale 2 and in a wide window; a test that resolves every
-  text of the settings catalog; a scan of every string with `%` for invalid format patterns.
+#### App
 
-### Fixed
+- **Screens.** Compose Material 3 UI with four tabs: Home, Nights, Compare and Settings; Sources and Log open from
+  Settings. Dynamic colour on Android 12+, light and dark theme, edge-to-edge. On wide screens (the unfolded
+  foldable), Nights shows the list and the detail side by side and Settings uses two columns. The UI is in English and
+  Russian; choices whose labels do not fit side by side are shown as radio buttons.
+- **Home**: Health Connect status (with install / update on Android 9–13); required and optional permissions, with
+  separate indicators for history access, background access and notifications; enabled sources, last and next run;
+  counters of found, estimated, skipped, stale and failed sessions, and of nights and naps written. Buttons "Estimate
+  new", "Backfill history" (progress, cancel, resume), "Recompute all", "Recompute stale nights" and "Delete my
+  sessions from Health Connect".
+- **Nights**: the list shows duration, stage shares, confidence and coverage, with "Stale", "Elevated heart rate",
+  "Low confidence" and "Nap" markers, and a filter All / Nights / Naps. The night detail shows a hypnogram, the
+  heart-rate curve, per-epoch probabilities and features, the warnings, and whether the session was processed as a
+  night or a nap. Actions: "Recompute", "Compare with RULES", "Export CSV" and "Delete my session".
+- **Compare** scores the estimates against sessions with real stages from other apps: kappa, accuracy, macro F1,
+  per-stage metrics, a confusion matrix, per-night scores, and nights and naps apart. "Calibrate" fits a personal model
+  on these nights (kappa before and after on held-out nights); "Reset to global model" removes it.
+- **Settings** has every parameter in groups, each with a hint, JSON export and import with validation, reset to
+  defaults, reset of the HMM emissions to the physiology table, and an offer to recompute the sessions a change made
+  stale. The last card, "Versions and licences", shows the app, algorithm and model versions, the licence and the
+  ODC-By attribution notice of the training datasets.
+- **Sources** lists the apps that wrote sleep sessions to Health Connect (icon, name, session count, last session),
+  with an enable switch and a priority order for each; packages can be added by name, and a switch takes heart rate
+  and steps from any app.
+- **Log** with a filter by level and sharing as a text file.
+- **Privacy**: a permission rationale and privacy screen, reachable from Home and from Health Connect
+  (`ACTION_SHOW_PERMISSIONS_RATIONALE`, and on Android 14+ the `VIEW_PERMISSION_USAGE` activity-alias). The app has no
+  `INTERNET` permission.
+- **Icon**: adaptive vector launcher icon with a monochrome layer, and `docs/icon.svg`.
+- **Demo mode** (debug builds only): Settings → "Debug build" → "Demo mode" switches the Nights list, the night detail
+  and Compare to synthetic nights and naps, for screenshots. The release build contains none of its code or text.
 
-- **Settings**: opening the "Features" group crashed the app with `UnknownFormatConversionException`. Its percent
-  fields have the unit "%" (`formatted="false"`), and a text without arguments was still resolved with
-  `Resources.getString(id, *emptyArray())`, which runs `String.format`. Texts without arguments are now read as they
-  are.
+#### Nights and naps
 
-## [0.1.0] - 2026-10-13
+- Every session is processed as a **night** or a **nap**. Settings → **Naps** → "Nap threshold" (180 min; 0 = no
+  naps) decides which; sessions shorter than the source setting "Minimum session length" (90 min) are ignored.
+- "Written for a nap": **Stages** (the default), **Asleep / awake** (only AWAKE and SLEEPING are written to Health
+  Connect) or **Nothing** (not estimated and not written; "Recompute stale nights" writes them after switching back).
+  "Estimator for naps" defaults to "Same as nights". The nap values of the algorithm are in the collapsed group
+  "Naps: algorithm" (empty = the value of nights).
+- Naps never enter the elevated-heart-rate baseline and are never compared with it. The stage-share sanity check and
+  the proportion calibration skip naps unless "Check the stage shares of naps" is on. Calibration on reference
+  nights and the population EM use nights only.
+- The bundled model has a dedicated nap model, chosen by a pre-registered leave-one-subject-out test on nap-length
+  pieces of the validation nights
+  ([ALGORITHM.md §13.12](https://github.com/alien2003/PulseStages/blob/v0.1.0/ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted)).
+  The night detail of a written nap says that its stages are rough.
 
-First release.
+#### Health Connect and storage
 
-### Added
-
-#### App (`:app`)
-
-- **Navigation and layout**
-  - Compose Material 3 UI with four tabs: Home, Nights, Compare and Settings. Sources and Log open from Settings.
-  - Dynamic colour on Android 12+, light and dark theme, edge-to-edge.
-  - On wide screens (the unfolded foldable), Nights shows list and detail side by side, and Settings uses two columns.
-- **Home**
-  - Health Connect status, with install / update on Android 9–13.
-  - Required and optional permissions, with separate indicators for history access, background access and
-    notifications.
-  - Enabled sources, last and next run, and counters of found, estimated, skipped, stale and failed nights.
-  - Buttons: "Estimate new", "Backfill history" (progress, cancel, resume), "Recompute all", "Recompute stale nights"
-    and "Delete my sessions from Health Connect".
-- **Nights**
-  - The list shows duration, stage shares, confidence and coverage, with "Stale", "Elevated heart rate" and "Low
-    confidence" markers.
-  - The night detail shows a Canvas hypnogram, the heart-rate curve, per-epoch probabilities and features, and the
-    warnings.
-  - Night actions: "Recompute", "Compare with RULES", "Export CSV" and "Delete my session".
-- **Compare** works with reference nights that have real stages from other apps. It shows kappa, accuracy, macro F1,
-  per-stage metrics, a confusion matrix and per-night scores. It offers "Calibrate" (personal model, kappa before and
-  after on held-out nights) and "Reset to global model".
-- **Settings** has every parameter, grouped, each with a hint. It offers JSON export and import with validation, reset
-  to defaults, reset of the HMM emissions to the physiology table, and an offer to recompute nights that a change
-  made stale. Its last card, "Versions and licences", shows the app, algorithm and model versions, the licence and
-  the ODC-By attribution notice of the training datasets.
-- **Sources** lists the apps that wrote sleep sessions to Health Connect, with icon, name, session count and last
-  session. Each has an enable switch and a priority order, packages can be added manually, and a switch takes heart
-  rate and steps from any app.
-- **Log** has a filter by level and sharing as a text file.
-- **Privacy**
-  - Permission rationale / privacy screen, reachable from Home and from Health Connect
-    (`ACTION_SHOW_PERMISSIONS_RATIONALE`, and on Android 14+ the `VIEW_PERMISSION_USAGE` activity-alias).
-  - No `INTERNET` permission.
-- **Strings** in English and Russian.
-- **Icon**: adaptive vector launcher icon with a monochrome layer, plus the vector icon `docs/icon.svg`.
-- **Demo mode** (debug builds only) with synthetic nights, for screenshots; the release build contains none of its
-  code or text.
-- **Screenshots** in `docs/screenshots/`, rendered on the JVM from synthetic data by `ScreenshotsTest`.
-
-#### Health Connect and storage (`:data-hc`, `:data-local`)
-
-- **Repository** over connect-client 1.1.0:
-  - paginated reads;
-  - upsert by `clientRecordId`, verified by reading it back, with delete-and-insert as the fallback;
-  - deletes of the app's own records only;
-  - Changes API, scan of sleep origins, error mapping with backoff on rate limits and transient errors.
-- **Night pipeline**:
+- **Repository** over connect-client 1.1.0: paginated reads; upsert by `clientRecordId`, verified by reading the
+  record back, with delete-and-insert as the fallback; deletes of the app's own records only; Changes API; scan of
+  sleep origins; error mapping with backoff on rate limits and transient errors.
+- **Session pipeline**:
   - source allowlist (default OHealth); the app's own sessions and sessions that already have stages are skipped;
-  - nap filter (`minSessionMin`), and fragment merging (`mergeGapMin`) with the gaps written as AWAKE;
-  - priority between sources, also against a higher-priority source that recorded the night with its own stages;
-  - deterministic `clientRecordId` (`ps:` + SHA-256 of the sorted source uuids), and `clientRecordVersion` =
+  - fragments closer than "Merge gap" (30 min) are merged, with the gaps written as AWAKE;
+  - priority between sources, also against a higher-priority source that recorded the night with its own stages; a
+    session that lies mostly inside a longer session of another app and covers at most half of it is a piece of that
+    night and does not replace it;
+  - deterministic `clientRecordId` (`ps:` + SHA-256 of the sorted source uuids) and `clientRecordVersion` =
     `ALGO_VERSION · 1000 + recompute count`;
   - replaced outputs are superseded, deleted sources are handled, records left from before a reinstall are
-    de-duplicated, and a failure on one night does not stop the others;
-  - overwrite policies "Skip up-to-date nights", "Recompute everything" and "Never overwrite".
-- **Sync and backfill**:
-  - Changes-API sync that falls back to re-reading the last 7 days;
-  - history backfill in 7-day windows that resumes after a restart (the start of the range is a single-record
-    lookup);
-  - a guard that refuses background reads without `READ_HEALTH_DATA_IN_BACKGROUND`;
-  - deletion of all PulseStages sessions or of one night; erasing cancels a running backfill and recompute, and
-    neither writes a night again that was deleted after it was requested.
-- **Room ledger**: `estimated_nights`, `night_sources`, `source_sessions`, `night_baselines`, `log_entries`,
-  `backfill_state`, `personal_models`.
-- **DataStore**: settings (JSON export / import / reset; the file stores only changed values, so the trained
-  defaults follow app updates) and the changes token.
+    de-duplicated, and a failure on one session does not stop the others;
+  - overwrite policies "Skip up-to-date nights", "Recompute everything" and "Never overwrite";
+  - the notes of every written session are JSON: estimator, mode (`NIGHT` / `NAP`), algorithm version, params hash,
+    coverage, confidence, source session uuids, heart-rate sample count and whether the stage proportions were
+    calibrated; the CSV export has a last column `mode`.
+- **Sync and backfill**: Changes-API sync that falls back to re-reading the last 7 days; history backfill in 7-day
+  windows that resumes after a restart; a guard that refuses background reads without
+  `READ_HEALTH_DATA_IN_BACKGROUND`; deletion of all PulseStages sessions or of one session. Deleting cancels a running
+  backfill and recompute, and neither writes a deleted session again.
+- **Room ledger** `estimated_nights`, `night_sources`, `source_sessions`, `night_baselines`, `log_entries`,
+  `backfill_state`, `personal_models` (schema version 2, with exported schemas).
+- **DataStore** settings (JSON export, import and reset; the file stores only changed values, so trained defaults
+  follow app updates) and the changes token.
 - **Internal log**, mirrored to logcat with the tag `PulseStages`.
+- Data of development builds made before 0.1.0: the ledger migrates from schema version 1 and keeps every row, and a settings file
+  exported by such a build loads with the retired keys `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`
+  and `post.proportionsMinSessionMin` ignored (replaced by `napMode.maxSessionMin`).
 
 #### Background work (`:work`)
 
-- `EstimateNewNightsWorker`: hourly Changes-API check, a daily run at a configurable time (default 09:00), and
+- `EstimateNewNightsWorker`: an hourly Changes-API check, a daily run at a configurable time (default 09:00), and
   "Estimate new" as expedited work.
 - `BackfillWorker` with progress, cancel and resume, and `RecomputeWorker`.
-- All workers use a battery-not-low constraint (configurable), exponential backoff and a `dataSync` foreground
-  notification for runs the user starts.
+- The hourly and daily works wait for a battery that is not low (configurable); all works use exponential backoff,
+  and the runs the user starts show a `dataSync` foreground notification.
 
 #### Algorithm (`:core-algo`, `:algo-cli`)
 
-- **Estimators**
-  - Pure Kotlin/JVM module behind `StageEstimator`, with `ALGO_VERSION` 1.
-  - RULES: thresholds.
-  - HMM: Viterbi and forward-backward, time-of-night priors, REM lockout, ultradian-cycle prior, per-night EM.
-  - HYBRID (default): MLP emissions on multi-scale features, decoded by an explicit-duration HSMM or a geometric HMM.
-- **Processing**
-  - Preprocessing: range filter, Hampel filter, bounded interpolation, smoothing and coverage.
-  - Shared post-processing, confidence, and an elevated-heart-rate baseline.
-  - Personalization: calibration on reference nights, and population EM.
-- **Tooling**
-  - Metrics (kappa, accuracy, F1, confusion matrix, minute errors), synthetic night generator, params hash, CSV
-    export.
-  - `algo-cli` with `features`, `evaluate` and `estimate`, used by the training scripts.
+- **Estimators** behind `StageEstimator`, `ALGO_VERSION` 1: RULES (thresholds); HMM (Viterbi and forward-backward,
+  time-of-night priors, REM lockout, ultradian-cycle prior, per-night EM); HYBRID, the default (MLP emissions on
+  multi-scale features, decoded by an explicit-duration HSMM or a geometric HMM).
+- **Bundled model** `pulsestages-walch+bidsleep-mlp-nap-model-final` in `app/src/main/assets/models/hybrid_model.json`:
+  the night model with a per-stage log-bias that matches the stage shares to the sleep lab (pre-registered,
+  [ALGORITHM.md §13.10](https://github.com/alien2003/PulseStages/blob/v0.1.0/ALGORITHM.md#1310-stage-proportions-prior-exponent-and-proportion-matching-pre-registered-v3-adopted)),
+  and the nap model above.
+- **Processing**: preprocessing (range filter, Hampel filter, bounded interpolation, smoothing, coverage), shared
+  post-processing, confidence and an elevated-heart-rate baseline; personalization by calibration on reference nights
+  and population EM.
+- **Tooling**: metrics (kappa, accuracy, F1, confusion matrix, minute errors), a synthetic night generator, the params
+  hash, CSV export, and `algo-cli` with `features`, `evaluate` (metrics by mode, nap proxies, fold bundles with nap
+  sections) and `estimate`.
 
 #### Training and validation (`tools/train`)
 
-- License-checked download of PhysioNet sleep-accel 1.0.0 and BIDSleep 1.0.1 (both ODC-By 1.0). DREAMT is not used,
+- Licence-checked download of PhysioNet sleep-accel 1.0.0 and BIDSleep 1.0.1 (both ODC-By 1.0). DREAMT is not used,
   because its access is restricted.
 - OHealth emulation: one heart-rate value per 2 minutes (instantaneous and 2-minute mean), steps from the
   accelerometer, 4-class labels.
-- Leave-one-subject-out validation with nested selection, computed through `algo-cli`. The results are in
-  ALGORITHM.md §13.
-- Bundled model `app/src/main/assets/models/hybrid_model.json` and the generated `TrainedDefaults.kt`.
+- Leave-one-subject-out validation with nested selection, computed through `algo-cli`; the generated
+  `TrainedDefaults.kt`; the pre-registrations of the stage-proportion, nap and nap-model experiments, committed under
+  `docs/prereg/` with their SHA-256 files and command logs and checked by the Python tests.
 - pytest suite on synthetic data.
 
 #### Build, CI and documentation
 
 - **Toolchain**: Gradle 9.8.1 wrapper, AGP 9.4.1, Kotlin 2.4.21; compileSdk 37, targetSdk 36, minSdk 28; versions in
-  `gradle/libs.versions.toml`; project-local toolchain through `.mise.toml` and `.tooling/`.
-- **Quality checks**:
-  - ktlint, detekt (with KDoc required on the public API of `:core-algo`) and JUnit 5 tests;
-  - module-graph check, Android-free runtime classpath and no Android imports in `:core-algo`;
-  - merged-manifest tests (no `INTERNET`) and English / Russian string parity of every module;
-  - Robolectric tests of the production Hilt / WorkManager graph and of the UI wiring with a fake Health Connect.
-- **GitHub Actions**:
-  - CI runs ktlint, detekt, the tests and `assembleDebug`, and the Python tests. It skips documentation-only changes
-    and keeps the debug APK of pushes to `main` for 2 days;
-  - Release on `v*` tags (and `-alpha.N`, `-beta.N`, `-rc.N` pre-release tags) builds the signed release APK and the
-    debug APK, verifies both and publishes them with SHA-256 checksums and the tag's changelog section, with the key
-    taken from repository secrets. A manual dry run checks the signing secrets without publishing anything;
-  - every action is pinned to a commit SHA, and Dependabot keeps the pins current.
-- **Documentation**: README (English, with a Russian section), ALGORITHM.md, PLAN.md, docs/INTERCHANGE.md,
-  docs/SCREENSHOTS.md, tools/train/README.md and DATASETS.md.
-- **License**: WTFPL.
+  `gradle/libs.versions.toml`; a project-local toolchain through `.mise.toml` and `.tooling/`.
+- **Quality checks**: ktlint, detekt (KDoc required on the public API of `:core-algo`) and JUnit 5 tests; the
+  module-graph check, an Android-free runtime classpath and no Android imports in `:core-algo`; merged-manifest tests
+  (no `INTERNET`); a check that the release APK contains no demo code or text; English / Russian string parity and
+  valid format patterns in every module; Robolectric tests of the production Hilt / WorkManager graph and of the UI
+  wiring with a fake Health Connect; render tests of every screen and every Settings group in English and Russian, at
+  font scale 2 and in a wide window; the ledger migration against the exported schemas; and a regression test that
+  compares 767 estimates with those recorded before the night and nap modes.
+- **GitHub Actions**: CI runs ktlint, detekt, the tests, `assembleDebug` and the Python tests on pushes, pull requests
+  and manual runs, skips documentation-only changes, and keeps the debug APK of pushes to `main` for 2 days. The
+  release workflow builds the signed release APK and the debug APK for `v*` tags (and `-alpha.N`, `-beta.N`, `-rc.N`
+  pre-release tags), verifies both and publishes them with SHA-256 checksums and the tag's changelog section; a manual
+  dry run checks the signing secrets without publishing. Every action is pinned to a commit SHA, and Dependabot keeps
+  the pins current.
+- **Documentation**: README, the user guide, the settings reference (generated from the code; a test fails when it
+  is out of date), architecture, Health Connect, privacy, development, CONTRIBUTING, SECURITY, issue and pull request
+  templates, ALGORITHM.md, PLAN.md, docs/INTERCHANGE.md, docs/SCREENSHOTS.md, and tools/train/README.md and
+  DATASETS.md. Screenshots in `docs/screenshots/`, including the two-pane Nights layout and the Settings group "Naps",
+  are rendered on the JVM from synthetic data by `ScreenshotsTest`. The release notes give the SHA-256 of the release
+  and of the debug signing certificate.
+- **Licence**: WTFPL.
+
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.0

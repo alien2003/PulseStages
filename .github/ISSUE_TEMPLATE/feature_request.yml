@@ -1,0 +1,71 @@
+name: Feature request
+description: Propose a new feature or a change of behaviour.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the proposal. Please write in English, and check the [documentation index](https://github.com/alien2003/PulseStages/blob/main/docs/README.md) first: the feature may exist already.
+
+        Some constraints are deliberate (see [CONTRIBUTING.md](https://github.com/alien2003/PulseStages/blob/main/CONTRIBUTING.md#proposing-a-change)): the app has no network access, never changes data of other apps, and changes to algorithm defaults need a pre-registered evaluation on the open datasets.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - App (screens, settings, workflow)
+        - Health Connect integration (what is read or written)
+        - Naps
+        - Algorithm or model
+        - Background work and scheduling
+        - Training and validation tools (tools/train)
+        - Build, CI or releases
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do you want to do that the app does not allow today, and why does it matter to you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the app do? For a UI change, name the screen and, if possible, the labels you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways to solve the problem that you considered, including settings that exist today.
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence (algorithm changes)
+      description: |
+        For a change to the estimates: which data would show that it is better (an open dataset, the metric, the expected effect)? Defaults change only through a pre-registered evaluation; synthetic results are not enough.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues for the same proposal.
+          required: true
+        - label: I would like to work on this myself.
+          required: false

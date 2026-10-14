@@ -54,7 +54,7 @@ a higher and more variable one, and stages follow a typical ultradian timing. Th
 - the validation below quantifies how often the estimate agrees with PSG: Cohen's kappa ≈ 0.34 for the default
   estimator ("fair" agreement, 61–62 % of 30-s epochs correct), with mean errors of 18–41 minutes per night for the
   AWAKE, DEEP and REM totals (38–53 for LIGHT) and large differences between people; daytime naps are estimated
-  much more roughly (section 13.11);
+  much more roughly (sections 13.11 and 13.12);
 - any night can be recomputed later with a better algorithm, because the source data are never modified and the params
   hash identifies what produced a record.
 
@@ -373,8 +373,9 @@ than 180 min, and what deliberately does not:
   nights (section 13.11), on which nap hypnograms are rough;
 - population EM and the calibration on reference nights (section 10) use nights only: a nap is on its own hrNorm
   scale and is decoded differently, so naps neither take part nor count towards `emEveryNights`;
-- source selection (app, before the estimator; README "Which source sessions become nights"): fragments closer than
-  `mergeGapMin` = 30 min are merged before the nap filter, so a nap ending less than 30 min before bedtime becomes the
+- source selection (app, before the estimator; [user guide, "Which sleep sessions are
+  estimated"](docs/user-guide.md#which-sleep-sessions-are-estimated)): fragments closer than `mergeGapMin` = 30 min
+  are merged before the nap filter, so a nap ending less than 30 min before bedtime becomes the
   first fragment of the night (the gap is AWAKE) — unchanged, because it cannot be told apart from a night that the
   watch split at an awakening, and the merged session's nadir is the night's; for two sources, a session lying mostly
   inside a session of another source but covering at most half of it is a piece of that sleep and never replaces it,
@@ -498,7 +499,7 @@ Defaults are never tuned on synthetic data or by feel (specification §9). Every
 
 Both datasets are open access under the **Open Data Commons Attribution License v1.0 (ODC-By 1.0)**, which allows use,
 derived databases and produced works (including commercial use) with attribution. The bundled model is a produced work
-of both. Attribution notice (also in README and in the app: Settings → "Versions and licences"):
+of both. Attribution notice (also in the README and in the app: Settings → "Versions and licences"):
 
 > Contains information from *Motion and heart rate from a wrist-worn wearable and labeled sleep from
 > polysomnography* (https://physionet.org/content/sleep-accel/1.0.0/) and from *BIDSleep: A Multi-Night
@@ -1382,8 +1383,9 @@ SKIP) should be the default?
 **Pre-registration** (written to `tools/train/out/prereg-nap-model.md` and appended verbatim to
 `tools/train/out/commands.log` at 2026-10-14T02:22:45+02:00, before any nap model was trained, decoded or scored and
 before any ends-in-wake window was built; **committed together with its analysis code as `d0b7f7b` before the first
-algo-cli call of the experiment** (commit at 02:40:47; the experiment run started at 02:41:13 by `commands-nap-model.log`,
-and its first algo-cli call at about 02:41:17, logged on completion at 02:41:20 in `out/nap-model/algocli.log`), as
+algo-cli call of the experiment** (on `main` the same patch is `72eb467`, with the same commit time; commit at
+02:40:47; the experiment run started at 02:41:13 by `commands-nap-model.log`, and its first algo-cli call at about
+02:41:17, logged on completion at 02:41:20 in `out/nap-model/algocli.log`), as
 section 13.11 recommended; [docs/prereg/prereg-nap-model.md](docs/prereg/prereg-nap-model.md),
 SHA-256 `b79de349…d290`, with the log as `docs/prereg/commands-nap-model.log`; `tools/train/tests/test_prereg.py`
 checks that they agree). Known beforehand: the night-level results and the current default N0, RULES, HMM-table and
