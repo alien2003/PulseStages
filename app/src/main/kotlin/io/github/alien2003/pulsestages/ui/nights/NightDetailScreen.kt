@@ -301,6 +301,10 @@ private fun HeaderCard(
         statusReasonRes(night.status, night.statusReason)?.let { reason ->
             LabeledValue(stringResource(R.string.night_detail_reason), stringResource(reason))
         }
+        // A WRITTEN night that the automatic refresh rewrote because its input changed after the previous write.
+        night.inputUpdate?.let { update ->
+            LabeledValue(stringResource(R.string.night_detail_input_updated), inputUpdateText(update).resolve())
+        }
         if (stale) {
             Text(
                 text = stringResource(R.string.night_detail_stale),

@@ -121,6 +121,10 @@
     <string name="night_reason_superseded">This night was replaced: its sessions now belong to another night, or the source app wrote its own sleep stages.</string>
     <string name="night_reason_deleted">You deleted the PulseStages session of this night. Automatic runs do not write it again; Recompute and the history backfill do.</string>
     <string name="night_reason_source_deleted">Some of the source sessions were deleted from Health Connect, so PulseStages removed its session of this night.</string>
+    <string name="night_detail_input_updated">Updated automatically</string>
+    <string name="night_input_more_heart_rate">more heart rate arrived (%1$d → %2$d samples)</string>
+    <string name="night_input_heart_rate">the heart rate changed (%1$d → %2$d samples)</string>
+    <string name="night_input_other_data">steps or other data changed</string>
     <string name="night_detail_quality">Estimate</string>
     <string name="night_detail_estimator">Estimator</string>
     <string name="night_detail_confidence">Confidence</string>

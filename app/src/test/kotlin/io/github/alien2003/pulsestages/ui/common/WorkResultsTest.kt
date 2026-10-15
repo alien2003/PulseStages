@@ -104,6 +104,26 @@ class WorkResultsTest {
     }
 
     @Test
+    fun `nights rewritten with late data are a second sentence of the summary, only when there are any`() {
+        val main = UiText.of(R.string.result_summary_estimate, UiText.plural(R.plurals.result_estimated, 1), 4, 2)
+        val summary = RunSummary(found = 4, estimated = 1, skipped = 2)
+        assertEquals(
+            UiText.of(R.string.result_with_refreshed, main, UiText.plural(R.plurals.result_refreshed, 1)),
+            WorkResultText.report(RunSubject.ESTIMATE, report(OutcomeKind.COMPLETED, summary.copy(refreshed = 1))),
+        )
+        assertEquals(main, WorkResultText.report(RunSubject.ESTIMATE, report(OutcomeKind.COMPLETED, summary)))
+        assertEquals(
+            UiText.of(
+                R.string.result_with_failures,
+                UiText.of(R.string.result_with_refreshed, main, UiText.plural(R.plurals.result_refreshed, 2)),
+                UiText.plural(R.plurals.result_failed_nights, 1),
+            ),
+            WorkResultText.report(RunSubject.ESTIMATE, report(OutcomeKind.COMPLETED, summary.copy(failed = 1, refreshed = 2))),
+            "failures stay the last sentence",
+        )
+    }
+
+    @Test
     fun `finished statuses without output and cancellations have a text, active ones none`() {
         assertEquals(UiText.of(R.string.result_done), WorkResultText.of(RunSubject.ESTIMATE, WorkStatus(JobState.SUCCEEDED)))
         assertEquals(UiText.of(R.string.result_failed), WorkResultText.of(RunSubject.ESTIMATE, WorkStatus(JobState.FAILED)))

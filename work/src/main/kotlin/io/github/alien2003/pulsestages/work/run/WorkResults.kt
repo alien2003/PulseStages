@@ -89,6 +89,9 @@ object WorkResults {
     /** Output key: outputs superseded. */
     const val KEY_SUPERSEDED: String = "superseded"
 
+    /** Output key: written nights rewritten because their input changed. */
+    const val KEY_REFRESHED: String = "refreshed"
+
     /** Output key: cancelled by the user. */
     const val KEY_CANCELLED: String = "cancelled"
 
@@ -179,6 +182,7 @@ object WorkResults {
             .putInt(KEY_STALE, summary.stale)
             .putInt(KEY_FAILED, summary.failed)
             .putInt(KEY_SUPERSEDED, summary.superseded)
+            .putInt(KEY_REFRESHED, summary.refreshed)
             .putBoolean(KEY_CANCELLED, summary.cancelled)
             .putBoolean(KEY_ALREADY_RUNNING, summary.alreadyRunning)
             .putBoolean(KEY_MODEL_UPDATED, summary.personalModelUpdated)
@@ -192,6 +196,7 @@ object WorkResults {
             stale = data.getInt(KEY_STALE, 0),
             failed = data.getInt(KEY_FAILED, 0),
             superseded = data.getInt(KEY_SUPERSEDED, 0),
+            refreshed = data.getInt(KEY_REFRESHED, 0),
             cancelled = data.getBoolean(KEY_CANCELLED, false),
             alreadyRunning = data.getBoolean(KEY_ALREADY_RUNNING, false),
             personalModelUpdated = data.getBoolean(KEY_MODEL_UPDATED, false),

@@ -120,6 +120,10 @@
     <string name="night_reason_superseded">Ночь заменена: её сессии теперь относятся к другой ночи, или приложение-источник записало собственные стадии сна.</string>
     <string name="night_reason_deleted">Вы удалили сессию PulseStages за эту ночь. Автоматические запуски не записывают её снова; это делают «Пересчитать» и бэкфилл истории.</string>
     <string name="night_reason_source_deleted">Часть исходных сессий удалена из Health Connect, поэтому PulseStages удалил свою сессию за эту ночь.</string>
+    <string name="night_detail_input_updated">Обновлена автоматически</string>
+    <string name="night_input_more_heart_rate">пришёл дополнительный пульс (%1$d → %2$d измерений)</string>
+    <string name="night_input_heart_rate">пульс изменился (%1$d → %2$d измерений)</string>
+    <string name="night_input_other_data">изменились шаги или другие данные</string>
     <string name="night_detail_quality">Оценка</string>
     <string name="night_detail_estimator">Оценщик</string>
     <string name="night_detail_confidence">Уверенность</string>

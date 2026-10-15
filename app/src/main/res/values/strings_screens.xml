@@ -23,6 +23,7 @@
     <string name="result_summary_backfill">Backfill finished: %1$s (found %2$d, skipped %3$d).</string>
     <string name="result_summary_recompute">Recompute finished: %1$s (skipped %3$d).</string>
     <string name="result_with_failures">%1$s %2$s</string>
+    <string name="result_with_refreshed">%1$s %2$s</string>
 
     <string name="model_global">Global model</string>
     <string name="model_personal_calibrated">Personal model (calibrated on reference nights)</string>
@@ -209,6 +210,10 @@
     <plurals name="result_failed_nights">
         <item quantity="one">%1$d night failed, see the log.</item>
         <item quantity="other">%1$d nights failed, see the log.</item>
+    </plurals>
+    <plurals name="result_refreshed">
+        <item quantity="one">%1$d night updated with late data.</item>
+        <item quantity="other">%1$d nights updated with late data.</item>
     </plurals>
     <plurals name="home_delete_done">
         <item quantity="one">Deleted %1$d session from Health Connect.</item>

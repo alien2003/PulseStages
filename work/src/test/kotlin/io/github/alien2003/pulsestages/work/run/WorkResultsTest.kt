@@ -1,7 +1,9 @@
 package io.github.alien2003.pulsestages.work.run
 
+import androidx.work.Data
 import androidx.work.ListenableWorker
 import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
+import io.github.alien2003.pulsestages.data.hc.pipeline.PipelineReport
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNull
@@ -11,7 +13,8 @@ import org.junit.jupiter.params.provider.ValueSource
 
 class WorkResultsTest {
     private val limits = RetryLimits(maxRetries = 5, maxUnexpectedRetries = 3)
-    private val completed = WorkOutcome.Completed(RunSummary(found = 4, estimated = 3, skipped = 1, stale = 1, failed = 0, superseded = 2))
+    private val completed =
+        WorkOutcome.Completed(RunSummary(found = 5, estimated = 3, skipped = 1, stale = 1, failed = 0, superseded = 2, refreshed = 1))
 
     @ParameterizedTest
     @ValueSource(ints = [0, 1, 10, 100])
@@ -72,6 +75,31 @@ class WorkResultsTest {
         assertEquals(OutcomeKind.COMPLETED, report.kind)
         assertEquals(completed.summary, report.summary)
         assertNull(report.blockedReason)
+    }
+
+    @Test
+    fun `nights rewritten by the refresh are counted from the pipeline report and kept in the output`() {
+        val pipeline = PipelineReport(found = 6, estimated = 2, skipped = 3, upToDate = 2, inputChecks = 3, refreshed = 1)
+
+        val summary = RunSummary.of(pipeline)
+
+        assertEquals(RunSummary(found = 6, estimated = 2, skipped = 3, refreshed = 1), summary)
+        val output = WorkResults.output(WorkOutcome.Completed(summary))
+        assertEquals(1, output.getInt(WorkResults.KEY_REFRESHED, -1))
+        assertEquals(summary, WorkResults.parse(output)?.summary)
+    }
+
+    @Test
+    fun `the output of a run stored before the refresh counter existed reads as nothing refreshed`() {
+        val older =
+            Data
+                .Builder()
+                .putString(WorkResults.KEY_OUTCOME, OutcomeKind.COMPLETED.name)
+                .putInt(WorkResults.KEY_FOUND, 2)
+                .putInt(WorkResults.KEY_ESTIMATED, 2)
+                .build()
+
+        assertEquals(RunSummary(found = 2, estimated = 2), WorkResults.parse(older)?.summary)
     }
 
     @Test

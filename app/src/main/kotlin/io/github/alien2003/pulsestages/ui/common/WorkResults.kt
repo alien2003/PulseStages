@@ -172,10 +172,17 @@ object WorkResultText {
                     UiText.of(templateOf(subject), estimated, summary.found, summary.skipped)
                 }
             }
+        // Written nights that "Estimate new" rewrote because heart rate (or other data) arrived after their write.
+        val withRefreshed =
+            if (summary.refreshed > 0) {
+                UiText.of(R.string.result_with_refreshed, main, UiText.plural(R.plurals.result_refreshed, summary.refreshed))
+            } else {
+                main
+            }
         return if (summary.failed > 0) {
-            UiText.of(R.string.result_with_failures, main, UiText.plural(R.plurals.result_failed_nights, summary.failed))
+            UiText.of(R.string.result_with_failures, withRefreshed, UiText.plural(R.plurals.result_failed_nights, summary.failed))
         } else {
-            main
+            withRefreshed
         }
     }
 

@@ -24,6 +24,8 @@ import io.github.alien2003.pulsestages.data.hc.fake.FakeSettingsRepository
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
 import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
 import io.github.alien2003.pulsestages.data.hc.usecase.HybridModelProvider
+import io.github.alien2003.pulsestages.data.local.db.InputChange
+import io.github.alien2003.pulsestages.data.local.db.InputUpdate
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.demo.DemoNightsSource
 import io.github.alien2003.pulsestages.testutil.FakeDocumentStore
@@ -33,6 +35,7 @@ import io.github.alien2003.pulsestages.ui.common.JobPhase
 import io.github.alien2003.pulsestages.ui.common.JobUi
 import io.github.alien2003.pulsestages.ui.common.UiMessage
 import io.github.alien2003.pulsestages.ui.common.UiText
+import io.github.alien2003.pulsestages.ui.common.resolve
 import io.github.alien2003.pulsestages.ui.nights.ComparisonState
 import io.github.alien2003.pulsestages.ui.nights.DetailLoad
 import io.github.alien2003.pulsestages.ui.nights.InspectionState
@@ -47,6 +50,7 @@ import io.github.alien2003.pulsestages.ui.nights.NightsRoute
 import io.github.alien2003.pulsestages.ui.nights.NightsScreen
 import io.github.alien2003.pulsestages.ui.nights.NightsUiState
 import io.github.alien2003.pulsestages.ui.nights.NightsViewModel
+import io.github.alien2003.pulsestages.ui.nights.inputUpdateText
 import io.github.alien2003.pulsestages.ui.nights.labelRes
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
@@ -66,9 +70,10 @@ import java.time.ZoneId
 /**
  * Renders the Nights list (loading, error, empty, the debug build's synthetic demo nights and a night in every status)
  * and the night detail (the demo night with the epoch details and the RULES comparison open, every inspection state,
- * every status, all warnings and flags, the jobs, the delete confirmation and "not found"), in English and Russian (also
- * at font scale 2 and in a wide window, where the list shows the detail beside it). Any exception fails the test, and
- * so does a text that still shows a format placeholder.
+ * every status, all warnings and flags, a night rewritten by the automatic refresh for every kind of input change, the
+ * jobs, the delete confirmation and "not found"), in English and Russian (also at font scale 2 and in a wide window,
+ * where the list shows the detail beside it). Any exception fails the test, and so does a text that still shows a
+ * format placeholder.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -231,6 +236,7 @@ class NightsRenderTest(
             variant,
             ->
             checkWarnings(name, variant)
+            checkInputUpdate(name, variant)
         }) { state ->
             NightDetailContent(state = state, actions = NightDetailActions())
         }
@@ -294,6 +300,26 @@ class NightsRenderTest(
         }
     }
 
+    /** A night that the automatic refresh rewrote says so (label and what changed); any other night does not. */
+    private fun checkInputUpdate(
+        name: String,
+        state: NightDetailUiState,
+    ) {
+        val night = state.night ?: return
+        val label = hasText(host.resources.getString(R.string.night_detail_input_updated))
+        when (val update = night.inputUpdate) {
+            null -> {
+                compose.onNode(label, useUnmergedTree = true).assertDoesNotExist()
+            }
+
+            else -> {
+                compose.onNode(label, useUnmergedTree = true).assertExists("$name: updated automatically")
+                val change = hasText(inputUpdateText(update).resolve(host.resources))
+                compose.onNode(change, useUnmergedTree = true).assertExists("$name: what changed in the input")
+            }
+        }
+    }
+
     private fun detailVariants(loaded: NightDetailUiState): List<Pair<String, NightDetailUiState>> {
         val night = checkNotNull(loaded.night)
         val selection = checkNotNull(loaded.selection)
@@ -346,7 +372,31 @@ class NightsRenderTest(
             NotEstimatedReason.entries.map { "not estimated $it" to idle.copy(inspection = InspectionState.NotEstimated(null, it)) } +
             BlockedReason.entries.map { "blocked $it" to idle.copy(inspection = InspectionState.Blocked(it)) } +
             listOf(true, false).map { "inspection failed, retryable $it" to idle.copy(inspection = InspectionState.Failed(it)) } +
-            NightStatus.entries.map { "status $it" to idle.copy(night = night.copy(status = it, statusReason = reasonOf(it))) }
+            NightStatus.entries.map { "status $it" to idle.copy(night = night.copy(status = it, statusReason = reasonOf(it))) } +
+            refreshedVariants(loaded)
+    }
+
+    /** A written night that the automatic refresh rewrote, for every kind of input change (one as a stale nap, too). */
+    private fun refreshedVariants(loaded: NightDetailUiState): List<Pair<String, NightDetailUiState>> {
+        val night = checkNotNull(loaded.night)
+        val idle = loaded.copy(selection = null, comparison = ComparisonState.None)
+        val updates = InputChange.entries.map { InputUpdate(it, hrSamplesBefore = 46, hrSamplesAfter = 57) }
+        return updates.map { update ->
+            "refreshed: ${update.change}" to idle.copy(night = night.copy(status = NightStatus.WRITTEN, statusReason = update.reason()))
+        } +
+            listOf(
+                "refreshed nap written as asleep / awake, stale" to
+                    idle.copy(
+                        night =
+                            night.copy(
+                                mode = SessionMode.NAP,
+                                sleepWakeOnly = true,
+                                status = NightStatus.WRITTEN,
+                                statusReason = updates.first().reason(),
+                            ),
+                        stale = true,
+                    ),
+            )
     }
 
     /** A nap: written with every stage, by RULES, as asleep / awake (with an epoch selected) and skipped by the policy. */

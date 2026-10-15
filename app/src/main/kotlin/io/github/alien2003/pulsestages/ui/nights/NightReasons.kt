@@ -3,11 +3,15 @@ package io.github.alien2003.pulsestages.ui.nights
 import androidx.annotation.StringRes
 import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.model.NotEstimatedReason
+import io.github.alien2003.pulsestages.data.local.db.InputChange
+import io.github.alien2003.pulsestages.data.local.db.InputUpdate
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
+import io.github.alien2003.pulsestages.ui.common.UiText
 
 /**
- * Localized explanation of a night without output, chosen by its [status]; null for a WRITTEN night. The ledger's
- * `statusReason` is an English diagnostic for the log: only the [NotEstimatedReason] code at its start is used.
+ * Localized explanation of a night without output, chosen by its [status]; null for a WRITTEN night (one that the
+ * automatic refresh rewrote is explained by [inputUpdateText]). The ledger's `statusReason` is an English diagnostic
+ * for the log: only the [NotEstimatedReason] code at its start is used.
  */
 @StringRes
 fun statusReasonRes(
@@ -28,3 +32,14 @@ internal fun notEstimatedReasonOf(statusReason: String?): NotEstimatedReason? {
     val code = statusReason?.substringBefore(':')?.trim() ?: return null
     return NotEstimatedReason.entries.firstOrNull { it.name == code }
 }
+
+/**
+ * Localized explanation of why the automatic refresh rewrote a WRITTEN night ([update], parsed from its `statusReason`):
+ * what changed in its input after the previous write, with the heart-rate sample counts of the estimates before and after.
+ */
+fun inputUpdateText(update: InputUpdate): UiText =
+    when (update.change) {
+        InputChange.MORE_HEART_RATE -> UiText.of(R.string.night_input_more_heart_rate, update.hrSamplesBefore, update.hrSamplesAfter)
+        InputChange.HEART_RATE -> UiText.of(R.string.night_input_heart_rate, update.hrSamplesBefore, update.hrSamplesAfter)
+        InputChange.OTHER_DATA -> UiText.of(R.string.night_input_other_data)
+    }

@@ -23,6 +23,7 @@
     <string name="result_summary_backfill">Бэкфилл завершён: %1$s (найдено: %2$d, пропущено: %3$d).</string>
     <string name="result_summary_recompute">Пересчёт завершён: %1$s (пропущено: %3$d).</string>
     <string name="result_with_failures">%1$s %2$s</string>
+    <string name="result_with_refreshed">%1$s %2$s</string>
 
     <string name="model_global">Глобальная модель</string>
     <string name="model_personal_calibrated">Личная модель (откалибрована по эталонным ночам)</string>
@@ -213,6 +214,12 @@
         <item quantity="few">%1$d ночи с ошибкой, см. лог.</item>
         <item quantity="many">%1$d ночей с ошибкой, см. лог.</item>
         <item quantity="other">%1$d ночи с ошибкой, см. лог.</item>
+    </plurals>
+    <plurals name="result_refreshed">
+        <item quantity="one">%1$d ночь обновлена по поздним данным.</item>
+        <item quantity="few">%1$d ночи обновлены по поздним данным.</item>
+        <item quantity="many">%1$d ночей обновлено по поздним данным.</item>
+        <item quantity="other">%1$d ночи обновлено по поздним данным.</item>
     </plurals>
     <plurals name="home_delete_done">
         <item quantity="one">Удалена %1$d сессия из Health Connect.</item>

@@ -24,6 +24,8 @@ enum class RetryCause {
  * @property stale WRITTEN nights left stale.
  * @property failed nights whose processing failed (logged; the run continued).
  * @property superseded older outputs replaced or removed.
+ * @property refreshed written nights rewritten because their input changed after the write (late heart rate; not
+ *   counted in [estimated]).
  * @property cancelled the run was cancelled by the user (backfill).
  * @property alreadyRunning another run of the same job was in progress; nothing was done.
  * @property personalModelUpdated population EM stored a new personal model after the run.
@@ -35,6 +37,7 @@ data class RunSummary(
     val stale: Int = 0,
     val failed: Int = 0,
     val superseded: Int = 0,
+    val refreshed: Int = 0,
     val cancelled: Boolean = false,
     val alreadyRunning: Boolean = false,
     val personalModelUpdated: Boolean = false,
@@ -50,6 +53,7 @@ data class RunSummary(
                 stale = report.stale,
                 failed = report.failed,
                 superseded = report.superseded,
+                refreshed = report.refreshed,
                 cancelled = report.cancelled,
             )
     }
