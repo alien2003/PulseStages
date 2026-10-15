@@ -10,6 +10,14 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-15
+
+Nights and naps are updated automatically when their heart rate reaches Health Connect after they were written, so a
+night estimated from part of its heart rate no longer stays so until it is recomputed by hand. Install it over 0.1.x
+like any update (same signing key): the app keeps its data, its ledger is migrated on the first start, and the
+sessions already in Health Connect stay; sessions written by 0.1.x are compared by their heart-rate sample count on
+their first check ([user guide](https://github.com/alien2003/PulseStages/blob/v0.2.0/docs/user-guide.md#automatic-runs)).
+
 ### Added
 
 - **Install and update with Obtainium**: a "Get it on Obtainium" button in the README and the user guide adds
@@ -17,7 +25,7 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   installs it and every later release as an update. The import takes final releases only, selects
   `PulseStages-<version>.apk` with the APK filter `^PulseStages-[0-9.]+\.apk$` (never the `-debug` APK) and expects
   the release signing certificate. The app itself still has no update check and no internet access
-  ([user guide](https://github.com/alien2003/PulseStages/blob/main/docs/user-guide.md#install-and-update-with-obtainium)).
+  ([user guide](https://github.com/alien2003/PulseStages/blob/v0.2.0/docs/user-guide.md#install-and-update-with-obtainium)).
   The release notes link to that section.
 - **Recent nights and naps are updated automatically when more heart rate arrives.** Heart rate often reaches Health
   Connect hours after the sleep session, and a night written from part of it (for example with the rules estimator at
@@ -30,15 +38,15 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   written again; fewer heart-rate samples than at the write never make a session worse. The night detail shows
   "Updated automatically" with the reason (for example "more heart rate arrived (46 → 57 samples)"), "Estimate new"
   adds "… nights updated with late data.", and the log has a line per update
-  ([user guide](docs/user-guide.md#automatic-runs),
-  [architecture.md §3.6](docs/architecture.md#36-refreshing-written-nights), [PLAN.md §2](PLAN.md#2-decisions)).
+  ([user guide](https://github.com/alien2003/PulseStages/blob/v0.2.0/docs/user-guide.md#automatic-runs),
+  [architecture.md §3.6](https://github.com/alien2003/PulseStages/blob/v0.2.0/docs/architecture.md#36-refreshing-written-nights), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.2.0/PLAN.md#2-decisions)).
 - **Ledger schema 3**: `estimated_nights.inputFingerprint` and `inputCheckedAt`, with the migration 2 → 3 and the
   exported schema `3.json`. The fingerprint holds per channel the number of samples and a SHA-256 digest of them, never
   the samples; rows written before have none and are compared by their heart-rate sample count and coverage until
-  their first check ([privacy.md](docs/privacy.md#3-what-is-stored-on-the-device),
-  [architecture.md §4.2](docs/architecture.md#42-schema-versions-and-migrations)).
+  their first check ([privacy.md](https://github.com/alien2003/PulseStages/blob/v0.2.0/docs/privacy.md#3-what-is-stored-on-the-device),
+  [architecture.md §4.2](https://github.com/alien2003/PulseStages/blob/v0.2.0/docs/architecture.md#42-schema-versions-and-migrations)).
 - **On-device suite**: the shadow pipeline's `refresh-recent` scenario runs the refresh over the real recent nights
-  with nothing written to Health Connect ([tools/device-test/README.md](tools/device-test/README.md)).
+  with nothing written to Health Connect ([tools/device-test/README.md](https://github.com/alien2003/PulseStages/blob/v0.2.0/tools/device-test/README.md)).
 
 ## [0.1.1] - 2026-10-15
 
@@ -298,6 +306,7 @@ for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epoc
   and of the debug signing certificate.
 - **Licence**: WTFPL.
 
-[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.2.0
 [0.1.1]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.1
 [0.1.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.0
