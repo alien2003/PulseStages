@@ -124,12 +124,12 @@ when it means "no package").
 
 | Record type | Read by | Origins | Range of record **start** times |
 |---|---|---|---|
-| `SleepSessionRecord` | `NightWindowReader`: sync re-reads, the window around a Changes-API page, backfill windows, recompute clusters, rebuilds after deletions, retries | the enabled source packages (never PulseStages itself) | the requested range ± 1 day |
+| `SleepSessionRecord` | `NightWindowReader`: sync re-reads, the window around a Changes-API page, backfill windows, recompute clusters, rebuilds after deletions, retries, the refresh of written nights | the enabled source packages (never PulseStages itself) | the requested range ± 1 day |
 | `SleepSessionRecord` | backfill start (`oldestSleepSessionStartMs`) | the enabled source packages | `[now − backfillDays, now)`, or from the epoch when `backfillDays` = 0; **one request with page size 1**, never paged |
 | `SleepSessionRecord` | `SourceScanner` (Settings → "Sleep sources") | any origin | the last 90 days, or the whole history with `READ_HEALTH_DATA_HISTORY` |
 | `SleepSessionRecord` | `ReferenceComparison` (Compare) | any origin; PulseStages' own sessions are dropped afterwards | "90 days", "1 year" or "All history" |
-| `SleepSessionRecord` (own) | write verification; the per-run lookup of our records; "Delete my sessions"; the delete fallback on Android 9–13 | PulseStages only | ±60 s around the session start; ±24 h around the run's nights; from the epoch to now; from the epoch to now + 24 h |
-| `HeartRateRecord` | `NightInputReader` (pipeline, night detail, Compare, personalization) | the night's package (`sources.hrSources` = `SAME_AS_SLEEP`, default) or any origin (`ANY`); Compare uses the enabled sources first and any origin when they have none | `[start − margin − 24 h, end + margin)`; samples are then clipped to `[start − margin, end + margin)` |
+| `SleepSessionRecord` (own) | write verification; the per-run lookup of our records (also by a refresh whose input changed, to compare with the stored record); "Delete my sessions"; the delete fallback on Android 9–13 | PulseStages only | ±60 s around the session start; ±24 h around the run's nights; from the epoch to now; from the epoch to now + 24 h |
+| `HeartRateRecord` | `NightInputReader` (pipeline, including the refresh of written nights; night detail, Compare, personalization) | the night's package (`sources.hrSources` = `SAME_AS_SLEEP`, default) or any origin (`ANY`); Compare uses the enabled sources first and any origin when they have none | `[start − margin − 24 h, end + margin)`; samples are then clipped to `[start − margin, end + margin)` |
 | `StepsRecord` | `NightInputReader` | as heart rate | as heart rate; records overlapping `[start − margin, end + margin)` are kept |
 | `OxygenSaturationRecord`, `RespiratoryRateRecord`, `HeartRateVariabilityRmssdRecord` | `NightInputReader`, only when enabled in the parameters and granted | as heart rate | `[start − margin, end + margin)`; instantaneous records need no padding |
 
@@ -138,8 +138,11 @@ nap is read with the same margin; `algo.napMode.contextMarginMin`, when set, onl
 (core-algo drops the rest), never what is read. Personalization's population EM re-reads the inputs of up to the latest
 90 estimated nights when it runs ([ALGORITHM.md §10](../ALGORITHM.md#10-personalization-personal)).
 
-PulseStages never calls `aggregate()`. Heart rate and steps are not stored by the app; every reader of an estimation
-input reads them from Health Connect again ([privacy.md §3](privacy.md#3-what-is-stored-on-the-device)).
+PulseStages never calls `aggregate()`. Heart rate, steps and the optional channels are not stored by the app; every
+reader of an estimation input reads them from Health Connect again. For each written night the ledger keeps only a
+fingerprint of the input it was estimated from: per channel the number of samples and a SHA-256 digest of them
+(`estimated_nights.inputFingerprint`, [architecture.md §3.6](architecture.md#36-refreshing-written-nights);
+[privacy.md §3](privacy.md#3-what-is-stored-on-the-device)).
 
 ### 3.2 Start-time filtering and the 24-hour left padding
 
@@ -218,7 +221,7 @@ inside the session, and the start must not be in the future. PulseStages' own ch
 | Metadata field | Value |
 |---|---|
 | `clientRecordId` | `"ps:"` + lower-case SHA-256 hex of the source session uuids, de-duplicated, sorted and joined with `,` (67 characters) |
-| `clientRecordVersion` | `ALGO_VERSION · 1000 + recomputeCount` (1000, 1001, ... while `ALGO_VERSION` is 1), never below the stored version + 1 |
+| `clientRecordVersion` | `ALGO_VERSION · 1000 + recomputeCount` (1000, 1001, ... while `ALGO_VERSION` is 1), never below the stored version + 1; every rewrite adds one, whether a recompute or a refresh after late data ([5](#5-changes-api)) |
 | `recordingMethod` | `RECORDING_METHOD_UNKNOWN` (0) |
 | `device` | `Device(type = TYPE_PHONE, manufacturer = Build.MANUFACTURER, model = Build.MODEL)`: the phone that computed and wrote the record |
 
@@ -343,8 +346,9 @@ the same range.
 | `REREAD_MS` | 7 days | re-read window after a token reset |
 | `MAX_REREAD_MS` | 30 days | Health Connect keeps change logs for about 30 days |
 | `TOKEN_MAX_AGE_MS` | 25 days | tokens are documented as valid for 30 days; an older token is treated as expired |
-| `RETRY_RECENT_MS` | 36 hours | nights without an estimate that ended this recently are retried by every run |
-| `LATE_ARRIVAL_MAX_MS` | 30 days | nights first seen at most this long after they ended are retried with growing gaps |
+| `RETRY_RECENT_MS` | 36 hours | nights that ended this recently are retried (without an estimate) or refreshed (written) by every run; late arrivals are retried or refreshed for this long after they were first seen |
+| `LATE_ARRIVAL_MAX_MS` | 30 days | nights first seen at most this long after they ended are retried or refreshed with growing gaps |
+| `MAX_REFRESH_NIGHTS_PER_RUN` | 8 | written nights whose input one run reads again; the rest are left to later runs ([7.2](#72-quotas)) |
 
 **Token lifetime.** The client documentation says tokens are valid for 30 days; the platform purges change-log and
 token rows older than 32 days (90 days with a cloud-backup flag;
@@ -356,9 +360,23 @@ On Android 14+ the client reports an expired, unknown or blank token as `changes
 retries once, then treats the token as expired; the following re-read also covers whatever a merely transient failure
 would have hidden.
 
-**Late heart rate.** The Changes API only reports sleep sessions. Heart rate that arrives after its session (for
-example when the watch syncs later) produces no change, so every run also retries the recent nights that could not be
-estimated yet ([architecture.md §6.7](architecture.md#67-what-a-sync-does)).
+**Late heart rate.** The token covers `SleepSessionRecord` only, so heart rate or steps that arrive after their
+session (for example when the watch syncs hours later) produce no change. After following the log (or re-reading),
+every run therefore:
+
+- retries the recent nights that could not be estimated yet (NOT_ESTIMATED, FAILED);
+- refreshes the recent written nights: it reads their heart rate, steps and optional channels again with the same
+  reads as an estimate and compares them with the fingerprint stored at the write (sample counts and SHA-256 digests).
+  When the input is unchanged, nothing else happens. A changed input is estimated again, and the record is rewritten
+  under the same `clientRecordId` with the version + 1 only when its stages, title or notes change; a night with
+  fewer heart-rate samples (in the estimate) than at the write keeps its record (a source replacing its records must not make it worse
+  for a while); a record deleted outside PulseStages is not written again. Nothing is refreshed under `NEVER`, and stale nights are left to a
+  recompute.
+
+Both use the window of the constants above: nights that ended in the last 36 hours on every run, late arrivals with
+growing gaps; at most 8 written nights are refreshed per run
+([architecture.md §6.7](architecture.md#67-what-a-sync-does), [§3.6](architecture.md#36-refreshing-written-nights)).
+Heart rate that arrives later than that is used only by a recompute.
 
 ## 6. Deleting records
 
@@ -432,6 +450,16 @@ sessions of its window and, on its first write, PulseStages' own sessions around
 start with a single-record read and then reads the history one 7-day window at a time, so a backfill of a long history
 makes the most calls.
 
+Every sync also refreshes recent written nights ([5](#5-changes-api)). Per checked night it reads the heart rate and
+the steps (one call per page of up to 1000 records: usually one each, up to about three with dense heart rate and the
+24 h left padding) and each enabled and granted optional channel; per refresh run one read of the sleep sessions
+around the targets and, when an input changed, one read of PulseStages' own sessions around them; a rewrite adds the
+insert and its verification read. `MAX_REFRESH_NIGHTS_PER_RUN` = 8 keeps this under 100 read calls per run even in
+the worst case (8 nights with dense heart rate, three optional channels and a rewrite each: 8 × 9 + 2 + 8 = 82),
+far below the background quota of 1000 calls per 15 minutes, and about 2000 a day with 25 runs, below 8000; usually
+only the one or two sessions of the last 36 hours are due. A backfill that makes many recent nights due at
+once is spread over several runs.
+
 ### 7.3 Backoff
 
 Two layers:
@@ -439,7 +467,8 @@ Two layers:
 1. **In the call.** `QuotaExceeded` and `Transient` are retried after 1, 2, 4, 8 and 16 s (`RetryPolicy.DEFAULT`: at
    most six attempts and 31 s of waiting per call). Every retry is logged.
 2. **In WorkManager.** When the call still fails, a quota error stops the run (`quotaHit`, sync outcome
-   `QUOTA_EXCEEDED`, backfill state `WAITING_RETRY`) and the work returns `Result.retry()`. WorkManager retries with
+   `QUOTA_EXCEEDED`, backfill state `WAITING_RETRY`; in a sync also during the retry or the refresh of recent nights)
+   and the work returns `Result.retry()`. WorkManager retries with
    exponential backoff starting at 30 s, doubled per retry up to 5 hours, for up to 20 retries
    ([architecture.md §6.3](architecture.md#63-results-retries-and-backoff)). A backfill resumes from its persisted
    cursor; a recompute of "all" or "stale" skips the nights an interrupted attempt already recomputed. This follows

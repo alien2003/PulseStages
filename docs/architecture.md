@@ -167,7 +167,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    T["Trigger:<br/>Changes-API page, re-read window,<br/>backfill window, recompute cluster"] --> R["Read sleep sessions<br/>of the enabled sources<br/>(window ± 1 day)"]
+    T["Trigger:<br/>Changes-API page, re-read window,<br/>retry or refresh window,<br/>backfill window, recompute cluster"] --> R["Read sleep sessions<br/>of the enabled sources<br/>(window ± 1 day)"]
     R --> B["NightCandidateBuilder<br/>allowlist, staged sessions,<br/>merging, minimum length,<br/>cross-source priority"]
     B -->|"skipped groups"| S[("source_sessions")]
     B -->|"candidates"| D["NightRun.processNight<br/>overwrite policy, deleted nights,<br/>up to date / stale"]
@@ -236,7 +236,8 @@ decides:
 |---|---|
 | A WRITTEN output exists and `overwritePolicy` = `NEVER` | not rewritten |
 | A WRITTEN output exists and the source boundaries, zone offsets or fragment times changed | recomputed (every policy except `NEVER`) |
-| A WRITTEN output exists and the policy is `RECOMPUTE_ALL`, or the trigger is an explicit recompute | recomputed |
+| A WRITTEN output exists and the policy is `RECOMPUTE_ALL`, or the trigger is an explicit recompute | recomputed (under `RECOMPUTE_ALL` a refresh target with the current version and hash is refreshed instead, see the next rows) |
+| A WRITTEN output exists with the current `ALGO_VERSION` and params hash, and it is a refresh target of a sync (`RunSpec.refreshTargets`) | **refreshed**: its input is read again; it is estimated again only when the input fingerprint changed, and rewritten (same `clientRecordId`, version + 1) only when the record would change ([3.6](#36-refreshing-written-nights)) |
 | A WRITTEN output exists with the current `ALGO_VERSION` and params hash | up to date, skipped |
 | A WRITTEN output exists with another version or hash (`SKIP_SAME_VERSION`) | left **stale**: never recomputed silently |
 | The night (or a night sharing a source session) was deleted by the user | skipped, unless the trigger recreates deleted nights (backfill, recompute) and the deletion happened before the run was requested |
@@ -247,7 +248,8 @@ Even when a WRITTEN night is skipped, nights it replaces are superseded and its 
 under `NEVER`).
 
 The triggers are `PipelineTrigger.NEW_NIGHTS` (sync), `BACKFILL` and `RECOMPUTE`. Only `RECOMPUTE` forces a recompute;
-`BACKFILL` and `RECOMPUTE` recreate deleted nights.
+`BACKFILL` and `RECOMPUTE` recreate deleted nights. The refresh of a sync (`NightPipeline.refresh`) is a `NEW_NIGHTS`
+run with refresh targets.
 
 ### 3.4 Estimation
 
@@ -296,15 +298,68 @@ The outcome is either `Estimated` or `NotEstimated` (`NO_HR_DATA`, `LOW_COVERAGE
 
 The written record is specified in [health-connect.md §4](health-connect.md#4-data-written).
 
+### 3.6 Refreshing written nights
+
+A night is estimated as soon as its sleep session appears, but its heart rate often reaches Health Connect later, and
+the Changes API reports sleep sessions only. Every write therefore stores the fingerprint of the input it was
+estimated from (`estimated_nights.inputFingerprint`, `InputFingerprint`) and `inputCheckedAt`, and every sync refreshes
+recent WRITTEN nights ([6.7](#67-what-a-sync-does)): it passes their `clientRecordId`s to `NightPipeline.refresh`,
+which runs the normal `NEW_NIGHTS` processing under `LedgerLock` with `RunSpec.refreshTargets`. Every rule of
+[3.3](#33-deciding-per-night) applies first; only a target that would be up to date (WRITTEN, not `NEVER`, sources
+unchanged, current `ALGO_VERSION` and params hash) goes to `NightRun.refresh`:
+
+1. The input is read with `NightInputReader`, exactly as for an estimate, and its fingerprint is computed:
+   `1|hr:<count>:<sha256>|steps:<count>:<sha256>|spo2:<part>|rr:<part>|hrv:<part>`, per channel the number of
+   samples and the SHA-256 of the samples sorted canonically, `-` for an optional channel that is not read
+   (`InputSelection`). The session boundaries, zone offsets and forced-awake gaps are not part of it (a change of the
+   sources recomputes the night anyway), nor is the baseline nadir (it comes from the ledger).
+2. The stored fingerprint is the same: nothing is estimated or written; only the fingerprint and `inputCheckedAt` are
+   stored (`EstimatedNightDao.markInputChecked`, which leaves `updatedAt` alone). Result `INPUT_CHECKED`.
+3. Otherwise the night is estimated again. If it can no longer be estimated, the previous output stays and only the
+   fingerprint is stored (warning "refresh: the input changed but the night can no longer be estimated (…); keeping
+   the previous output"). The same holds when the estimate now has fewer heart-rate samples than at the last write
+   (info "refresh: fewer heart-rate samples than at the last write (… -> …); keeping the previous output"): a source
+   that replaces its records, or data deleted on purpose, never makes a written night worse automatically; a recompute
+   uses the data as it is.
+4. A row written before ledger schema 3 has no fingerprint: when the new estimate has the stored heart-rate sample
+   count and coverage (three decimals), the input is taken as unchanged and only the fingerprint is stored.
+5. The record the estimate gives (the stages as written, so AWAKE / SLEEPING only for a `SLEEP_WAKE` nap; the title;
+   the notes) is compared with our stored record (`storedOwnSessions`, read once per run). When our record is no
+   longer in Health Connect, it was deleted outside the app: it is not written again, only the fingerprint is stored
+   (warning "refresh: … our session of this night is no longer in Health Connect (deleted outside PulseStages?); not
+   written again").
+6. The same stages (sorted), title and notes: a ledger-only update. The row takes the new estimate (stages, minutes,
+   flags, nadir, coverage, confidence, heart-rate samples) and the new fingerprint, but keeps `hcRecordId`,
+   `clientRecordVersion`, `recomputeCount`, `statusReason` and `updatedAt`; nothing is written to Health Connect.
+   Result `INPUT_CHECKED` (info "refresh: the input changed (…); the written session stays the same"). When our record
+   has a higher version than the row, an earlier refresh wrote exactly this estimate and was interrupted before its
+   ledger transaction: the row takes the record's id, version and modification time, the matching recompute count and
+   the update's reason instead (info "updated: … (written by an earlier run that was interrupted)").
+7. Otherwise the record is rewritten through the normal write path ([3.5](#35-writing)): the same `clientRecordId`,
+   version + 1 (`nextRecomputeCount`), `updatedAt` = now and `statusReason` = `InputUpdate.reason()`, for example
+   `INPUT_UPDATED: MORE_HEART_RATE 46 57 - more heart rate arrived (46 -> 57 heart-rate samples)`; superseding works as
+   after any write. Result `REFRESHED` (info "updated: …").
+
+`InputFingerprint.changeOf` names the change: more heart-rate samples than at the last write (`MORE_HEART_RATE`),
+another change of the heart-rate part (`HEART_RATE`), or only steps and optional channels (`OTHER_DATA`). The night
+detail shows the `statusReason` of a refreshed night as "Updated automatically" (`EstimatedNightEntity.inputUpdate`);
+a regular write clears it. Under `RECOMPUTE_ALL` a current refresh target is refreshed as well instead of being
+recomputed on every sync. Everything else follows the normal rules: only WRITTEN nights are targets (never DELETED,
+SUPERSEDED, SOURCE_DELETED or NOT_ESTIMATED rows, so never a nap skipped by `SKIP`), a deleted night met in the same
+run is skipped (`DELETED_SKIPPED`) as in every sync, and a target whose source got its own stages or became a
+lower-priority duplicate is no longer a candidate and is handled by `retireStagedOutputs`. A target that is no
+candidate of its window any more (a duplicate, shorter than the minimum session length, merged into another night) is
+only marked as checked (`markInputChecked` with its fingerprint), so it moves back in the refresh order.
+
 ## 4. The Room ledger and other local state
 
 ### 4.1 Tables
 
-`PulseStagesDatabase` (`pulsestages.db`, schema version 2):
+`PulseStagesDatabase` (`pulsestages.db`, schema version 3):
 
 | Table | Key | Content |
 |---|---|---|
-| `estimated_nights` | `id`; `clientRecordId` unique | One row per output night: source uuids and package, session start / end and zone offsets, our Health Connect record id (`hcRecordId`, non-null exactly while we believe our record exists), `algoVersion`, `paramsHash`, estimator, model id, coverage, confidence, `recomputeCount`, `clientRecordVersion`, `status` and `statusReason`, minutes per stage, flags (elevated heart rate, low confidence, calibrated, rules fallback), warnings, nadir, heart-rate sample count, the stages (`stagesJson`), timestamps, `mode` (NIGHT / NAP) and `sleepWakeOnly`. |
+| `estimated_nights` | `id`; `clientRecordId` unique | One row per output night: source uuids and package, session start / end and zone offsets, our Health Connect record id (`hcRecordId`, non-null exactly while we believe our record exists), `algoVersion`, `paramsHash`, estimator, model id, coverage, confidence, `recomputeCount`, `clientRecordVersion`, `status` and `statusReason`, minutes per stage, flags (elevated heart rate, low confidence, calibrated, rules fallback), warnings, nadir, heart-rate sample count, the stages (`stagesJson`), timestamps, `mode` (NIGHT / NAP), `sleepWakeOnly`, and (schema 3) `inputFingerprint` (the fingerprint of the input the output was last compared with: per channel the sample count and a SHA-256 of the samples, never the samples) and `inputCheckedAt` (when that input was last read: the write or a later refresh check) ([3.6](#36-refreshing-written-nights)). |
 | `night_sources` | (`clientRecordId`, `sourceUuid`) | Links a night to each of its source sessions (indexed by `sourceUuid`). |
 | `source_sessions` | `uuid` | Every source session seen: package, start, end, `outcome` (`ESTIMATED`, `NAP`, `HAS_STAGES`, `OWN`, `LOWER_PRIORITY_DUPLICATE`, `NOT_ESTIMATED`, `FAILED`, `DELETED`), reason, the night it belongs to, `lastSeenAt`. The Home counters are built from it. |
 | `night_baselines` | `clientRecordId` | Heart-rate nadir and end of every written session, for the rolling baseline. Naps get a row too; the baseline query counts only sessions at least as long as the nap threshold, so a changed threshold applies to the whole history. |
@@ -323,7 +378,7 @@ stateDiagram-v2
     [*] --> FAILED: processing failed
     NOT_ESTIMATED --> WRITTEN: retried or recomputed
     FAILED --> WRITTEN: retried or recomputed
-    WRITTEN --> WRITTEN: recomputed with a higher version
+    WRITTEN --> WRITTEN: recomputed, or refreshed after its input changed, with a higher version
     WRITTEN --> NOT_ESTIMATED: nap no longer written (SKIP)
     WRITTEN --> SUPERSEDED: replaced by another night
     NOT_ESTIMATED --> SUPERSEDED: replaced by another night
@@ -340,12 +395,19 @@ rules.
 
 ### 4.2 Schema versions and migrations
 
-Every schema version is exported to `data-local/schemas/` (`1.json`, `2.json`), and every later version ships a
-migration in `LedgerMigrations`. There is deliberately **no destructive fallback**: the ledger is what keeps the
-Health Connect writes idempotent. Version 2 added `estimated_nights.mode` and `sleepWakeOnly`; the migration marks
-rows of sessions shorter than 180 min (the version-1 nap threshold, fixed in the migration) as naps.
+Every schema version is exported to `data-local/schemas/` (`1.json`, `2.json`, `3.json`), and every later version
+ships a migration in `LedgerMigrations` (`ALL` lists them, oldest first). There is deliberately **no destructive
+fallback**: the ledger is what keeps the Health Connect writes idempotent.
+
+| Version | Change | Migration |
+|---|---|---|
+| 1 | first release | |
+| 2 | `estimated_nights.mode` and `sleepWakeOnly` (night and nap modes) | `MIGRATION_1_2` marks rows of sessions shorter than 180 min (the version-1 nap threshold, fixed in the migration) as naps |
+| 3 | `estimated_nights.inputFingerprint` (TEXT) and `inputCheckedAt` (INTEGER), both nullable without a default (refresh of written nights, [3.6](#36-refreshing-written-nights)) | `MIGRATION_2_3`: two `ALTER TABLE … ADD COLUMN`; existing rows keep null, so the refresh compares their heart-rate sample count and coverage instead and stores a fingerprint from then on |
+
 `LedgerMigrationTest` builds a version-1 database from the exported schema, opens it with the current database and
-the migrations, and checks every row.
+every migration (1 → 2 → 3), and checks every row and the resulting version; Room's open fails if the migrated tables
+differ from the current entities, and without the migrations the old database is not opened at all.
 
 ### 4.3 DataStore
 
@@ -357,9 +419,9 @@ the migrations, and checks every row.
 ### 4.4 The ledger lock
 
 `LedgerLock` is a process-wide, non-reentrant `Mutex` around every change of the ledger together with the matching
-Health Connect writes. `NightPipeline.process`, `supersedeLeftovers`, `applyDeletions`, `retireRemnants`, the
-`MyDataEraser` operations and switching the active personal model hold it, so a sync, a backfill, a recompute and an
-erase never interleave, and one pipeline run computes its params hash and estimates all its nights with the same
+Health Connect writes. `NightPipeline.process`, `refresh`, `supersedeLeftovers`, `applyDeletions`, `retireRemnants`,
+the `MyDataEraser` operations and switching the active personal model hold it, so a sync, a backfill, a recompute and
+an erase never interleave, and one pipeline run computes its params hash and estimates all its nights with the same
 personal model.
 
 ## 5. Idempotency
@@ -493,6 +555,26 @@ hash is stale; stale nights are recomputed only on request (Home "Recompute stal
 shows after a change, or "Recompute" on one night) or under `RECOMPUTE_ALL`. Which settings enter the hash is listed
 in [settings-reference.md](settings-reference.md).
 
+### 5.9 Refreshes
+
+The refresh of written nights ([3.6](#36-refreshing-written-nights)) keeps the same guarantees:
+
+- **An unchanged input writes nothing.** When the fingerprint is the one stored, nothing is estimated and nothing is
+  written to Health Connect; the ledger only records the check (`inputFingerprint`, `inputCheckedAt`). Running a sync
+  any number of times therefore rewrites no night whose data did not change.
+- **A changed input rewrites only a changed record.** The record is rewritten only when its stages, title or notes
+  differ from our stored record; otherwise only the ledger row takes the new estimate. A rewrite is an ordinary write
+  under the same `clientRecordId` with the next version ([5.1](#51-record-keys)), verified like every write
+  ([5.3](#53-read-back-verification)), so Health Connect still holds one record per night, and superseding
+  ([5.4](#54-one-output-per-night)) applies unchanged. When a refresh rewrite is interrupted after the insert but
+  before the ledger transaction ([5.7](#57-crash-consistency)), the next check finds our record already holding the new
+  estimate: the ledger row then takes over its record id, version and modification time and the update's reason
+  ("updated: … (written by an earlier run that was interrupted)") instead of writing it again.
+- **It never recreates a record.** When our stored record of a target is no longer in Health Connect (deleted outside
+  the app), the refresh writes nothing; only a recompute (or a change of its source sessions) writes it again. Nights
+  without an output (DELETED, SUPERSEDED, SOURCE_DELETED, NOT_ESTIMATED) are never targets, and nothing is refreshed
+  under `NEVER` or for a stale night.
+
 ## 6. Background work
 
 ### 6.1 Works
@@ -603,9 +685,22 @@ Every `EstimateNewNightsWorker` run calls `EstimateNewNightsRunner`, which runs 
 2. repair leftover double outputs;
 3. follow the Changes API with the stored token, or re-read recent nights by time range when there is no usable token
    ([health-connect.md §5](health-connect.md#5-changes-api) has the details);
-4. retry nights without an estimate (NOT_ESTIMATED / FAILED): every run retries nights that ended in the last 36 h,
-   because their heart rate may arrive after the session; nights that arrived late are retried with growing gaps;
-5. record the outcome in `SyncStateStore`.
+4. retry nights without an estimate (NOT_ESTIMATED / FAILED, not a nap skipped by `SKIP`): every run retries nights
+   that ended in the last 36 h (`RETRY_RECENT_MS`), because their heart rate may arrive after the session; nights
+   that arrived late (first seen in the last 36 h, at most 30 days (`LATE_ARRIVAL_MAX_MS`) after they ended) are
+   retried when the time since their last attempt is at least the time between their first and their last attempt,
+   about 1, 2, 4, 8, 16 and 32 h after they were first seen with hourly syncs;
+5. refresh written nights (`refreshWritten`; skipped when an earlier step stopped early, and without any read under
+   `NEVER`): the up-to-date WRITTEN nights (`NightPipeline.refreshableNights`: current version and params hash, neither
+   written nor checked earlier in this run) that are due on the schedule of step 4, where the last attempt is the last
+   write or refresh check. At most `MAX_REFRESH_NIGHTS_PER_RUN` = 8 per run: nights that ended in the last 36 h first,
+   then the late arrivals, each group checked-longest-ago first (then newest), so the limit rotates through all due
+   nights; the rest are logged ("N more written night(s) are due for a refresh; later runs check them") and left to
+   later runs. One read of the sleep sessions over the targets' span ± 1 day, then `NightPipeline.refresh`
+   ([3.6](#36-refreshing-written-nights)). A Health Connect error of that read stops only the refresh: a quota error or
+   a refused access ends the run as `QUOTA_EXCEEDED` or blocked, a transient error is logged and left to the next run,
+   and the report keeps what the earlier steps did;
+6. record the outcome in `SyncStateStore`.
 
 After a completed sync the runner runs the population EM adaptation when it is due
 (`PersonalizationService.maybeRunPopulationEm`; only when the HMM emissions are in use,
@@ -647,11 +742,18 @@ The tests run the waits in virtual time (`Sleeper`).
 ### 7.4 Run reports
 
 Each job reports instead of throwing: `PipelineReport` (found, estimated, skipped, stale, up to date, failed, not
-estimated, superseded, `quotaHit`, `blockedReason`, `cancelled`), `SyncReport` with a `SyncOutcome`
-(`SUCCESS`, `PARTIAL_FAILURE`, `QUOTA_EXCEEDED`, `PERMISSION_DENIED`, `HEALTH_CONNECT_UNAVAILABLE`,
+estimated, superseded, `inputChecks`, `refreshed`, `quotaHit`, `blockedReason`, `cancelled`), `SyncReport` with a
+`SyncOutcome` (`SUCCESS`, `PARTIAL_FAILURE`, `QUOTA_EXCEEDED`, `PERMISSION_DENIED`, `HEALTH_CONNECT_UNAVAILABLE`,
 `BACKGROUND_READ_BLOCKED`, `FAILED`, `CANCELLED`), and `BackfillReport` with a `BackfillOutcome`. The runners map
 these to `WorkOutcome` ([6.3](#63-results-retries-and-backoff)); `guardedRun` turns any remaining `Throwable` except
 cancellation into `Unexpected`, so a worker never throws.
+
+`inputChecks` counts the written nights whose input a refresh read again ([3.6](#36-refreshing-written-nights)),
+rewritten (`NightResult.REFRESHED`, also counted in `refreshed`) or not (`NightResult.INPUT_CHECKED`). A refresh check
+is not a night the run found: it is counted in neither `found`, `skipped`, `upToDate` nor `estimated`, so "Estimate new"
+still reports only the nights that were new (a refresh check that fails counts in `found` and `failed` like any night). The detail string of a sync in `SyncStateStore` adds
+`refreshChecks=` and `refreshed=`; the work output carries `refreshed` (`RunSummary.refreshed`,
+`WorkResults.KEY_REFRESHED`), from which "Estimate new" adds "… nights updated with late data." to its message.
 
 ### 7.5 Use cases and the UI
 
@@ -672,15 +774,18 @@ Messages are capped at 8,000 characters and carry the stack trace of a throwable
 
 ## 8. Testing strategy
 
-All Kotlin tests run on the JVM. There are no instrumented tests (`androidTest`) and no device UI tests; the Android 9–13
-Health Connect app path has not been run on a device. The full check is:
+The tests of the build all run on the JVM. The on-device end-to-end suite in `app/src/androidTest` runs separately,
+against the debug build installed on a phone and its real Health Connect data, with every write of its pipeline
+scenarios captured in memory ([8.6](#86-on-device-end-to-end-suite)). The Android 9–13 Health Connect app path has not
+been run on a device. The full check is:
 
 ```sh
-mise exec -- ./gradlew assembleDebug test ktlintCheck detekt
+mise exec -- ./gradlew test ktlintCheck detekt assembleDebug assembleRelease :app:compileDebugAndroidTestKotlin
 ```
 
 CI runs `./gradlew ktlintCheck detekt test assembleDebug` and the Python tests of `tools/train`
-([development.md](development.md)).
+([development.md](development.md)); it does not compile the on-device suite, so `:app:compileDebugAndroidTestKotlin` is
+what catches a change that breaks it (a constructor or an interface it implements).
 
 ### 8.1 Layers
 
@@ -689,7 +794,7 @@ CI runs `./gradlew ktlintCheck detekt test assembleDebug` and the Python tests o
 | `:core-algo` | JUnit 5, plain JVM | every algorithm part, invariants of every estimate (sorted, contiguous, covering the session), synthetic recovery, edge cases, the params hash, the CSV format, the night / nap modes (`NapModeRegressionTest` compares 767 estimates with digests recorded on the build before the two modes), and the shipped model bundle against this build (`BundledModelAssetTest`). Synthetic data guards invariants and regressions only; algorithm choices are made on the open datasets ([ALGORITHM.md §15](../ALGORITHM.md#15-synthetic-validation-regression-tests-only)). |
 | `:algo-cli` | JUnit 5 | the commands and their file formats. |
 | `:data-local` | JUnit 5; Robolectric (JUnit 4 through the Vintage engine) where Android SQLite is needed | the DAOs on a real Room database, the migration against the exported schemas, the settings JSON and validator, the DataStores, the logger, the module's Hilt graph. |
-| `:data-hc` | JUnit 5; Robolectric for the Room cross-check and the Hilt graph | `HealthConnectRepository` against `FakeHealthConnectClient`, the error mapping, `VerifiedUpsert`, and the pipeline scenarios (merging, priority, staged sources, naps, deletions, repairs, recompute, erase, backfill, sync) against `FakeHealthRepository` and `InMemoryLedger`. |
+| `:data-hc` | JUnit 5; Robolectric for the Room cross-check and the Hilt graph | `HealthConnectRepository` against `FakeHealthConnectClient`, the error mapping, `VerifiedUpsert`, and the pipeline scenarios (merging, priority, staged sources, naps, deletions, repairs, recompute, erase, backfill, sync, the refresh of written nights) against `FakeHealthRepository` and `InMemoryLedger`. |
 | `:work` | JUnit 5; Robolectric with work-testing's test WorkManager | the runners, the `WorkOutcome` mapping, the work requests, the scheduler, the worker adapters (`TestListenableWorkerBuilder`), the estimator adapter. |
 | `:app` | JUnit 5 for ViewModels; Robolectric for the app graph, wiring, rendering and screenshots | ViewModel state machines with fakes, the production Hilt graph, an end-to-end wiring test, render tests, screenshots, and the structural checks below. |
 
@@ -710,8 +815,9 @@ CI runs `./gradlew ktlintCheck detekt test assembleDebug` and the Python tests o
   `RoomLedgerCrossCheckTest` runs the same pipeline scenario on the real Room ledger (Robolectric) and on the in-memory
   ledger and requires identical ledgers and identical Health Connect contents; this is what justifies running the
   other pipeline tests on the in-memory ledger.
-- **`FakeNightEstimator`**, `FakeSettingsRepository`, `TestClock`, `RecordingLogger` and `PipelineHarness` complete the
-  test fixtures.
+- **`FakeNightEstimator`** (deterministic stages from the input; `emulateRulesFallback` makes a coverage between
+  `rulesMinCoverage` and `minCoverage` give RULES with `RULES_FALLBACK_LOW_COVERAGE`, as the real estimator does),
+  `FakeSettingsRepository`, `TestClock`, `RecordingLogger` and `PipelineHarness` complete the test fixtures.
 
 ### 8.3 Robolectric offline
 
@@ -747,6 +853,20 @@ test downloads anything.
 | `verifyModuleGraph`, `verifyPureJvmRuntimeClasspath`, `NoAndroidImportsTest` | the dependency rule ([1.1](#11-the-dependency-rule)) |
 | ktlint, detekt | code style and static analysis; detekt also requires KDoc on the public API of `:core-algo` |
 
+### 8.6 On-device end-to-end suite
+
+`app/src/androidTest` (JUnit 4, androidx.test, Compose ui-test) runs against the debug build installed on a phone, with
+its real Health Connect data, through `tools/device-test/run-device-tests.sh`; it is not part of `./gradlew test` or
+CI. Safety snapshots before and after the run require the app's own records to stay byte-identical and other apps'
+records unchanged. Its shadow pipeline runs the app's real `HealthConnectRepository` for reads, the real estimator and
+an in-memory copy of the app's Room database, and captures every write and delete in memory; its scenarios cover the
+backfill, idempotency, "recompute all", the default settings, policy variants, and the refresh of recent written
+nights (`refresh-recent`: a refresh with unchanged input must write nothing; late heart rate may rewrite only the
+affected night, under its `clientRecordId` with the version + 1). One short-lived test record in the `ps-e2e:`
+namespace checks real upserts, and a read-only tour covers every screen.
+[tools/device-test/README.md](../tools/device-test/README.md) has the details and every Health Connect call the suite
+can make.
+
 ## 9. Key source files
 
 | Topic | File |
@@ -756,6 +876,7 @@ test downloads anything.
 | Record mapping and verified upsert | [`HcRecordMapper.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/HcRecordMapper.kt), [`VerifiedUpsert.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/VerifiedUpsert.kt) |
 | Candidates and keys | [`NightCandidates.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightCandidates.kt) |
 | Pipeline | [`NightPipeline.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightPipeline.kt), [`NightRun.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightRun.kt), [`NightInputReader.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightInputReader.kt) |
+| Refresh of written nights | [`InputFingerprint.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/InputFingerprint.kt); `NightRun.refresh`, `NewNightsSync.refreshWritten`, `InputUpdate` in `EstimatedNightEntity.kt` |
 | Stages, title, notes | [`StageMapping.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/StageMapping.kt), [`SessionText.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/SessionText.kt) |
 | Jobs | [`NewNightsSync.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NewNightsSync.kt), [`BackfillEngine.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/BackfillEngine.kt), [`NightRecomputer.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightRecomputer.kt), [`MyDataEraser.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/MyDataEraser.kt) |
 | Access checks and the ledger lock | [`HealthAccessGuard.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/HealthAccessGuard.kt) |

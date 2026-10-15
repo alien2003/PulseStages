@@ -186,6 +186,63 @@ from memory.
   session length with linear interpolation, exclusive with the nap section's scalar `stageLogBias` and left out of the
   canonical JSON when absent, so every existing bundle keeps its fingerprint and personal deltas keyed to the night
   model stay valid. Built for the literature-anchored candidates of stage 5f; the shipped bundle has none.
+- **Refresh of written nights (ledger schema 3).** A night is estimated as soon as its sleep session appears, but heart
+  rate often reaches Health Connect later (watch → OHealth → Health Connect, sometimes hours), and the Changes API
+  follows `SleepSessionRecord` only. Only nights without an estimate were retried, so a night written from part of its
+  heart rate (RULES at coverage 0.4–0.6, or ≥ 0.6 with heart rate missing) stayed so until the user recomputed it; a
+  real short session had 46 heart-rate samples at its first estimate and 57 a day later, and its record was not
+  updated. Every sync now refreshes recent written nights after the retry (`NewNightsSync.refreshWritten`,
+  `NightPipeline.refresh`, `NightRun.refresh`; docs/architecture.md §3.6):
+  - **What is fingerprinted.** Every write stores the fingerprint of the input it was estimated from
+    (`estimated_nights.inputFingerprint`, `InputFingerprint`) and `inputCheckedAt`: for heart rate, steps, SpO2,
+    respiratory rate and HRV the sample count and the SHA-256 of the samples sorted canonically (so the order in which
+    Health Connect returns records with equal start times does not matter), `-` for an optional channel that was not
+    read, over exactly what `NightInputReader` read (session ± `contextMarginMin`, the origins of `hrSources`). A
+    refresh reads the input the same way and compares. A digest rather than the counts alone, because replaced or
+    corrected samples keep the count; a digest rather than the samples, because the app stores no raw samples
+    (docs/privacy.md). Not part of it: the session bounds, zone offsets and forced-awake gaps (a change of the sources
+    recomputes the night anyway) and the baseline nadir (it comes from the ledger, not from Health Connect).
+  - **When.** The window and back-off of the retry of nights without an estimate: nights that ended in the last 36 h
+    (`RETRY_RECENT_MS`) on every run; late arrivals (first seen in the last 36 h, at most 30 days
+    (`LATE_ARRIVAL_MAX_MS`) after they ended) when the time since the last write or check is at least the time between
+    the first sight and that one, about 1, 2, 4, 8, 16 and 32 h after first seen with hourly syncs. Nights written or
+    checked earlier in the same run are left out.
+  - **At most 8 nights per run** (`MAX_REFRESH_NIGHTS_PER_RUN`): recently ended nights first, then the late arrivals,
+    each group checked-longest-ago first (then newest), so the limit rotates through all due nights; the rest are logged
+    and left to later runs. A checked night costs its heart-rate
+    and step reads (one call per page of 1000 records: usually one each, about three with dense heart rate and the 24 h
+    left padding) plus one per enabled optional channel; a rewrite adds an insert and a verification read; a refresh run
+    adds one sleep-session read and, when an input changed, one read of our own sessions. Worst case 8 × (3 + 3 + 3) +
+    2 + 8 = 82 read calls per run, against the background quota of 1000 per 15 min and 8000 per day (§4; 25 runs a day
+    ≈ 2000). A backfill that makes many recent nights due at once is spread over several runs. A quota error stops the
+    run like any other step (`QUOTA_EXCEEDED`, WorkManager retries).
+  - **Never refreshed.** Nothing under `NEVER` (not even read). Stale nights (only the current `ALGO_VERSION` and params
+    hash are targets; stale ones wait for an explicit recompute, as everywhere). DELETED, SUPERSEDED, SOURCE_DELETED and
+    NOT_ESTIMATED rows, so no nap skipped by `SKIP`. A target whose source got its own stages or became a lower-priority
+    duplicate follows the normal rules (`retireStagedOutputs`). Under `RECOMPUTE_ALL` a current target is refreshed
+    instead of being recomputed on every sync.
+  - **Rewrite only on a changed record.** Unchanged fingerprint: nothing is estimated or written, only
+    `inputCheckedAt` moves. Changed: the night is estimated again; when it can no longer be estimated, or the session
+    estimate now has fewer heart-rate samples than at the last write (a source replacing its records, data deleted on
+    purpose),
+    the previous output stays: an automatic update never makes a night worse, a recompute uses the data as it is. The record is rewritten only when it differs from our stored record in Health Connect in its stages
+    (sorted; for a sleep / wake nap the AWAKE / SLEEPING stages as written), title or notes; otherwise the ledger takes
+    the new estimate and fingerprint (for a sleep / wake nap also the estimated stages) and keeps its record id,
+    version, `statusReason` and `updatedAt`, and nothing is written to Health Connect.
+  - **Same record, version + 1.** A rewrite keeps the `clientRecordId` and takes the next version
+    (`nextRecomputeCount`), like a recompute, so Health Connect replaces the record in place; `statusReason` records
+    why (`INPUT_UPDATED: MORE_HEART_RATE 46 57 - …`, shown as "Updated automatically" in the night detail), and a
+    later regular write clears it.
+  - **A record deleted outside the app is never recreated.** When our stored record of a target is missing from Health
+    Connect, the refresh logs a warning and writes nothing; only a recompute writes it again.
+  - **Rows from before schema 3** have no fingerprint: a new estimate with the stored heart-rate sample count and the
+    same coverage (three decimals) is taken as unchanged, and the fingerprint is stored from then on. Migration 2 → 3
+    adds the two nullable columns without default; exported schema `3.json`, `LedgerMigrationTest`.
+  - **No delay before the first estimate.** The refresh makes an early write correct itself; the heart-rate delay is
+    unbounded (minutes to hours), so no fixed delay would avoid rewrites; a delay would need a new "pending" ledger
+    state and leave the user without a result; the cost of an early write is one rewrite (version + 1).
+  - **No setting.** The refresh rewrites only when the data changed, so it needs no switch of its own; "Existing
+    sessions" = "Never overwrite" already turns it off, with every other rewrite.
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 

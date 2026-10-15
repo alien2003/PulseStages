@@ -383,7 +383,10 @@ Tap an entry to open its detail. Its cards, from top to bottom (the terms are ex
    estimate only." ([Why naps are written as asleep / awake](#why-naps-are-written-as-asleep--awake)). A nap written as
    asleep / awake (the default) adds "Written to Health Connect as asleep / awake only; the stages shown here are the
    app's estimate." A stale session says "Stale: estimated with other settings or an older algorithm. Recompute it to
-   update its session."
+   update its session." A session that PulseStages rewrote on its own because more data arrived after the first
+   estimate ([Automatic runs](#automatic-runs)) has the row "Updated automatically" with the reason: "more heart rate
+   arrived (46 → 57 samples)", "the heart rate changed (… → … samples)" or "steps or other data changed". A later
+   recompute removes the row.
 2. **Hypnogram**, titled "Hypnogram (as written to Health Connect)", "Hypnogram (the app's estimate; written to
    Health Connect as asleep / awake)" for a nap written as asleep / awake, or "Hypnogram (a new estimate; nothing was
    written)" when nothing was written. Below it is the heart-rate curve ("Heart rate" and "Smoothed", in bpm) and a
@@ -409,8 +412,10 @@ Tap an entry to open its detail. Its cards, from top to bottom (the terms are ex
    samples", "Lowest heart rate", "Algorithm version", "Parameters hash" and "Model".
 6. **"Warnings"**, when there are any: the flags "Elevated heart rate", "Low confidence", "Proportions calibrated" and
    "Rules fallback (low coverage)", and the warnings below.
-7. **"Source"**: "App" (the source app), "Source sessions" (their Health Connect ids), "Record key (clientRecordId)"
-   (the key of PulseStages' session) and "Last change".
+7. **"Source"**: "App" (the source app), "Source sessions" (how many), "Record key (clientRecordId)"
+   (the key of PulseStages' session) and "Last change" (when the session was last written, by the first estimate, a
+   recompute or an automatic update, or when the night's status last changed; a check that rewrote nothing does not
+   count).
 
 | Warning | Meaning |
 |---|---|
@@ -698,18 +703,39 @@ PulseStages uses Android's WorkManager for all background work:
 - **Daily run** at "Daily run" (09:00 local time by default). The time is approximate: Android may delay background
   work.
 - **Battery.** With "Only when the battery is not low" (on by default) both wait until the battery is not low.
-- **Late heart rate.** After each run, recent sessions that could not be estimated yet are tried again, because their
-  heart rate may arrive after the session: sessions that ended in the last 36 hours on every run, sessions that arrived
-  late less often.
+- **Late heart rate.** The heart rate often reaches Health Connect hours after the sleep session (when the watch
+  syncs), and Health Connect reports only new, changed and deleted sleep sessions. Every run therefore looks at recent
+  sessions again after the check:
+  - sessions that could not be estimated yet ("Not estimated", "Failed") are tried again;
+  - nights and naps it already wrote are checked: their heart rate, steps and optional data are read again, and when
+    they changed, the session is estimated again and updated.
+
+  Sessions that ended in the last 36 hours are looked at on every run. Sessions that arrived late (up to 30 days after
+  they ended) are looked at for 36 hours after they first appeared, with growing gaps (about 1, 2, 4, 8, 16 and 32
+  hours after, with the hourly check). At most 8 written sessions are checked per run; the others wait for the next
+  runs.
+- **Updates of written sessions.** A written session is rewritten only when it would change: its stages, its title or
+  its notes, which hold the coverage, the confidence and the number of heart-rate samples. It keeps its record key and
+  gets the next version, like a recompute, and the night detail says "Updated automatically" and why
+  ([Night detail](#night-detail)). A session written from part of the heart rate is upgraded this way: a night
+  estimated with the rules estimator because only 40–60 % of it had heart rate ("Rules fallback (low coverage)") gets
+  the configured estimator ("Hybrid" by default) once at least 60 % has heart rate. Not updated: anything under
+  "Existing sessions" = "Never overwrite"; stale nights (they wait for "Recompute stale nights"); sessions you deleted,
+  in PulseStages or in Health Connect, which are not written again; a session never gets worse automatically: when
+  the night now has fewer heart-rate samples than when it was written (the source app is replacing its data, or data
+  was deleted), it stays as it is ("Recompute" uses the data as it is). Heart rate that arrives after these 36 hours is
+  not picked up automatically: use "Recompute" on the night. The log has a line for every update, for example
+  "updated: more heart rate arrived (46 -> 57 heart-rate samples)".
 - **Background access.** Automatic runs read only with "Allow background" granted
   ([Permissions](#permissions)); "Last run" shows "no background access" otherwise.
 - **"Estimate new"** runs the same check at once, as a foreground service with the notification "Estimating new
-  nights", so it works without background access.
+  nights", so it works without background access. When it updated written sessions, its message ends with "… nights
+  updated with late data."
 - **Errors.** Health Connect rate-limit and transient errors are retried later with a growing delay (from 30 seconds,
   doubling up to 5 hours). A failure on one night is logged and does not stop the others.
 
-Automatic runs never recompute nights that are already up to date, and never rewrite stale ones on their own (with the
-default "Existing sessions").
+Apart from these updates of recent sessions whose data changed, automatic runs never recompute nights that are already
+up to date, and they never rewrite stale ones on their own (with the default "Existing sessions").
 
 ## Stale nights and recomputing
 
@@ -735,9 +761,9 @@ Settings → "Written sessions" → "Existing sessions" decides what runs do wit
 
 | Option | Behaviour |
 |---|---|
-| "Skip up-to-date nights" (default) | Nights with the current version and hash are skipped. Stale nights are marked and recomputed only when you ask. |
-| "Recompute everything" | Every run estimates the nights it reads again and rewrites their sessions, also for source sessions that already have stages. |
-| "Never overwrite" | An existing PulseStages session is never rewritten, not even by Recompute; only nights without a session are estimated. Home says so in the "Recompute" section. |
+| "Skip up-to-date nights" (default) | Nights with the current version and hash are skipped; recent ones are rewritten only when more heart rate or other data arrived ([Automatic runs](#automatic-runs)). Stale nights are marked and recomputed only when you ask. |
+| "Recompute everything" | Every run estimates the nights it reads again and rewrites their sessions, also for source sessions that already have stages. The check of recent written sessions for late data rewrites them only when their data changed, as with the default. |
+| "Never overwrite" | An existing PulseStages session is never rewritten, not even by Recompute or when more heart rate arrives; only nights without a session are estimated. Home says so in the "Recompute" section. |
 
 If a source session's start or end changes, the night is recomputed under every option except "Never overwrite".
 
@@ -814,8 +840,9 @@ The export does not contain the list of estimated nights, the personal model or 
 - **In Health Connect.** Health Connect → "Permissions and data" → "App permissions" → PulseStages → "Delete app
   data", choose a period, then "Next" → "Delete" ([Google help](https://support.google.com/android/answer/12201232)).
   The same page can revoke every permission. PulseStages does not watch its own sessions for deletions made outside
-  the app (it follows only the enabled sources), so its Nights list keeps showing those nights as "Estimated"; a
-  recompute writes them again. Prefer the buttons in the app when you want PulseStages to know.
+  the app (it follows only the enabled sources), so its Nights list keeps showing those nights as "Estimated"; the
+  automatic update of recent sessions with late data does not write them again, but a recompute does. Prefer the
+  buttons in the app when you want PulseStages to know.
 - **Clearing the app's storage** in Android's app settings deletes the list of nights, the settings, the personal
   model and the log, but not the sessions in Health Connect. When PulseStages processes such a night again, it finds
   its earlier session and replaces it, so the night does not get a second one (on Android 9–13, as long as Health
@@ -933,8 +960,10 @@ the app is open.
 | Naps are "Not estimated": "Naps are not estimated (Settings, Naps)." | "Written for a nap" is "Nothing" | Set "Written for a nap" to "Asleep / awake" (the default) or "Stages" and tap "Recompute stale nights". |
 | A nap has no light, deep or REM sleep in Health Connect or in another app | "Written for a nap" is "Asleep / awake", the default since 0.1.1 | Expected: the stages are in PulseStages' Nights tab and are not validated ([Why naps are written as asleep / awake](#why-naps-are-written-as-asleep--awake)). To write them anyway, choose "Stages" and tap "Recompute stale nights". |
 | A nap ends up inside a night | It ended less than "Merge gap" (30 min) before the night, so it was merged as a fragment | Expected; set "Merge gap" to 0 to keep them apart (this affects all fragments). |
-| A night is "Not estimated": "There is no heart-rate data for this night." | The heart rate is not in Health Connect (yet), or it comes from another app | Wait: sessions are retried automatically for 36 hours. Later use "Recompute". If another app writes the heart rate, turn on "Heart rate and steps from any app". |
-| A night is "Not estimated": "Too little of the night has heart-rate data." | Less than 40 % of the epochs have heart rate (between 40 % and 60 % the rules estimator is used) | Check that the watch measures heart rate during sleep; recompute later if data arrived late. |
+| A night is "Not estimated": "There is no heart-rate data for this night." | The heart rate is not in Health Connect (yet), or it comes from another app | Wait: sessions are retried automatically for 36 hours ([Automatic runs](#automatic-runs)). Later use "Recompute". If another app writes the heart rate, turn on "Heart rate and steps from any app". |
+| A night is "Not estimated": "Too little of the night has heart-rate data." | Less than 40 % of the epochs have heart rate (between 40 % and 60 % the rules estimator is used) | Check that the watch measures heart rate during sleep. Heart rate that arrives within 36 hours is picked up automatically; after that use "Recompute". |
+| Warning "Too few heart-rate data: the rules estimator was used." (flag "Rules fallback (low coverage)") | Only 40–60 % of the night had heart rate when it was estimated, often because the rest had not reached Health Connect yet | Wait: a recent night is updated automatically once at least 60 % has heart rate; the night detail then says "Updated automatically". After 36 hours use "Recompute". |
+| A recent night's stages changed by themselves; the night detail says "Updated automatically" | More heart rate (or steps or optional data) arrived after the first estimate, and the new estimate changed the session | Expected: the session now uses all the data. It keeps its record key and gets the next version ([Automatic runs](#automatic-runs)). |
 | A night is "Not estimated": "The session is too short." | "Estimator session gate" (Preprocessing) is above 0 | Set it back to 0 (the default). |
 | A night is "Failed" ("Estimating or writing this night failed. The log has the details; Recompute tries again.") | An error while estimating or writing; the log has "processing failed: …" | Read the [Log](#log), then "Recompute". Report it if it persists ([CONTRIBUTING.md](../CONTRIBUTING.md)). |
 | "Health Connect's rate limit was reached. Try again later." or "Last run": "rate limit reached, will retry" | Health Connect's request quota | Wait; runs retry automatically with a growing delay. |
@@ -983,9 +1012,12 @@ validated.
 Such spans are written as unknown by default; "Data gaps" (Post-processing) can write light sleep or the neighbouring
 stage instead.
 
-**Why did a night's stages change after an update?** They did not change on their own: the written session stays
+**Why did a night's stages change after an update?** An app update does not change them: the written session stays
 until you recompute it. The night is marked "Stale" because the model or the defaults changed; "Recompute stale
-nights" rewrites it with the new version.
+nights" rewrites it with the new version. What does change a session on its own is late data: when more heart rate
+(or steps or optional data) of a recent night reaches Health Connect within 36 hours, PulseStages estimates the night
+again and rewrites its session if the result differs; the night detail then says "Updated automatically" and why
+([Automatic runs](#automatic-runs)).
 
 **Why does Health Connect show my naps without stages?** "Written for a nap" is "Asleep / awake" by default: no nap
 stage model passed the pre-registered checks, so the stages of naps stay in the app and are not validated

@@ -79,11 +79,15 @@ mise exec -- pip install -r tools/train/requirements.txt
 
 ### Everyday commands
 
-The full check, the same Gradle tasks CI runs:
+The full check:
 
 ```sh
-mise exec -- ./gradlew assembleDebug test ktlintCheck detekt
+mise exec -- ./gradlew test ktlintCheck detekt assembleDebug assembleRelease :app:compileDebugAndroidTestKotlin
 ```
+
+CI runs `ktlintCheck detekt test assembleDebug` ([Jobs](#jobs)). `:app:compileDebugAndroidTestKotlin` compiles the
+on-device end-to-end suite, which CI does not build: a changed constructor, or a new member of an interface the suite
+implements (`HealthRepository`, `NightEstimator`, `AppLogger`), breaks it without failing CI.
 
 | Command | What it does |
 |---|---|
@@ -93,6 +97,7 @@ mise exec -- ./gradlew assembleDebug test ktlintCheck detekt
 | `./gradlew :app:testDebugUnitTest --tests '*SettingsRenderTest'` | One test class. Android modules have only the `testDebugUnitTest` unit-test task (the AGP 9 default) |
 | `./gradlew ktlintCheck` / `./gradlew ktlintFormat` | Check / fix Kotlin formatting, including the `*.gradle.kts` scripts |
 | `./gradlew detekt` | Static analysis of every module (all source sets) |
+| `./gradlew :app:compileDebugAndroidTestKotlin` | Compiles the on-device end-to-end suite (`app/src/androidTest`) without building its APK; part of the full check, not of CI |
 | `./gradlew :algo-cli:installDist` | The command-line front end of `:core-algo`, launcher `algo-cli/build/install/algo-cli/bin/algo-cli` |
 | `python -I -m pytest tools/train/tests -q` | The Python tests of the training tools (synthetic data only, no datasets, no `algo-cli` build) |
 
@@ -125,7 +130,7 @@ Some committed files are produced by the build. Regenerate them in the same chan
 | `docs/settings-reference.md` | `SettingsReferenceTest` (`:app`, `src/test`), from the settings catalog, the defaults and the validators; it fails when the committed file is out of date | `mise exec -- ./gradlew :app:testDebugUnitTest --tests '*SettingsReferenceTest' -PrecordSettingsReference` |
 | `core-algo/.../params/TrainedDefaults.kt` | `tools/train/train.py defaults --run <run> --write` | [Training and validation](#training-and-validation) |
 | `app/src/main/assets/models/hybrid_model.json` | `train.py … --install-model`; `BundledModelAssetTest` validates it against the build | [Training and validation](#training-and-validation) |
-| `data-local/schemas/…/<version>.json` | Room schema export (`room { schemaDirectory(…) }` in `data-local/build.gradle.kts`); `LedgerMigrationTest` builds older databases from these files | any build that compiles `:data-local` after a schema change |
+| `data-local/schemas/…/<version>.json` (`1.json`, `2.json`, `3.json`) | Room schema export (`room { schemaDirectory(…) }` in `data-local/build.gradle.kts`); `LedgerMigrationTest` builds older databases from these files | any build that compiles `:data-local` after a schema change |
 
 Without `-PrecordScreenshots`, every test run still renders the screenshots, into `app/build/screenshots/`. The
 settings reference links to sections of [ALGORITHM.md](../ALGORITHM.md) by their headings, so renaming one of those
@@ -229,10 +234,14 @@ not enforced there.
 
 - On a phone: the end-to-end suite in `app/src/androidTest` (JUnit 4, androidx.test, Compose ui-test), run with
   `tools/device-test/run-device-tests.sh` against the installed app ([Running on a phone](#on-device-end-to-end-suite)).
-  `./gradlew :app:assembleDebugAndroidTest` only builds its APK.
+  `./gradlew :app:assembleDebugAndroidTest` only builds its APK, and `./gradlew :app:compileDebugAndroidTestKotlin`
+  only compiles it (part of the full check; CI does not build the suite).
 
-- Database changes: bump the Room version, commit the exported schema under `data-local/schemas/`, add the migration
-  and extend `LedgerMigrationTest`.
+- Database changes: bump the Room version in `PulseStagesDatabase`, commit the exported schema under
+  `data-local/schemas/`, add the migration to `LedgerMigrations` (and to its `ALL`) and extend `LedgerMigrationTest`.
+  There is no destructive fallback. The versions so far: 1 (first release), 2 (night and nap modes:
+  `estimated_nights.mode`, `sleepWakeOnly`), 3 (refresh of written nights: `estimated_nights.inputFingerprint`,
+  `inputCheckedAt`); [architecture.md §4.2](architecture.md#42-schema-versions-and-migrations) has the details.
 - Algorithm code: `NapModeRegressionTest` (`:core-algo`) makes 767 estimates (synthetic sessions under several
   configurations) with a fixed copy of an earlier bundle and that build's defaults, and compares every result with the
   digests recorded on that build

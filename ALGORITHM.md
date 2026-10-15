@@ -368,6 +368,14 @@ in the nap mode of section 18, sections 13.11–13.13) → not estimated
 = 0.6 → the configured estimator; `rulesMinCoverage` = 0.4 ≤ coverage < 0.6 → RULES with
 `RULES_FALLBACK_LOW_COVERAGE`; coverage < 0.4 → not estimated (`LOW_COVERAGE`), reason logged.
 
+**Late heart rate.** The gates are applied to the heart rate that is in Health Connect when the night is estimated,
+which the app does as soon as the sleep session appears; heart rate often arrives hours later. The gates and the
+estimators do not change for that: the app reads the input of a recently written night again and, when it changed,
+estimates the night again in the same way (for 36 hours; [user guide, "Automatic
+runs"](docs/user-guide.md#automatic-runs)). A night written with RULES at coverage 0.4–0.6 thus gets the configured
+estimator (HYBRID by default) once its coverage reaches 0.6, and a night estimated from part of its heart rate is
+replaced by the estimate from all of it.
+
 **Confidence**: epochConfidence = max_s γ_k(s); nightConfidence = mean epochConfidence over the session epochs with
 data × coverage × 0.8 (elevated night) × 0.7 (sanity check failed), clipped to [0, 1].
 

@@ -9,7 +9,9 @@ stores, what it writes, where data can leave the app and how to delete everythin
 - It reads only from Health Connect, and writes only its own sleep sessions there. It never changes or deletes
   another app's data.
 - It keeps derived results (which nights it estimated, their stages and summary values) in its private storage. It
-  does not store your raw heart rate, steps or other samples; it reads them from Health Connect again when needed.
+  does not store your raw heart rate, steps or other samples; it reads them from Health Connect again when needed. For
+  each written night it keeps only a fingerprint of them (sample counts and one-way digests), to notice data that
+  arrives late.
 - Data leaves the app only through Health Connect, through files you export or share yourself, and through the system
   log (logcat).
 - Its private data is excluded from Android backups and device transfer.
@@ -37,9 +39,9 @@ Contents:
 | Data | Read from | Used for | Kept by PulseStages |
 |---|---|---|---|
 | Sleep sessions of the sources you enable (by default OHealth) | Health Connect | finding the nights to estimate | the session ids, app package, start and end, and what happened to each session (ledger) |
-| Heart rate around each night | Health Connect | the main input of the estimate | not the samples; derived values only: the night's lowest smoothed heart rate (for the rolling baseline), the share of the night with heart-rate data, the number of samples used |
-| Steps around each night | Health Connect | movement input of the estimate | no |
-| SpO2, respiratory rate, HRV (optional; only when enabled in Settings and allowed) | Health Connect | optional inputs of the estimate | no |
+| Heart rate around each night | Health Connect | the main input of the estimate | not the samples; derived values only: the night's lowest smoothed heart rate (for the rolling baseline), the share of the night with heart-rate data, the number of samples used, and for each written night the number of samples read and a SHA-256 digest of them (input fingerprint, [3](#3-what-is-stored-on-the-device)) |
+| Steps around each night | Health Connect | movement input of the estimate | not the samples; for each written night only their number and a SHA-256 digest (input fingerprint) |
+| SpO2, respiratory rate, HRV (optional; only when enabled in Settings and allowed) | Health Connect | optional inputs of the estimate | not the samples; for each written night only their number and a SHA-256 digest of each channel that was read (input fingerprint) |
 | Sleep sessions of every app (Sources screen) | Health Connect | listing the apps that write sleep, with session counts and the date of the last one | no; only the sources you enable, their priority and manually added packages are saved in the settings |
 | Sleep sessions with stages of other apps (Compare tab) | Health Connect | comparing PulseStages' estimate with them | no; "Calibrate" stores the resulting personal model (a few model parameters) |
 | PulseStages' own sessions | Health Connect | verifying writes, avoiding duplicates, deleting them | the id, version and summary of each written night (ledger) |
@@ -88,7 +90,7 @@ Everything below is in the app's private storage, which other apps cannot read.
 
 | Store | Location | Content |
 |---|---|---|
-| Room database (the ledger) | `databases/pulsestages.db` | `estimated_nights`: one row per estimated night or nap: the ids of its source sessions, the source app, start and end with time-zone offsets, the id of PulseStages' record in Health Connect, algorithm version, params hash, estimator, coverage, confidence, minutes per stage, the stages, flags and warnings, the lowest heart rate, the number of heart-rate samples, status and timestamps. `night_sources`: night ↔ source session links. `source_sessions`: every source session seen (id, app, start, end, outcome). `night_baselines`: the lowest heart rate of each written session, for the rolling baseline. `personal_models`: personal models from "Calibrate" or the unsupervised adaptation. `backfill_state`: the progress of the history backfill. `log_entries`: the internal log ([5](#5-logs)). |
+| Room database (the ledger) | `databases/pulsestages.db` | `estimated_nights`: one row per estimated night or nap: the ids of its source sessions, the source app, start and end with time-zone offsets, the id of PulseStages' record in Health Connect, algorithm version, params hash, estimator, coverage, confidence, minutes per stage, the stages, flags and warnings, the lowest heart rate, the number of heart-rate samples, status and timestamps, and the input fingerprint with the time it was last checked (below). `night_sources`: night ↔ source session links. `source_sessions`: every source session seen (id, app, start, end, outcome). `night_baselines`: the lowest heart rate of each written session, for the rolling baseline. `personal_models`: personal models from "Calibrate" or the unsupervised adaptation. `backfill_state`: the progress of the history backfill. `log_entries`: the internal log ([5](#5-logs)). |
 | Settings (DataStore) | `files/datastore/app_settings.json` | the settings that differ from the defaults: enabled sleep sources and their priority, schedule, title template, algorithm parameters, log level. No health data. |
 | Sync state (DataStore) | `files/datastore/sync_state.preferences_pb` | the Health Connect changes token and the source packages it belongs to, when the last sync started and ended, its outcome and a short English detail (counters), and a counter of the unsupervised adaptation. |
 | WorkManager's database | managed by WorkManager | the scheduled and recent background work: its type, when it was requested, the id of a night to recompute, and the result of finished work (counters, outcome, an English detail). |
@@ -98,6 +100,15 @@ Everything below is in the app's private storage, which other apps cannot read.
 Raw heart-rate, step, SpO2, respiratory-rate and HRV samples are never stored. The night detail, the CSV export,
 Compare and the personalization read them from Health Connect again each time
 ([architecture.md §4](architecture.md#4-the-room-ledger-and-other-local-state) describes the ledger for developers).
+
+**Input fingerprint.** For each written night the ledger keeps a fingerprint of the input the night was estimated
+from (`estimated_nights.inputFingerprint`): for the heart rate, the steps and each optional channel that was read, the
+number of samples and a SHA-256 digest of the samples; and when that input was last checked (`inputCheckedAt`). It
+lets later runs tell whether more data arrived after the night was written
+([user guide, "Automatic runs"](user-guide.md#automatic-runs)). It does not contain the samples: a digest is one-way,
+so the samples cannot be computed back from it; it can only confirm that a given set of samples is exactly the one that
+was read. It is part of the ledger and is deleted with it when you clear the app's storage or uninstall the app
+([8](#8-deleting-your-data)); the rows of deleted nights (below) keep it like their other values.
 
 The ledger keeps rows of deleted nights (status "Deleted by you", "Source deleted" or "Replaced") so that automatic
 runs do not write them again; they no longer have a record in Health Connect.
@@ -125,8 +136,9 @@ the notes. PulseStages writes nothing else: no heart rate, no steps, no other da
 The app keeps an internal log for troubleshooting (Settings → Log).
 
 - **What is logged.** Each line has a time, a level, the component and a message about processing: which runs
-  started and how they ended, counters, why a night was or was not estimated (with its heart-rate coverage), the
-  package names of the sleep sources, Health Connect errors with their English message and stack trace. Lines about a
+  started and how they ended, counters, why a night was or was not estimated (with its heart-rate coverage), why a
+  night was updated after more data arrived (with its heart-rate sample counts before and after), the package names of
+  the sleep sources, Health Connect errors with their English message and stack trace. Lines about a
   night carry the night's key (`ps:` and a hash of its source session ids). The code does not log heart-rate samples
   or the sequence of stages.
 - **How much.** Lines below the level of Settings → Debugging → "Log level" (default Info) are not recorded. The

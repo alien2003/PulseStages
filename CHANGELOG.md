@@ -19,6 +19,26 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   the release signing certificate. The app itself still has no update check and no internet access
   ([user guide](https://github.com/alien2003/PulseStages/blob/main/docs/user-guide.md#install-and-update-with-obtainium)).
   The release notes link to that section.
+- **Recent nights and naps are updated automatically when more heart rate arrives.** Heart rate often reaches Health
+  Connect hours after the sleep session, and a night written from part of it (for example with the rules estimator at
+  40–60 % coverage) stayed so until it was recomputed by hand. Every sync now also reads the heart rate, steps and
+  optional channels of recent written nights and naps again and compares them with a fingerprint stored at the write:
+  on the schedule of the retry of nights without an estimate (every run for 36 hours after the session ended, growing
+  gaps for late arrivals), at most 8 per run. When the input changed, the night is estimated again, and its session is
+  rewritten only when it would change (stages, title or notes), under the same record key with the next version. Never
+  under "Never overwrite"; stale nights are left to "Recompute stale nights"; a session deleted outside the app is not
+  written again; fewer heart-rate samples than at the write never make a session worse. The night detail shows
+  "Updated automatically" with the reason (for example "more heart rate arrived (46 → 57 samples)"), "Estimate new"
+  adds "… nights updated with late data.", and the log has a line per update
+  ([user guide](docs/user-guide.md#automatic-runs),
+  [architecture.md §3.6](docs/architecture.md#36-refreshing-written-nights), [PLAN.md §2](PLAN.md#2-decisions)).
+- **Ledger schema 3**: `estimated_nights.inputFingerprint` and `inputCheckedAt`, with the migration 2 → 3 and the
+  exported schema `3.json`. The fingerprint holds per channel the number of samples and a SHA-256 digest of them, never
+  the samples; rows written before have none and are compared by their heart-rate sample count and coverage until
+  their first check ([privacy.md](docs/privacy.md#3-what-is-stored-on-the-device),
+  [architecture.md §4.2](docs/architecture.md#42-schema-versions-and-migrations)).
+- **On-device suite**: the shadow pipeline's `refresh-recent` scenario runs the refresh over the real recent nights
+  with nothing written to Health Connect ([tools/device-test/README.md](tools/device-test/README.md)).
 
 ## [0.1.1] - 2026-10-15
 
