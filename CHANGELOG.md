@@ -10,6 +10,14 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
+Sleep as Android can now show PulseStages' stages: the opt-in setting "Sleep as Android compatibility" starts every
+written session one second before the watch app's, so Sleep as Android imports PulseStages' session instead of the
+watch app's session without stages. Install it over 0.2.0 like any update (same signing key): the app keeps its data,
+and nothing becomes stale until the setting is turned on
+([user guide](https://github.com/alien2003/PulseStages/blob/v0.3.0/docs/user-guide.md#sleep-as-android)).
+
 ### Added
 
 - **Sleep as Android compatibility** (Settings → "Written sessions" → "Sleep as Android compatibility",
@@ -27,12 +35,12 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   "Recompute" rewrites them in place (same record key, next version), never under "Never overwrite". Nights Sleep as
   Android already imported stay as they are until they are deleted there and synced again (Sleep as Android →
   Settings → Services → "Sync now"; nights of the last 29 days only). English and Russian texts
-  ([user guide](docs/user-guide.md#sleep-as-android-compatibility),
-  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+  ([user guide](https://github.com/alien2003/PulseStages/blob/v0.3.0/docs/user-guide.md#sleep-as-android-compatibility),
+  [health-connect.md §8.3](https://github.com/alien2003/PulseStages/blob/v0.3.0/docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.3.0/PLAN.md#2-decisions)).
 - **On-device suite**: the shadow pipeline's `policy-start-before-source` scenario checks that every captured session
   starts exactly one second before its night, and the real-write sequence's second version moves the record's start by
   that second, so an in-place upsert with another start is checked on the phone
-  ([tools/device-test/README.md](tools/device-test/README.md)).
+  ([tools/device-test/README.md](https://github.com/alien2003/PulseStages/blob/v0.3.0/tools/device-test/README.md)).
 
 ### Changed
 
@@ -48,8 +56,8 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   recompute, deleting the imported nights of the last 29 days (cloud icon) in Sleep as Android and syncing again with
   "Sync now", and warns against tapping its "Health Connect" row in Settings → Services (a switch: it turns the
   integration off and Sleep as Android revokes its Health Connect permissions) and against its Backup → "Download from
-  Health Connect" ([user guide](docs/user-guide.md#sleep-as-android),
-  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android)).
+  Health Connect" ([user guide](https://github.com/alien2003/PulseStages/blob/v0.3.0/docs/user-guide.md#sleep-as-android),
+  [health-connect.md §8.3](https://github.com/alien2003/PulseStages/blob/v0.3.0/docs/health-connect.md#83-sleep-as-android)).
 
 ## [0.2.0] - 2026-10-15
 
@@ -347,7 +355,8 @@ for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epoc
   and of the debug signing certificate.
 - **Licence**: WTFPL.
 
-[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.2.0
 [0.1.1]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.1
 [0.1.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.0

@@ -82,7 +82,7 @@ case "${args[0]}" in
     rest="${args[*]:1}"
     case "$rest" in
       "getprop "*) echo "X" ;;
-      "dumpsys package $APP") printf '  versionCode=20099 minSdk=28 targetSdk=36\r\n  versionName=0.2.0\r\n' ;;
+      "dumpsys package $APP") printf '  versionCode=30099 minSdk=28 targetSdk=36\r\n  versionName=0.3.0\r\n' ;;
       "pm path $APP") printf 'package:/data/app/~~x==/%s-y==/base.apk\r\n' "$APP" ;;
       "pm list instrumentation")
         [[ -f "$state/installed" ]] && echo "instrumentation:$APP.test/$APP.e2e.E2eRunner (target=$APP)"
