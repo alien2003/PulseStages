@@ -520,9 +520,17 @@ Its documentation does not say how it chooses between overlapping sessions of di
 the bullets below was observed with Sleep as Android 20261006 and confirmed on the development phone (Android 16,
 ColorOS 16); other versions may behave differently.
 
-- **When it imports.** Only when the user taps Sync, when it saves a record (added, edited or saved automatically) and
-  when its own tracking ends. Its documentation says the integration then works in the background, but there is no
-  periodic import for a user who only views data in it.
+- **When it imports.** Only when the user taps Settings → Services → "Sync now" (or the sync button of its Health
+  Connect screen), when it saves a record (added, edited or saved automatically) and when its own tracking ends. "Sync
+  now" syncs every enabled service its summary lists (for example "Health Connect, SleepCloud, SleepSync"). Its
+  documentation says the integration then works in the background, but there is no periodic import for a user who
+  only views data in it.
+- **The "Health Connect" row is a switch.** While the row in Settings → Services says "Connected", tapping it does not
+  sync: it turns the integration off, and Sleep as Android then revokes all its Health Connect permissions (they
+  disappear once its process ends). Turning the integration on again asks for the permissions again, and "Access past
+  data" must be switched on again in Health Connect → "App permissions" → "Sleep" → "Additional access". Turning it on
+  (when it is off) opens its Health Connect screen. This happened on the development phone; the integration and all nine
+  permissions were restored. The user guide therefore tells users to sync with "Sync now" only.
 - **Selection.** It reads the sleep sessions of all apps, orders them by start time and keeps only the first session of
   every group of overlapping sessions; sessions that merely touch (one ends where the next starts) count as overlapping.
   The others are dropped silently. The priority list of [8.2](#82-health-connects-data-sources-and-priority) does not
@@ -535,19 +543,21 @@ ColorOS 16); other versions may behave differently.
   a refresh after late heart rate ([5](#5-changes-api)) or a recompute rewrites our record in Health Connect, not its
   copy. A night imported once stays as it was until the user deletes it in Sleep as Android and syncs again. Deleting
   a night in Sleep as Android removes nothing from Health Connect.
-- **Read window.** The Sync button of its Health Connect screen reads up to 5 years back, its other syncs the last
-  14 days. Without Health Connect's history access (its history switch on that screen) it reads other apps' data only
-  from the last 29 days, so an older night deleted there does not come back ([3.4](#34-history)).
+- **Read window.** "Sync now" reads Health Connect for the last 30 days and the automatic syncs the last 14 days; only
+  the sync button of the Health Connect screen it opens when the integration is turned on reads up to 5 years back.
+  Without Health Connect's history access ("Access past data" in Health Connect → "App permissions" → "Sleep" →
+  "Additional access") it reads other apps' data only from the last 29 days ([3.4](#34-history)), so an older night
+  deleted there does not come back with "Sync now".
 - **Stages.** On import, `STAGE_TYPE_AWAKE` (1), `STAGE_TYPE_LIGHT` (4), `STAGE_TYPE_DEEP` (5) and `STAGE_TYPE_REM` (6)
   become its awake, light, deep and REM; `STAGE_TYPE_UNKNOWN` (0) and `STAGE_TYPE_SLEEPING` (2) are dropped.
   - A record without light, deep or REM gets no hypnogram. Sleep as Android then shows only short awake bars from its
     own heart-rate-based awake detection, which is on by default
     ([awake detection](https://sleep.urbandroid.org/docs/sleep/awake_detection.html)): the thin stripes users see on
     OHealth's nights. They are not stages written by PulseStages.
-  - When Sleep as Android imports our session (with `write.startBeforeSource`; not yet confirmed on a device), a nap
-    written with `SLEEP_WAKE` (the default nap output) shows only its awake parts, and with `write.awakeAsLight` such
-    a nap has nothing left. `algo.napMode.outputPolicy` = `STAGES` ("Written for a nap" =
-    "Stages") writes the nap's stages, which are not validated.
+  - When Sleep as Android imports our session (with `write.startBeforeSource`), a nap written with `SLEEP_WAKE` (the
+    default nap output) shows as a time span without phases (only its awake parts, if any), and with
+    `write.awakeAsLight` without awake parts either. `algo.napMode.outputPolicy` = `STAGES` ("Written for a nap" =
+    "Stages") writes the nap's stages, which Sleep as Android then shows as phases; they are not validated.
   - Spans written as `STAGE_TYPE_UNKNOWN` (heart-rate gaps, [4.3](#43-stage-mapping)) have no phase there.
 - **Backup import.** Its Backup → "Download from Health Connect" creates records without the cloud icon, which Sleep as
   Android later exports to Health Connect as its own sessions: duplicates in the user's Health Connect archive. The
@@ -556,18 +566,23 @@ ColorOS 16); other versions may behave differently.
 Confirmed on the development phone: without `write.startBeforeSource`, Sleep as Android showed OHealth's stage-less
 session (cloud icon, OHealth's times, only thin awake stripes); deleting it in Sleep as Android and syncing brought
 the stage-less session back every time; Apple Watch nights with stages that another app wrote to Health Connect showed a
-full hypnogram.
+full hypnogram. With `write.startBeforeSource` on, after a recompute and a sync with the sync button of its Health
+Connect screen ("Sync now" runs the same import for the last 30 days), Sleep as Android 20261006 imported our
+sessions (cloud icon) of the nights it held no record of (they had been deleted there before the sync): nights showed a
+full hypnogram with the same phase shares as PulseStages (for one night 11 % deep, 20 % REM, 64 % light and 5 % awake
+in both apps), and naps written with `SLEEP_WAKE` showed as a time span without phases. Sleep as Android shows whole
+minutes, so a night whose session starts at 3:03:59 starts at 3:03 there, one minute before the watch app's 3:04.
 
 **`write.startBeforeSource`** (Settings → "Written sessions" → "Sleep as Android compatibility", off by default) starts
 our record `OutputOptions.START_BEFORE_SOURCE_MS` = 1 s before the night, with the first stage extended back to it
-([4.1](#41-the-record), [4.3](#43-stage-mapping)), so it sorts before the source session. Sleep as Android should then
-import our session instead of the source's; this is not yet confirmed on a device (the selection by earliest start and
-the lost tie are). The option applies to every written session, naps included. It changes the written data and is part
-of the params hash while it is on ([architecture.md §5.8](architecture.md#58-params-hash-and-staleness)): turning it on,
-or off again, makes every written night stale, and a recompute rewrites the records in place (same `clientRecordId`,
-version + 1). Nights Sleep as Android already imported must be deleted there and synced again. `write.awakeAsLight`
-("Write awake as light sleep") remains for readers that show awakenings poorly; it changes the written data and the
-params hash, and Sleep as Android does not need it, because it imports AWAKE as awake. The user's steps are in the
+([4.1](#41-the-record), [4.3](#43-stage-mapping)), so it sorts before the source session. Sleep as Android then imports
+our session instead of the source's (confirmed on the development phone with Sleep as Android 20261006, above). The
+option applies to every written session, naps included. It changes the written data and is part of the params hash while
+it is on ([architecture.md §5.8](architecture.md#58-params-hash-and-staleness)): turning it on, or off again, makes
+every written night stale, and a recompute rewrites the records in place (same `clientRecordId`, version + 1). Nights
+Sleep as Android already imported must be deleted there and synced again. `write.awakeAsLight` ("Write awake as light
+sleep") remains for readers that show awakenings poorly; it changes the written data and the params hash, and Sleep as
+Android does not need it, because it imports AWAKE as awake. The user's steps are in the
 [user guide](user-guide.md#sleep-as-android).
 
 ## 9. Deleting PulseStages data

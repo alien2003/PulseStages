@@ -18,11 +18,15 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   the older source session, so Sleep as Android showed OHealth's nights without stages. With the setting on, every
   written session, naps included, starts 1 second before its source session and its first stage is extended back by that
   second; the end, zone offsets, record key, title and the notes' keys are unchanged (the params hash in the notes
-  changes), and the app's screens keep the night's own times. That Sleep as Android then imports PulseStages' session is
-  not yet confirmed on a device. The setting changes the written data and is part of the params hash only while it is
-  on: the update changes no hash, and turning it on (or off again) makes every written night stale; "Recompute" rewrites
-  them in place (same record key, next version), never under "Never overwrite". Nights Sleep as Android already imported
-  stay as they are until they are deleted there and synced again. English and Russian texts
+  changes), and the app's screens keep the night's own times. Sleep as Android then imports PulseStages' sessions with
+  their stages: confirmed on the development phone with Sleep as Android 20261006, where the nights (deleted there
+  before the sync) showed a full hypnogram with the same phase shares as in PulseStages. It shows whole minutes, so
+  when the watch app's session starts on a whole minute, the night shows there one minute earlier (3:03 instead of
+  3:04 for a session starting at 3:03:59). The setting changes the written data and is part of the params hash only
+  while it is on: the update changes no hash, and turning it on (or off again) makes every written night stale;
+  "Recompute" rewrites them in place (same record key, next version), never under "Never overwrite". Nights Sleep as
+  Android already imported stay as they are until they are deleted there and synced again (Sleep as Android →
+  Settings → Services → "Sync now"; nights of the last 29 days only). English and Russian texts
   ([user guide](docs/user-guide.md#sleep-as-android-compatibility),
   [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
 - **On-device suite**: the shadow pipeline's `policy-start-before-source` scenario checks that every captured session
@@ -33,14 +37,18 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 ### Changed
 
 - **Sleep as Android in the documentation**: its import is no longer "not verified". Observed with Sleep as Android
-  20261006 and confirmed on the development phone, it syncs only when you tap Sync, when it saves a record and when its
-  own tracking ends; it keeps the first of overlapping sessions by start time, whatever Health Connect's priority list
-  says; it never imports a session that overlaps a record it already has and never picks up later changes; it drops
-  Health Connect's "unknown" and "sleeping" stages, so a nap written as asleep / awake, once imported, shows only its
-  awake parts there; and the thin stripes on nights without stages are its own heart-rate awake detection. The user
-  guide's setup replaces "delete the stage-less session" and "Write awake as light sleep" with the compatibility
-  setting, a recompute, deleting the imported nights (cloud icon) in Sleep as Android and syncing again, and warns
-  against its Backup → "Download from Health Connect" ([user guide](docs/user-guide.md#sleep-as-android),
+  20261006 and confirmed on the development phone, it syncs only when you tap "Sync now" in its Settings → Services
+  (Health Connect for the last 30 days) or the sync button of its Health Connect screen (up to 5 years back), when it
+  saves a record and when its own tracking ends (both the last 14 days); it keeps the first of overlapping sessions by
+  start time, whatever Health Connect's priority list says; it never imports a session that overlaps a record it
+  already has and never picks up later changes; it drops Health Connect's "unknown" and "sleeping" stages, so a nap
+  written as asleep / awake, once imported, shows there as a time span without phases (only its awake parts, if any);
+  and the thin stripes on nights without stages are its own heart-rate awake detection. The user guide's setup
+  replaces "delete the stage-less session" and "Write awake as light sleep" with the compatibility setting, a
+  recompute, deleting the imported nights of the last 29 days (cloud icon) in Sleep as Android and syncing again with
+  "Sync now", and warns against tapping its "Health Connect" row in Settings → Services (a switch: it turns the
+  integration off and Sleep as Android revokes its Health Connect permissions) and against its Backup → "Download from
+  Health Connect" ([user guide](docs/user-guide.md#sleep-as-android),
   [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android)).
 
 ## [0.2.0] - 2026-10-15

@@ -263,11 +263,13 @@ already in Health Connect keep their stages until they are recomputed. The
 - **Sleep as Android** imports only the first of overlapping sessions by start time. PulseStages' session, which starts
   at the same moment as the watch app's, loses that tie, so Sleep as Android showed OHealth's nights without stages
   (observed with Sleep as Android 20261006 and confirmed on the development phone). Settings → "Written sessions" →
-  "Sleep as Android compatibility" (off by default) starts PulseStages' session 1 second earlier
-  ([user guide](docs/user-guide.md#sleep-as-android)).
-- **Not verified yet.** Whether "Sleep as Android compatibility" makes Sleep as Android import PulseStages' session
-  (not yet confirmed on a device); whether OHealth writes SpO2 or respiratory rate at night (the app works either
-  way); the behaviour of readers that filter by recording method or device type.
+  "Sleep as Android compatibility" (off by default) starts PulseStages' session 1 second earlier, so Sleep as Android
+  imports it with its stages for nights it has not imported yet; nights it already imported must be recomputed, deleted
+  there and synced again (last 29 days only). A nap written as asleep / awake shows there as a time span without phases
+  (both confirmed on the development phone with Sleep as Android 20261006,
+  [user guide](docs/user-guide.md#sleep-as-android)).
+- **Not verified yet.** Whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the
+  behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
 
 ## Licence
