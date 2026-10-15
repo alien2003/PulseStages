@@ -4,6 +4,7 @@ import android.os.SystemClock
 import io.github.alien2003.pulsestages.data.hc.EstimatedSessionWrite
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
+import io.github.alien2003.pulsestages.data.hc.pipeline.OutputOptions
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
 import io.github.alien2003.pulsestages.e2e.E2e
 import io.github.alien2003.pulsestages.e2e.safety.GuardedSleepInserter
@@ -49,7 +50,11 @@ class RealWriteSequence(
     val clientRecordId: String = E2e.TEST_NAMESPACE + UUID.randomUUID()
 
     private val v1: EstimatedSessionWrite = night.write(clientRecordId, TestNight.FIRST_VERSION, settings)
-    private val v2: EstimatedSessionWrite = v1.copy(clientRecordVersion = v1.clientRecordVersion + 1, stages = TestNight.rotated(v1.stages))
+    private val v2: EstimatedSessionWrite =
+        movedStart(
+            v1.copy(clientRecordVersion = v1.clientRecordVersion + 1, stages = TestNight.rotated(v1.stages)),
+            night.candidate.startMs,
+        )
     private val rawV1 = TestNight.record(v1)
     private val inserter = GuardedSleepInserter()
     private var started = 0L
@@ -68,6 +73,7 @@ class RealWriteSequence(
     init {
         check(SafetyGuardRepository.isTestId(clientRecordId))
         check(v2.stages != v1.stages) { "v2 must have other stages than v1" }
+        check(v2.startMs != v1.startMs) { "v2 must start at another time than v1" }
     }
 
     /** The six steps; throws on the first broken expectation (the caller cleans up in `finally`). */
@@ -110,6 +116,19 @@ class RealWriteSequence(
     }
 
     private fun elapsed(): Long = SystemClock.elapsedRealtime() - started
+
+    /**
+     * [write] with its start moved by the shift of `write.startBeforeSource`, the other way than v1 (one second before
+     * the night when v1 starts with it, back to the night otherwise), and its first stage moved with it: turning the
+     * option on or off rewrites a record in place with another start.
+     */
+    private fun movedStart(
+        write: EstimatedSessionWrite,
+        nightStartMs: Long,
+    ): EstimatedSessionWrite {
+        val startMs = if (write.startMs == nightStartMs) nightStartMs - OutputOptions.START_BEFORE_SOURCE_MS else nightStartMs
+        return write.copy(startMs = startMs, stages = listOf(write.stages.first().copy(startMs = startMs)) + write.stages.drop(1))
+    }
 
     /** Our records with [write]'s clientRecordId around its night. */
     private suspend fun withId(write: EstimatedSessionWrite): List<HcSleepSession> =

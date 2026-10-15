@@ -42,12 +42,14 @@ import java.time.ZoneOffset
  *
  * @property candidate the source night.
  * @property estimate the estimate of the app's real estimator.
+ * @property startMs the start of the record as the app would write it (`write.startBeforeSource`).
  * @property stages the stages as the app would write them.
  * @property paramsHash the params hash the app would put into the notes.
  */
 class TestNight(
     val candidate: NightCandidate,
     val estimate: NightEstimate,
+    val startMs: Long,
     val stages: List<HcStage>,
     val paramsHash: String,
 ) {
@@ -71,7 +73,7 @@ class TestNight(
         return EstimatedSessionWrite(
             clientRecordId = clientRecordId,
             clientRecordVersion = version,
-            startMs = candidate.startMs,
+            startMs = startMs,
             endMs = candidate.endMs,
             startZoneOffsetSec = candidate.startZoneOffsetSec,
             endZoneOffsetSec = candidate.endZoneOffsetSec,
@@ -130,11 +132,18 @@ class TestNight(
             val cutoff = nowMs - MIN_AGE_DAYS * DAY_MS
             val packages = settings.sources.sourcePackages.filterTo(sortedSetOf()) { it != ownPackage }
             val sessions = if (packages.isEmpty()) emptyList() else repository.readSleepSessions(0L, cutoff, packages)
+
+            // From the start of the record the app would write (one second earlier with write.startBeforeSource).
+            fun overlapsNoOwnRecord(night: NightCandidate): Boolean {
+                val start = OutputOptions.recordStartMs(night.startMs, settings.write)
+                return own.none { it.startMs < night.endMs && it.endMs > start }
+            }
+
             return NightCandidateBuilder(ownPackage, SystemZoneOffsetProvider)
                 .build(sessions, settings.sources, settings.write.overwritePolicy, settings.algo)
                 .candidates
                 .filter { it.endMs <= cutoff }
-                .filter { night -> own.none { it.startMs < night.endMs && it.endMs > night.startMs } }
+                .filter(::overlapsNoOwnRecord)
                 .sortedWith(compareBy<NightCandidate> { it.mode(settings.algo) != SessionMode.NIGHT }.thenByDescending { it.startMs })
                 .take(MAX_TRIES)
         }
@@ -175,15 +184,19 @@ class TestNight(
             paramsHash: String,
         ): TestNight? {
             val sleepWake = estimate.mode == SessionMode.NAP && settings.algo.napMode.outputPolicy == NapOutputPolicy.SLEEP_WAKE
-            val stages =
+            val mapped =
                 if (sleepWake) {
                     StageMapping.toSleepWakeHcStages(estimate.stages, settings.write.awakeAsLight)
                 } else {
                     StageMapping.toHcStages(estimate.stages, settings.write.awakeAsLight)
                 }
             val epochMs = settings.algo.preprocess.epochSec * SECOND_MS
-            val valid = StageMapping.validate(stages, candidate.startMs, candidate.endMs, epochMs).isEmpty()
-            return if (valid) TestNight(candidate, estimate, stages, paramsHash) else null
+            // As the app: against the night first, then the record with its first stage extended back to its start.
+            if (StageMapping.validate(mapped, candidate.startMs, candidate.endMs, epochMs).isNotEmpty()) return null
+            val startMs = OutputOptions.recordStartMs(candidate.startMs, settings.write)
+            val stages = StageMapping.startingAt(mapped, startMs)
+            return TestNight(candidate, estimate, startMs, stages, paramsHash)
+                .takeIf { StageMapping.validate(stages, startMs, candidate.endMs, epochMs).isEmpty() }
         }
 
         /** [stages] with every type replaced (AWAKE → LIGHT → DEEP → REM → AWAKE, others → LIGHT), adjacent equal ones merged. */

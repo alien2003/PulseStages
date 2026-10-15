@@ -58,7 +58,8 @@ the later steps do not need of the run's read budget (a hard cap), and covers on
 4. "recompute all": every written night rewritten exactly once, with clientRecordVersion + 1;
 5. the history again with the default settings;
 6. policies on the most recent weeks: naps SKIP, STAGES and SLEEP_WAKE (the default since the realistic-nap
-   experiment, so STAGES has its own scenario), `awakeAsLight`, `gapPolicy` LIGHT, `hrSources` ANY.
+   experiment, so STAGES has its own scenario), `awakeAsLight`, `startBeforeSource` (every write starts exactly one
+   second before its night), `gapPolicy` LIGHT, `hrSources` ANY.
 
 It reports per session: local date, start, length, NIGHT / NAP, outcome, estimator, coverage, confidence, stage
 shares, warnings, heart-rate samples and their median interval, the estimate's time, and whether the result equals the
@@ -71,7 +72,8 @@ room for them (waited for before the write), and a read right before the insert 
 skipped. Then, with clientRecordId `ps-e2e:<random uuid>` (recorded on the phone before the insert) and a title
 starting with "[PulseStages E2E test record, deleted within a minute]": insert v1 (exactly one record with that id;
 stages, title, notes and zone offsets as written) → the same v1 again (still one, unchanged) → v2 with other stages
-(one record, version 2, the new stages, the same metadata.id) → a plain `insertRecords` of v1 (Health Connect ignores
+and its start moved by the one second of `write.startBeforeSource` (one record, version 2, the new stages and start,
+the same metadata.id) → a plain `insertRecords` of v1 (Health Connect ignores
 the lower version) → the app's verified write of v1 (it replaces the stale higher version: delete and insert) → delete
 by clientRecordId → none left. The reads while the record exists are never held back by the suite's budget, so the
 record lives seconds; its lifetime is asserted under 60 s. Without a suitable night the test is skipped and nothing is

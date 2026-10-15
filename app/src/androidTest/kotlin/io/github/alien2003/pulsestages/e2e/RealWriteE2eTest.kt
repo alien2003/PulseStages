@@ -44,7 +44,8 @@ import org.junit.runner.RunWith
  * 1. insert v1 (the app's VerifiedUpsert) → exactly one own record with that id; stages, title, notes, start, end and
  *    zone offsets as written;
  * 2. insert the same v1 again → still one record, same id, stages unchanged;
- * 3. insert v2 (version + 1, other stages) → one record, version 2, the new stages, the same metadata.id;
+ * 3. insert v2 (version + 1, other stages, the start moved by the one second of `write.startBeforeSource`) → one
+ *    record, version 2, the new stages and start, the same metadata.id;
  * 4. a plain insertRecords of v1 → Health Connect ignores the lower version: version 2 and its stages stay;
  * 5. the app's VerifiedUpsert of v1 → it finds the higher stale version and replaces it (delete + insert): version 1;
  * 6. delete by clientRecordId → no record left.

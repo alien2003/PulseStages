@@ -8,6 +8,7 @@ import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.pipeline.BackfillOutcome
 import io.github.alien2003.pulsestages.data.hc.pipeline.BackfillReport
+import io.github.alien2003.pulsestages.data.hc.pipeline.OutputOptions
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.hc.pipeline.ResourceDefaultTitleProvider
 import io.github.alien2003.pulsestages.data.hc.usecase.HybridModelProvider
@@ -38,7 +39,7 @@ import kotlinx.serialization.json.jsonPrimitive
  *    clientRecordVersion + 1 and an input update, at most the per-run cap; the same sync again does not rewrite them;
  * 4. `recompute-all`: "recompute all" must rewrite every written night exactly once, with clientRecordVersion + 1;
  * 5. `defaults`: the history again with the default settings;
- * 6. policies on the most recent weeks: naps SKIP / SLEEP_WAKE, awakeAsLight, gapPolicy LIGHT, hrSources ANY.
+ * 6. policies on the most recent weeks: naps SKIP / SLEEP_WAKE, awakeAsLight, startBeforeSource, gapPolicy LIGHT, hrSources ANY.
  * Nothing is written to Health Connect ([ShadowWriteRepository]); the reads are those of the real repository.
  */
 class ShadowRun(
@@ -315,6 +316,12 @@ class ShadowRun(
             "AWAKE written as LIGHT (write.awakeAsLight)",
             base.copy(write = base.write.copy(awakeAsLight = true)),
         )
+        policy(
+            "policy-start-before-source",
+            "sessions start one second before their source (write.startBeforeSource)",
+            base.copy(write = base.write.copy(startBeforeSource = true)),
+            ::expectStartBeforeSource,
+        )
         val gapLight = base.copy(algo = base.algo.copy(post = base.algo.post.copy(gapPolicy = GapPolicy.LIGHT)))
         policy("policy-gap-light", "data gaps written as LIGHT (algo.post.gapPolicy LIGHT)", gapLight, ::expectNoUnknownStages)
         val any = user.withHistory(minOf(census.policyDays, ANY_SOURCES_DAYS))
@@ -394,6 +401,29 @@ class ShadowRun(
         writes
             .filter { captured -> captured.write.stages.any { it.type == SleepSessionRecord.STAGE_TYPE_UNKNOWN } }
             .forEach { problems += "${it.write.clientRecordId.take(ID_PREFIX)}… has UNKNOWN stages although gaps are LIGHT" }
+    }
+
+    /** With startBeforeSource every session starts exactly one second before its night (the source's start). */
+    private suspend fun expectStartBeforeSource(
+        env: ShadowEnvironment,
+        writes: List<CapturedWrite>,
+        problems: MutableList<String>,
+        notes: MutableList<String>,
+    ) {
+        if (writes.isEmpty()) notes += "nothing was written in the covered weeks: the start check is vacuous"
+        writes.forEach { captured ->
+            val night = env.database.estimatedNightDao().findByClientRecordId(captured.write.clientRecordId)
+            val id = captured.write.clientRecordId.take(ID_PREFIX)
+            when {
+                night == null -> {
+                    problems += "$id… is not in the ledger"
+                }
+
+                captured.write.startMs != night.sessionStartMs - OutputOptions.START_BEFORE_SOURCE_MS -> {
+                    problems += "$id… starts at ${captured.write.startMs}, not one second before its night (${night.sessionStartMs})"
+                }
+            }
+        }
     }
 
     private suspend fun allNights(env: ShadowEnvironment) =
