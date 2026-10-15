@@ -10,6 +10,15 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-15
+
+Naps are written to Health Connect as asleep / awake by default. A pre-registered experiment tried to make the
+stage breakdown of naps realistic and found no nap stage model that passed its checks (per-epoch discrimination,
+following the heart rate across sleep regimes, realism against published compositions of afternoon naps), so the
+nap model stays and its stages, still shown in the app, are not validated. Nights are unchanged. Details in
+[ALGORITHM.md §13.13](https://github.com/alien2003/PulseStages/blob/v0.1.1/ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)
+and the [user guide](https://github.com/alien2003/PulseStages/blob/v0.1.1/docs/user-guide.md#updating-from-010).
+
 ### Added
 
 - **On-device end-to-end suite** (`app/src/androidTest`, `tools/device-test/run-device-tests.sh`). Runs against the
@@ -259,5 +268,6 @@ for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epoc
   and of the debug signing certificate.
 - **Licence**: WTFPL.
 
-[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.1
 [0.1.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.0

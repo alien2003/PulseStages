@@ -119,7 +119,7 @@ its settings file, its sync state and the demo-mode flag must be as before, and 
   their own): same metadata.id, clientRecordVersion, lastModifiedTime, start, end, zone offsets, stages, title, notes.
 - **The app is never installed, updated, downgraded, cleared, uninstalled or stripped of a permission.** The runner
   installs only `io.github.alien2003.pulsestages.test` (`adb install -r -t`), checks that the app's versionCode is
-  10099 and that it is signed with the same certificate as the test APK (your `~/.android/debug.keystore`), and at the
+  10199 (v0.1.1; `EXPECTED_VERSION_CODE` / `EXPECTED_VERSION_NAME` override it) and that it is signed with the same certificate as the test APK (your `~/.android/debug.keystore`), and at the
   end uninstalls only the test package. It never uses `connectedAndroidTest` or `installDebug`.
 - **The suite's code never writes the app's database or DataStore files.** It reads the settings file and the
   sync-state file as bytes (their SHA-256 is compared before and after the run, and around the UI tour); the shadow
@@ -195,22 +195,22 @@ enqueue, cancel or run by the suite.
   comparison (PulseStages cannot change other apps' data, so such a failure points at that app).
 - The UI tour's barrier is a check of what is on the screen. A future version of a screen that writes without a button
   press, or a writing button with a label the check does not know, would not be caught by it; the comparison of
-  Health Connect and of the app's files afterwards would report the change. The checks are built for v0.1.0.
+  Health Connect and of the app's files afterwards would report the change. The checks are built for v0.1.1.
 
 ## How to run
 
 Prerequisites: the project set up as in [docs/development.md](../../docs/development.md) (mise, the SDK), `adb.exe` on
 Windows reachable as `ADB_WIN` (WSL) or `adb` (Linux), USB debugging allowed for this computer, and the installed
-debug build of v0.1.0 (versionCode 10099) signed with your `~/.android/debug.keystore`. The checkout must be at v0.1.0
-plus this suite (the test APK is compiled against the same sources as the installed app).
+debug build of v0.1.1 (versionCode 10199) signed with your `~/.android/debug.keystore`. The checkout must be at v0.1.1
+(or a later commit with the same app sources) (the test APK is compiled against the same sources as the installed app).
 
 ```sh
 mise exec -- tools/device-test/run-device-tests.sh                  # everything
 mise exec -- tools/device-test/run-device-tests.sh cleanup-only     # only remove what the suite may have left
 ```
 
-The runner builds the test APK with `./gradlew :app:assembleDebugAndroidTest -PversionName=0.1.0
--PversionCode=10099` (the app APK is not built for the phone and never installed; the same version properties keep
+The runner builds the test APK with `./gradlew :app:assembleDebugAndroidTest -PversionName=0.1.1
+-PversionCode=10199` (the app APK is not built for the phone and never installed; the same version properties keep
 everything compiled exactly like the installed app). Options: `--skip-build`, `--keep-going` (continue after a failed
 step), `--serial SERIAL`, `--unlock-timeout SECONDS` (default 300), `--shadow-history-days N` (0 = all history),
 `--read-budget N` (default 4000, earlier runs of the last 24 hours included), `--reads-per-15min N` (default 600),
@@ -274,7 +274,7 @@ contain your own data (dates, stage shares, package names, screenshots of the ap
 The test APK is an instrumentation of the installed app (`targetPackage` `io.github.alien2003.pulsestages`), so the
 test code runs inside the app's process with the app's uid and Health Connect permissions, next to the app's own
 classes, which come from the installed APK. That is why the test APK has to be compiled against the same sources
-(v0.1.0) and signed with the same key, and why it never needs the app to be reinstalled. Its instrumentation class
+(v0.1.1) and signed with the same key, and why it never needs the app to be reinstalled. Its instrumentation class
 `E2eRunner` installs the in-memory WorkManager before Android calls the app's `Application.onCreate`. The UI tour reads
 every text by resource name from the installed app, so it does not depend on resource ids matching between builds.
 
