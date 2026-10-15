@@ -51,7 +51,7 @@ data class CapturedDelete(
  * read result, and the simulated ones are added where the real repository would return them (own-package and
  * any-origin sleep reads, [readOwnSessions], [scanSleepOrigins]). The upsert follows Health Connect with the app's
  * read-back verification: the stored record is the one written (VerifiedUpsert replaces a higher stale version), and
- * its id is stable per clientRecordId.
+ * its id is stable per clientRecordId. A scenario may add synthetic heart rate to the reads ([extraHeartRate]).
  */
 @Suppress("TooManyFunctions") // The wide HealthRepository boundary.
 class ShadowWriteRepository(
@@ -66,6 +66,15 @@ class ShadowWriteRepository(
     /** The scenario the next captured calls belong to. */
     @Volatile
     var phase: String = "setup"
+
+    /**
+     * Synthetic heart rate a scenario adds to what Health Connect returned (late data, in memory only: never written
+     * anywhere). Called with the arguments and the result of every heart-rate read, it returns the samples the
+     * pipeline sees: a NEW list sorted by time (the result may be a cached list shared with other reads and must not be
+     * modified). Null: the real heart rate.
+     */
+    @Volatile
+    var extraHeartRate: ((startMs: Long, endMs: Long, packages: Set<String>?, samples: List<HrSample>) -> List<HrSample>)? = null
 
     /** Every captured write, in order. */
     val writes: List<CapturedWrite> get() = synchronized(this) { capturedWrites.toList() }
@@ -138,7 +147,10 @@ class ShadowWriteRepository(
         startMs: Long,
         endMs: Long,
         packages: Set<String>?,
-    ): List<HrSample> = reads.readHeartRate(startMs, endMs, packages)
+    ): List<HrSample> {
+        val real = reads.readHeartRate(startMs, endMs, packages)
+        return extraHeartRate?.invoke(startMs, endMs, packages, real) ?: real
+    }
 
     override suspend fun readSteps(
         startMs: Long,

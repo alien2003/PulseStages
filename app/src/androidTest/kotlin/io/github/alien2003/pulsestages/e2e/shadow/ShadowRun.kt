@@ -31,11 +31,14 @@ import kotlinx.serialization.json.jsonPrimitive
  * 1. `real-settings`: the backfill engine over the history with the user's real settings (copied read-only from the
  *    app's settings file), on an isolated ledger; every captured write must satisfy [WriteInvariants], and ledger and
  *    simulated Health Connect must agree;
- * 2. `idempotency-backfill` and `idempotency-sync`: a second backfill and a Changes-API sync on the same ledger must
- *    write and delete nothing;
- * 3. `recompute-all`: "recompute all" must rewrite every written night exactly once, with clientRecordVersion + 1;
- * 4. `defaults`: the history again with the default settings;
- * 5. policies on the most recent weeks: naps SKIP / SLEEP_WAKE, awakeAsLight, gapPolicy LIGHT, hrSources ANY.
+ * 2. `idempotency-backfill` and `idempotency-sync`: a second backfill and a Changes-API sync (with its refresh of
+ *    recently written nights) on the same ledger must write and delete nothing;
+ * 3. `refresh-recent` ([RefreshScenario]): the automatic refresh of recently written nights: a sync on unchanged data
+ *    writes nothing; with synthetic late heart rate (in memory only) a sync rewrites only written nights, each once with
+ *    clientRecordVersion + 1 and an input update, at most the per-run cap; the same sync again does not rewrite them;
+ * 4. `recompute-all`: "recompute all" must rewrite every written night exactly once, with clientRecordVersion + 1;
+ * 5. `defaults`: the history again with the default settings;
+ * 6. policies on the most recent weeks: naps SKIP / SLEEP_WAKE, awakeAsLight, gapPolicy LIGHT, hrSources ANY.
  * Nothing is written to Health Connect ([ShadowWriteRepository]); the reads are those of the real repository.
  */
 class ShadowRun(
@@ -89,6 +92,7 @@ class ShadowRun(
             backfill(env, real, "the backfill engine over the history with the user's settings")
             sessions = ShadowChecks.sessionReports(env, real, reads, appRecords)
             idempotency(env, real)
+            refreshRecent(env)
             recomputeAll(env, real)
         }
         environment("defaults").use { env ->
@@ -170,7 +174,13 @@ class ShadowRun(
         env.health.phase = "idempotency-sync"
         val sync = env.sync.run(inBackground = false)
         val problems = mutableListOf<String>()
-        val notes = mutableListOf("settings: ${settings.sources.sourcePackages}; sync up to date: ${sync.pipeline.upToDate}")
+        val notes =
+            mutableListOf(
+                "settings: ${settings.sources.sourcePackages}; sync up to date: ${sync.pipeline.upToDate}; " +
+                    "written nights whose input the sync's refresh read again: ${sync.pipeline.inputChecks}",
+            )
+        // Unchanged (cached) data give the fingerprints stored at the write: the refresh rewrites nothing, whatever the policy.
+        if (sync.pipeline.refreshed > 0) problems += "idempotency-sync refreshed ${sync.pipeline.refreshed} night(s) on unchanged data"
         // RECOMPUTE_ALL rewrites every night on every run by design; the other policies must write nothing now.
         val rewritesByDesign = settings.write.overwritePolicy == OverwritePolicy.RECOMPUTE_ALL
         if (rewritesByDesign) notes += "overwritePolicy RECOMPUTE_ALL rewrites every night by design: the zero-write check is skipped"
@@ -197,7 +207,9 @@ class ShadowRun(
         scenarios +=
             ScenarioReport(
                 name = "idempotency",
-                description = "a second backfill and a Changes-API sync (re-read of the last week) on the same ledger",
+                description =
+                    "a second backfill and a Changes-API sync (re-read of the last week, refresh of recently written nights) " +
+                        "on the same ledger",
                 outcome = "${again.outcome} / ${sync.outcome}",
                 found = (again.state?.nightsFound ?: 0) + sync.pipeline.found,
                 written = env.health.writesOf("idempotency-backfill").size + env.health.writesOf("idempotency-sync").size,
@@ -216,7 +228,17 @@ class ShadowRun(
             )
     }
 
-    /** "Recompute all" rewrites every written night exactly once, with clientRecordVersion + 1. */
+    /** The automatic refresh of recently written nights on the ledger of [env] ([RefreshScenario]). */
+    private suspend fun refreshRecent(env: ShadowEnvironment) {
+        val report = RefreshScenario(env, defaultTitle).run()
+        scenarios += report
+        E2e.progress("${report.name}: ${report.written} rewrite(s) in three syncs, ${report.problems.size} problem(s)")
+    }
+
+    /**
+     * "Recompute all" rewrites every written night exactly once, with clientRecordVersion + 1 (relative to the ledger at
+     * its start, so after the rewrites of the refresh scenario).
+     */
     private suspend fun recomputeAll(
         env: ShadowEnvironment,
         settings: AppSettings,

@@ -44,10 +44,20 @@ the later steps do not need of the run's read budget (a hard cap), and covers on
    (stages sorted, contiguous, exactly inside the session, at least one epoch each, only `STAGE_TYPE_*` values the
    app writes; clientRecordId `ps:` + sha256 of the source uuids; version `ALGO_VERSION·1000 + n`; the notes' JSON
    keys and values; the title) and the ledger must agree with the simulated Health Connect (one output per night);
-2. idempotency: a second backfill and a Changes-API sync on the same ledger must write and delete nothing;
-3. "recompute all": every written night rewritten exactly once, with clientRecordVersion + 1;
-4. the history again with the default settings;
-5. policies on the most recent weeks: naps SKIP, STAGES and SLEEP_WAKE (the default since the realistic-nap
+2. idempotency: a second backfill and a Changes-API sync (with its refresh of recently written nights) on the same
+   ledger must write and delete nothing;
+3. refresh of recently written nights (`refresh-recent`), on the same ledger: a sync on unchanged data writes and
+   deletes nothing; then synthetic late heart rate is added in memory (every sample in a written night's input window
+   also one second later, same bpm; never written anywhere) and a sync may rewrite only nights that were written
+   before, each once, with the same clientRecordId and clientRecordVersion + 1, at most 8 per run, with the input
+   update as the ledger's reason, deleting nothing; the same sync again must not rewrite those nights (their input did
+   not change since). Every ledger row was created during the test, and the sync checks a night again only after as
+   long as it waited before, so the scenario moves the isolated pipeline's clock forward before each sync (by the age
+   of the oldest written row, at most to 35 hours after that row was created) to make the written nights of the last
+   30 days due again, as at a later hourly sync. Under `overwritePolicy` NEVER nothing may be refreshed;
+4. "recompute all": every written night rewritten exactly once, with clientRecordVersion + 1;
+5. the history again with the default settings;
+6. policies on the most recent weeks: naps SKIP, STAGES and SLEEP_WAKE (the default since the realistic-nap
    experiment, so STAGES has its own scenario), `awakeAsLight`, `gapPolicy` LIGHT, `hrSources` ANY.
 
 It reports per session: local date, start, length, NIGHT / NAP, outcome, estimator, coverage, confidence, stage
@@ -148,7 +158,7 @@ The test code runs inside the app's process, as the app.
 | `readRecords` | SleepSessionRecord of the enabled sources (window reads, one single-record read of the oldest session) | shadow pipeline, real write |
 | `readRecords` | HeartRateRecord, StepsRecord, OxygenSaturationRecord, RespiratoryRateRecord, HeartRateVariabilityRmssdRecord around each night (the night's source, or any origin with `hrSources` ANY) | shadow pipeline, real write (≤ 8 nights) |
 | `getChangesToken` | SleepSessionRecord of the enabled sources | shadow pipeline (sync scenario) |
-| `getChanges` | with that token, only when one is stored (not in a fresh run) | shadow pipeline |
+| `getChanges` | with that token, only when one is stored (not by the first sync of a scenario) | shadow pipeline (the syncs of the refresh scenario) |
 | `getGrantedPermissions`, `getSdkStatus`, `getFeatureStatus` | — | every test that builds the repository |
 | `insertRecords` | ONE SleepSessionRecord, clientRecordId `ps-e2e:<uuid>`: six inserts (v1, v1, v2, plain v1, verified v1 = insert + insert) | real write |
 | `deleteRecords` | SleepSessionRecord by clientRecordIds, only `ps-e2e:` ids | real write (the verified write's repair, the final delete), its `finally` and the cleanup step |

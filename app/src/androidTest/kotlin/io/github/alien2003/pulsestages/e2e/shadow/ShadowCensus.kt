@@ -28,7 +28,7 @@ object ShadowCensus {
     /** Heart rate (about 3 pages with the left padding) and steps (about 2). */
     private const val BASE_READS_PER_NIGHT = 5
 
-    /** The other scenarios (defaults, sync, recompute, policies) mostly hit the cache: 25 % on top. */
+    /** The other scenarios (defaults, syncs, refresh, recompute, policies) mostly hit the cache: 25 % on top. */
     private const val SCENARIO_MARGIN = 1.25
     private const val MIN_POLICY_DAYS = 14
     private const val MAX_POLICY_DAYS = 60

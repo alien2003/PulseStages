@@ -30,7 +30,10 @@ import kotlinx.coroutines.cancel
 import java.io.Closeable
 import java.io.File
 import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * One isolated copy of the app's pipeline for a shadow scenario, wired like the app's Hilt graph but with:
@@ -41,7 +44,8 @@ import java.util.UUID
  * - [ShadowWriteRepository] over [reads] (the real Health Connect for reads): no write or delete leaves the process;
  * - the real estimator (SleepStager with the bundled hybrid model from the app's assets, [hybridModels]) and the
  *   personal-model store of the in-memory ledger (empty: the global models);
- * - the suite's [logger] (the app's log table is never written).
+ * - the suite's [logger] (the app's log table is never written);
+ * - the system clock, which a scenario may move forward to simulate a later run ([advanceClock]).
  */
 @Suppress("InjectDispatcher") // The suite wires the pipeline itself, like the app's Hilt modules.
 class ShadowEnvironment(
@@ -52,7 +56,7 @@ class ShadowEnvironment(
     private val logger: E2eLogger,
 ) : Closeable {
     private val ownPackage = E2e.app.packageName
-    private val clock: Clock = Clock.systemUTC()
+    private val clock = ShiftedClock(Clock.systemUTC())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** The scenario's private directory (DataStore files). */
@@ -102,6 +106,18 @@ class ShadowEnvironment(
     /** The Changes-API sync of new nights. */
     val sync: NewNightsSync = NewNightsSync(health, settings, syncState, windowReader, pipeline, logger, clock)
 
+    /** The time every component of this environment sees: the system time, moved forward by [advanceClock]. */
+    fun nowMs(): Long = clock.millis()
+
+    /**
+     * Moves the time every component of this environment sees [byMs] forward, as if a later run happened (e.g. the
+     * next hourly sync). Never backwards; Health Connect's own times are not affected.
+     */
+    fun advanceClock(byMs: Long) {
+        require(byMs >= 0) { "the clock only moves forward: $byMs ms" }
+        clock.advance(byMs)
+    }
+
     /** Stores [value] as this scenario's settings; fails when the app's validator rejects them. */
     suspend fun useSettings(value: AppSettings): AppSettings {
         val result = settings.update { value }
@@ -125,4 +141,22 @@ class ShadowEnvironment(
             root.deleteRecursively()
         }
     }
+}
+
+/** [base] moved forward by [offsetMs] ([advance]); the clocks [withZone] returns share the offset. */
+private class ShiftedClock(
+    private val base: Clock,
+    private val offsetMs: AtomicLong = AtomicLong(0L),
+) : Clock() {
+    fun advance(byMs: Long) {
+        offsetMs.addAndGet(byMs)
+    }
+
+    override fun getZone(): ZoneId = base.zone
+
+    override fun withZone(zone: ZoneId): Clock = ShiftedClock(base.withZone(zone), offsetMs)
+
+    override fun instant(): Instant = base.instant().plusMillis(offsetMs.get())
+
+    override fun millis(): Long = base.millis() + offsetMs.get()
 }
