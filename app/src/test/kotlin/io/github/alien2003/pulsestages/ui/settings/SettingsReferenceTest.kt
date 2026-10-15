@@ -68,8 +68,9 @@ class SettingsReferenceTest {
     fun `the params hash column follows the pipeline's hash`() {
         val keys = reference.keys()
         keys.filter { it.startsWith("algo.") }.forEach { assertEquals(it, true, reference.inParamsHash(it)) }
-        // The output option and the input selection are part of the hash, the title template deliberately is not.
+        // The output options and the input selection are part of the hash, the title template deliberately is not.
         assertEquals(true, reference.inParamsHash("write.awakeAsLight"))
+        assertEquals(true, reference.inParamsHash("write.startBeforeSource"))
         assertEquals(true, reference.inParamsHash("sources.hrSources"))
         listOf("write.titleTemplate", "write.overwritePolicy", "sources.minSessionMin", "schedule.periodicHours", "debug.logLevel")
             .forEach { assertEquals(it, false, reference.inParamsHash(it)) }

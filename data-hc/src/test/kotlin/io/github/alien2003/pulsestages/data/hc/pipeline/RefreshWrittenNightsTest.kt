@@ -270,6 +270,48 @@ class RefreshWrittenNightsTest {
         }
 
     @Test
+    fun `with startBeforeSource a refresh rewrite keeps the record one second before its source`() =
+        harnessTest(dir) { h ->
+            h.settings.set { it.copy(write = it.write.copy(startBeforeSource = true)) }
+            val source = h.repository.addPartialNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            val first = h.singleRecord()
+            assertEquals(source.startMs - OutputOptions.START_BEFORE_SOURCE_MS, first.startMs)
+
+            h.clock.advanceBy(HOUR_MS)
+            h.repository.addRestOfHeartRate(source)
+            val report = h.sync.run(inBackground = false)
+
+            assertEquals(1, report.pipeline.refreshed)
+            val record = h.singleRecord()
+            assertEquals(first.uuid, record.uuid)
+            assertEquals(1001L, record.clientRecordVersion)
+            assertEquals(source.startMs - OutputOptions.START_BEFORE_SOURCE_MS, record.startMs)
+            assertValidStages(record)
+            assertEquals(source.startMs, h.singleNight().sessionStartMs)
+            h.assertLedgerMatchesHealthConnect()
+        }
+
+    @Test
+    fun `with startBeforeSource a changed input that gives the same record does not rewrite it`() =
+        harnessTest(dir) { h ->
+            h.settings.set { it.copy(write = it.write.copy(startBeforeSource = true)) }
+            val source = h.repository.addNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            val record = h.singleRecord()
+
+            h.clock.advanceBy(HOUR_MS)
+            h.repository.addSteps(OHEALTH, source.startMs + 3 * HOUR_MS, source.startMs + 3 * HOUR_MS + 5 * MINUTE_MS, 40)
+            h.repository.clearCalls()
+            val report = h.sync.run(inBackground = false)
+
+            assertEquals(1, report.pipeline.inputChecks)
+            assertEquals(0, report.pipeline.refreshed)
+            assertEquals(0, h.repository.callCount(Operation.WRITE), "the shifted start is part of the same record")
+            assertEquals(listOf(record), h.repository.ownSessions())
+        }
+
+    @Test
     fun `a night written by the Changes part of a sync is not read again by the refresh of the same sync`() =
         harnessTest(dir) { h ->
             h.sync.run(inBackground = false)

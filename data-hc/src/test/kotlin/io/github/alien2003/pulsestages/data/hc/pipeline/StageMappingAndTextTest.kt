@@ -11,6 +11,7 @@ import io.github.alien2003.pulsestages.data.local.settings.HrSourcesMode
 import io.github.alien2003.pulsestages.data.local.settings.WriteSettings
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -81,6 +82,39 @@ class StageMappingTest {
             StageMapping.validate(listOf(HcStage(0, 30_000, 4)), 0, 30_000, m),
             "session shorter than an epoch",
         )
+    }
+
+    @Test
+    fun `startingAt extends the first stage back and leaves the others`() {
+        val stages = listOf(HcStage(10 * m, 20 * m, 4), HcStage(20 * m, 30 * m, 5))
+        val early = 10 * m - 1_000
+        val extended = StageMapping.startingAt(stages, early)
+        assertEquals(listOf(HcStage(early, 20 * m, 4), HcStage(20 * m, 30 * m, 5)), extended)
+        assertEquals(emptyList<String>(), StageMapping.validate(extended, early, 30 * m, m))
+        assertEquals(stages, StageMapping.startingAt(stages, 10 * m))
+        assertEquals(emptyList<HcStage>(), StageMapping.startingAt(emptyList(), 0))
+        assertThrows(IllegalArgumentException::class.java) { StageMapping.startingAt(stages, 10 * m + 1) }
+    }
+
+    @Test
+    fun `a valid hypnogram extended one second back is valid for the earlier start`() {
+        val shift = OutputOptions.START_BEFORE_SOURCE_MS
+        val sleepWake = StageMapping.toSleepWakeHcStages(listOf(StageInterval(0, 20 * m, SleepStage.DEEP)), awakeAsLight = false)
+        val hypnograms =
+            listOf(
+                listOf(HcStage(0, 10 * m, 4), HcStage(10 * m, 11 * m, 1), HcStage(11 * m, 50 * m + 30_000, 0)),
+                listOf(HcStage(0, m, 1), HcStage(m, 20 * m, 2)),
+                sleepWake,
+                // Shorter than one epoch: one stage, also once it is longer than an epoch after the extension.
+                listOf(HcStage(0, 30_000, 4)),
+                listOf(HcStage(0, m - 500, 4)),
+            )
+        hypnograms.forEach { stages ->
+            val end = stages.last().endMs
+            assertEquals(emptyList<String>(), StageMapping.validate(stages, 0, end, m), "valid before: $stages")
+            val extended = StageMapping.startingAt(stages, -shift)
+            assertEquals(emptyList<String>(), StageMapping.validate(extended, -shift, end, m), "after: $stages")
+        }
     }
 
     @Test
@@ -179,6 +213,20 @@ class SessionTextTest {
         val base = WriteSettings()
         assertNotEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(awakeAsLight = true)))
         assertEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(titleTemplate = "x")))
+    }
+
+    @Test
+    fun `startBeforeSource is part of the params hash extra only when on, so earlier hashes stay valid`() {
+        val base = WriteSettings()
+        assertEquals("awakeAsLight=false", OutputOptions.hashExtra(base), "the extra of the releases before the option")
+        assertEquals("awakeAsLight=true", OutputOptions.hashExtra(base.copy(awakeAsLight = true)))
+        assertEquals("awakeAsLight=false;startBeforeSource=true", OutputOptions.hashExtra(base.copy(startBeforeSource = true)))
+    }
+
+    @Test
+    fun `the record starts one second before the night only with startBeforeSource`() {
+        assertEquals(5_000L, OutputOptions.recordStartMs(5_000L, WriteSettings()))
+        assertEquals(4_000L, OutputOptions.recordStartMs(5_000L, WriteSettings(startBeforeSource = true)))
     }
 
     @Test

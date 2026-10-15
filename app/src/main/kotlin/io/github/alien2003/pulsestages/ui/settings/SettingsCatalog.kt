@@ -267,6 +267,15 @@ private val writeSection =
                         write = { s, v -> s.copy(write = s.write.copy(awakeAsLight = v)) },
                     ),
                 ),
+                SettingsItem.Field(
+                    SwitchSpec(
+                        path = "write.startBeforeSource",
+                        title = text(R.string.set_wr_start_before_source_title),
+                        hint = text(R.string.set_wr_start_before_source_hint),
+                        read = { it.write.startBeforeSource },
+                        write = { s, v -> s.copy(write = s.write.copy(startBeforeSource = v)) },
+                    ),
+                ),
             ),
     )
 

@@ -97,6 +97,12 @@ data class WriteSettings(
     val overwritePolicy: OverwritePolicy = OverwritePolicy.SKIP_SAME_VERSION,
     /** Write AWAKE as LIGHT for readers that render awakenings poorly. Part of the params hash. */
     val awakeAsLight: Boolean = false,
+    /**
+     * Start every written session one second before its night (the start of its first source session), for Sleep as
+     * Android: of overlapping sessions it imports the one that starts first, and it loses a tie to the source session,
+     * which has no stages. Part of the params hash.
+     */
+    val startBeforeSource: Boolean = false,
 )
 
 /** Internal log level, in increasing severity. */

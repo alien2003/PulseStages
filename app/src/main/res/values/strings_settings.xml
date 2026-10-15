@@ -21,6 +21,8 @@
     <string name="set_wr_overwrite_hint">Skip up-to-date nights: nights already estimated with the current parameters are skipped, except that a recent night is updated when more heart-rate data arrives for it; nights estimated with other parameters are marked stale and recomputed only when you ask. Recompute everything: every run estimates the nights it reads again and rewrites their sessions, also for source sessions that already have sleep stages (recent sessions checked for late heart-rate data are rewritten only when their data changed). Never overwrite: an existing PulseStages session is never rewritten, not even by Recompute or when more heart-rate data arrives; only nights without a session are estimated.</string>
     <string name="set_wr_awake_as_light_title">Write awake as light sleep</string>
     <string name="set_wr_awake_as_light_hint">For apps that show awakenings poorly. Changes the written data.</string>
+    <string name="set_wr_start_before_source_title">Sleep as Android compatibility</string>
+    <string name="set_wr_start_before_source_hint">Starts each written session 1 second before the source session, so that Sleep as Android imports it instead of the source\'s session without stages. Nights Sleep as Android has already imported must be deleted there and synced again. Changes the written data.</string>
     <string name="set_alg_estimator_title">Estimator</string>
     <string name="set_alg_estimator_hint">Hybrid (trained classifier + duration model) is the default; HMM and Rules are simpler alternatives.</string>
     <string name="set_pre_min_bpm_title">Lowest valid heart rate</string>

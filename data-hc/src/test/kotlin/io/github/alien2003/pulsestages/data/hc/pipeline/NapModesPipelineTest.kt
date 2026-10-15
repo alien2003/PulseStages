@@ -57,7 +57,7 @@ class NapModesPipelineTest {
         ledger.allNights().single { it.sessionStartMs == session.startMs }
 
     private fun PipelineHarness.output(session: HcSleepSession): HcSleepSession? =
-        repository.ownSessions().singleOrNull { it.startMs == session.startMs }
+        repository.ownSessions().singleOrNull { it.clientRecordId == NightKeys.clientRecordId(listOf(session.uuid)) }
 
     private fun notesMode(own: HcSleepSession): String =
         Json
@@ -122,6 +122,27 @@ class NapModesPipelineTest {
             val nightOutput = checkNotNull(h.output(night))
             assertTrue(nightOutput.stages.none { it.type == SleepSessionRecord.STAGE_TYPE_SLEEPING })
             assertFalse(h.row(night).sleepWakeOnly)
+        }
+
+    @Test
+    fun `with startBeforeSource a SLEEP_WAKE nap starts one second earlier, the ledger keeps the estimated stages`() =
+        harnessTest(dir) { h ->
+            h.withNaps(NapOutputPolicy.SLEEP_WAKE)
+            h.settings.set { it.copy(write = it.write.copy(startBeforeSource = true)) }
+            val (night, nap) = h.nightAndNap()
+
+            h.processRecent()
+
+            val napOutput = checkNotNull(h.output(nap))
+            assertEquals(nap.startMs - OutputOptions.START_BEFORE_SOURCE_MS, napOutput.startMs)
+            assertEquals(napOutput.startMs, napOutput.stages.first().startMs)
+            assertEquals(nap.endMs, napOutput.endMs)
+            val types = setOf(SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_AWAKE)
+            assertTrue(napOutput.stages.all { it.type in types }, "${napOutput.stages}")
+            val row = h.row(nap)
+            assertTrue(row.sleepWakeOnly)
+            assertEquals(nap.startMs, row.stages.first().startMs)
+            assertEquals(night.startMs - OutputOptions.START_BEFORE_SOURCE_MS, checkNotNull(h.output(night)).startMs)
         }
 
     @Test

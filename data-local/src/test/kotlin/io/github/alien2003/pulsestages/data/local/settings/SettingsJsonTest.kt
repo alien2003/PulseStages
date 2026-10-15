@@ -42,6 +42,7 @@ class SettingsJsonTest {
                     titleTemplate = "Stages {estimator} v{version}",
                     overwritePolicy = OverwritePolicy.NEVER,
                     awakeAsLight = true,
+                    startBeforeSource = true,
                 ),
             algo =
                 AlgoParams(

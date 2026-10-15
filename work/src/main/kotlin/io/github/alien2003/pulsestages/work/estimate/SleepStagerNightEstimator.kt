@@ -22,7 +22,7 @@ import javax.inject.Singleton
  * The active personal model is looked up on every call (one single-row query) and the stager is rebuilt only when the
  * bundle or the active model changed, so [paramsHash] always describes the configuration the next [estimate] uses: the
  * hash covers the parameters, the bundle fingerprint, the personal-model fingerprint (when enabled) and the output
- * options passed as `extra` (`awakeAsLight`, see
+ * options passed as `extra` (`awakeAsLight`, and `startBeforeSource` when it is on, see
  * [io.github.alien2003.pulsestages.data.hc.pipeline.OutputOptions]).
  */
 @Singleton

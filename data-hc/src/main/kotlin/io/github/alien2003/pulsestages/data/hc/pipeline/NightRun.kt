@@ -332,7 +332,7 @@ internal class NightRun(
      * - Unchanged: nothing is estimated or written; only `inputCheckedAt` moves.
      * - Changed (or no fingerprint stored and the heart-rate sample count or coverage differs): the night is
      *   estimated again. The record is rewritten (same clientRecordId, version + 1, `statusReason` = [InputUpdate]) only
-     *   when the record itself would change (stages, title or notes). Otherwise only the ledger takes the new estimate
+     *   when the record itself would change (start, stages, title or notes). Otherwise only the ledger takes the new estimate
      *   and fingerprint, keeping its version and `updatedAt`.
      * - Never rewritten: a night that can no longer be estimated (the previous output stays, as for a recompute), and a
      *   night whose record is no longer in Health Connect (deleted outside PulseStages: not recreated).
@@ -654,8 +654,9 @@ internal class NightRun(
 
     /**
      * The record [estimate] gives for [candidate]: the mapped stages (AWAKE / SLEEPING only for a nap with the
-     * SLEEP_WAKE output policy), validated, the title and the notes. Throws [InvalidStagesException] when the stages
-     * cannot be written.
+     * SLEEP_WAKE output policy), validated against the night, then its start (one second before the night with
+     * `write.startBeforeSource`, the first stage extended back to it) with the stages validated again against the
+     * record, the title and the notes. Throws [InvalidStagesException] when the stages cannot be written.
      */
     private fun plan(
         candidate: NightCandidate,
@@ -663,21 +664,21 @@ internal class NightRun(
     ): PlannedRecord {
         val awakeAsLight = settings.write.awakeAsLight
         val sleepWakeOnly = estimate.mode == SessionMode.NAP && settings.algo.napMode.outputPolicy == NapOutputPolicy.SLEEP_WAKE
-        val stages =
+        val mapped =
             if (sleepWakeOnly) {
                 StageMapping.toSleepWakeHcStages(estimate.stages, awakeAsLight)
             } else {
                 StageMapping.toHcStages(estimate.stages, awakeAsLight)
             }
-        val problems =
-            StageMapping.validate(
-                stages,
-                candidate.startMs,
-                candidate.endMs,
-                settings.algo.preprocess.epochSec * SECOND_MS,
-            )
-        if (problems.isNotEmpty()) throw InvalidStagesException(problems)
-        return PlannedRecord(stages, sleepWakeOnly, title(estimate), notes(candidate, estimate))
+        val epochMs = settings.algo.preprocess.epochSec * SECOND_MS
+        // Against the night first, so that a gap before the first estimated stage is reported and not filled.
+        val nightProblems = StageMapping.validate(mapped, candidate.startMs, candidate.endMs, epochMs)
+        if (nightProblems.isNotEmpty()) throw InvalidStagesException(nightProblems)
+        val startMs = OutputOptions.recordStartMs(candidate.startMs, settings.write)
+        val stages = StageMapping.startingAt(mapped, startMs)
+        val recordProblems = StageMapping.validate(stages, startMs, candidate.endMs, epochMs)
+        if (recordProblems.isNotEmpty()) throw InvalidStagesException(recordProblems)
+        return PlannedRecord(startMs, stages, sleepWakeOnly, title(estimate), notes(candidate, estimate))
     }
 
     private suspend fun write(
@@ -703,9 +704,11 @@ internal class NightRun(
         val coverage = SessionText.round3(estimate.coverage)
         val what = if (estimate.mode == SessionMode.NAP) "nap" else "night"
         val output = if (sleepWakeOnly) "${stages.size} sleep/wake stages" else "${stages.size} stages"
+        val earlierSec = (candidate.startMs - planned.startMs) / SECOND_MS
+        val shifted = if (planned.startMs != candidate.startMs) ", starting $earlierSec s before its source" else ""
         logger.i(
             TAG,
-            "wrote ${estimate.estimator} $what v$version ($output, coverage $coverage)",
+            "wrote ${estimate.estimator} $what v$version ($output, coverage $coverage$shifted)",
             nightKey = candidate.clientRecordId,
         )
         // Under NEVER only nights without an output can be related here (see processNight).
@@ -784,7 +787,7 @@ internal class NightRun(
         EstimatedSessionWrite(
             clientRecordId = candidate.clientRecordId,
             clientRecordVersion = version,
-            startMs = candidate.startMs,
+            startMs = planned.startMs,
             endMs = candidate.endMs,
             startZoneOffsetSec = candidate.startZoneOffsetSec,
             endZoneOffsetSec = candidate.endZoneOffsetSec,
@@ -830,7 +833,8 @@ internal class NightRun(
         fingerprint: String,
     ): EstimatedNightEntity {
         val now = clock.millis()
-        // The estimated stages (after awakeAsLight): for a sleep/wake nap the ledger keeps them, not the two written types.
+        // The estimated stages (after awakeAsLight) in the night's times: for a sleep/wake nap the ledger keeps them, not
+        // the two written types, and with startBeforeSource they are not extended back to the record's start.
         val estimated = StageMapping.toHcStages(estimate.stages, settings.write.awakeAsLight)
         val minutes = StageMinutes.of(estimated)
         return EstimatedNightEntity(
@@ -1059,18 +1063,22 @@ internal class NightRun(
     )
 
     /**
-     * The record an estimate gives ([plan]): the stages as written, whether they are AWAKE / SLEEPING only, the title
-     * and the notes.
+     * The record an estimate gives ([plan]): its start, the stages as written, whether they are AWAKE / SLEEPING only,
+     * the title and the notes.
      */
     private class PlannedRecord(
+        val startMs: Long,
         val stages: List<HcStage>,
         val sleepWakeOnly: Boolean,
         val title: String,
         val notes: String,
     ) {
-        /** True when [stored] (our record in Health Connect) already has these stages, this title and these notes. */
+        /** True when [stored] (our record in Health Connect) already has this start, these stages, this title and these notes. */
         fun sameRecordAs(stored: HcSleepSession): Boolean =
-            stored.title == title && stored.notes == notes && stored.stages.sortedWith(STAGE_ORDER) == stages.sortedWith(STAGE_ORDER)
+            stored.startMs == startMs &&
+                stored.title == title &&
+                stored.notes == notes &&
+                stored.stages.sortedWith(STAGE_ORDER) == stages.sortedWith(STAGE_ORDER)
 
         /** The [Written] of a ledger-only update of [existing]: its record, version and recompute count stay. */
         fun written(existing: EstimatedNightEntity): Written =

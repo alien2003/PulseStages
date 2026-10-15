@@ -11,7 +11,8 @@ import io.github.alien2003.pulsestages.data.hc.HcStage
  * UNKNOWN → STAGE_TYPE_UNKNOWN (0); with `awakeAsLight` AWAKE (including the forced-awake gaps between merged
  * fragments) is written as LIGHT. A nap with the SLEEP_WAKE output ([toSleepWakeHcStages]) gets only AWAKE (1) and
  * SLEEPING (2): LIGHT, DEEP, REM and UNKNOWN are SLEEPING (the source session already says the whole span was sleep),
- * and with `awakeAsLight` AWAKE is SLEEPING too.
+ * and with `awakeAsLight` AWAKE is SLEEPING too. With `write.startBeforeSource` the first stage of a validated hypnogram
+ * is extended back to the record's start ([startingAt]).
  */
 object StageMapping {
     /** The stage types PulseStages ever writes. */
@@ -83,7 +84,20 @@ object StageMapping {
         return merged
     }
 
-    /** [stages] (written with [toHcStages]) as the ledger stores them. */
+    /**
+     * [stages] with the first one extended back to [startMs], the start of a record that begins before its night
+     * (`write.startBeforeSource`); the others are unchanged. [startMs] must not lie after the first stage's start.
+     */
+    fun startingAt(
+        stages: List<HcStage>,
+        startMs: Long,
+    ): List<HcStage> {
+        val first = stages.firstOrNull() ?: return stages
+        require(startMs <= first.startMs) { "a record starting at $startMs would cut its first stage (${first.startMs})" }
+        return if (startMs == first.startMs) stages else listOf(first.copy(startMs = startMs)) + stages.drop(1)
+    }
+
+    /** [stages] (from [toHcStages], in the night's times: not extended by [startingAt]) as the ledger stores them. */
     fun toLedgerStages(stages: List<HcStage>): List<StageInterval> = stages.map { StageInterval(it.startMs, it.endMs, fromHcType(it.type)) }
 
     /**

@@ -142,6 +142,10 @@ class SleepStagerNightEstimatorTest {
                 estimator.paramsHash(params, OutputOptions.hashExtra(WriteSettings(awakeAsLight = false))),
                 estimator.paramsHash(params, OutputOptions.hashExtra(WriteSettings(awakeAsLight = true))),
             )
+            assertNotEquals(
+                estimator.paramsHash(params, OutputOptions.hashExtra(WriteSettings())),
+                estimator.paramsHash(params, OutputOptions.hashExtra(WriteSettings(startBeforeSource = true))),
+            )
             assertEquals(
                 estimator.paramsHash(params, OutputOptions.hashExtra(WriteSettings(titleTemplate = "a"))),
                 estimator.paramsHash(params, OutputOptions.hashExtra(WriteSettings(titleTemplate = "b"))),

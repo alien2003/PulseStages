@@ -42,7 +42,8 @@ enum class NightStatus {
  * @property sourceUuids Health Connect ids of the source sessions this night was built from, sorted (also linked in
  *   `night_sources`).
  * @property sourcePackage package that wrote the source sessions.
- * @property sessionStartMs start of the (merged) source session.
+ * @property sessionStartMs start of the (merged) source session (our record starts one second earlier with
+ *   `write.startBeforeSource`).
  * @property sessionEndMs end of the (merged) source session.
  * @property startZoneOffsetSec zone offset at the start, seconds.
  * @property endZoneOffsetSec zone offset at the end, seconds.
@@ -72,6 +73,8 @@ enum class NightStatus {
  * @property stages the estimated stages after the awakeAsLight mapping, stored compactly as `[[startMs,endMs,"DEEP"],...]`
  *   in column `stagesJson`: exactly what was written, except for a nap written with the SLEEP_WAKE output
  *   ([sleepWakeOnly]), whose LIGHT / DEEP / REM / UNKNOWN were written as Health Connect's generic "sleeping" stage.
+ *   Always in the night's times: with `write.startBeforeSource` the written first stage starts one second earlier,
+ *   at the record's start.
  * @property createdAt when the row was created.
  * @property updatedAt when the row was last changed.
  * @property mode whether the session was processed as a night or as a nap (`napMode.maxSessionMin` of the settings it

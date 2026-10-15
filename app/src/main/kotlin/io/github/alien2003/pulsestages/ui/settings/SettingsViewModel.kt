@@ -148,7 +148,8 @@ sealed interface SettingsEdit {
 /**
  * Edits, validates, resets, exports and imports [AppSettings]. Every edit is validated with [SettingsChecks] before it
  * is stored; an invalid value stays in its field with the error below it and is never stored. When a stored change
- * makes estimated nights stale (it changed the params hash: algorithm parameters, the estimator, awake-as-light), a
+ * makes estimated nights stale (it changed the params hash: algorithm parameters, the estimator, the output options
+ * awake-as-light and Sleep as Android compatibility), a
  * Snackbar says how many and offers to recompute them; nothing is recomputed without that tap.
  */
 @Suppress("TooManyFunctions") // One function per user action of the screen.

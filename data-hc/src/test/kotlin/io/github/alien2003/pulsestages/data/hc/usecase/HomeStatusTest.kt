@@ -91,6 +91,24 @@ class HomeStatusTest {
                     .counters.stale,
             )
 
+            h.settings.set { it.copy(write = it.write.copy(startBeforeSource = true)) }
+            assertEquals(
+                1,
+                h.homeStatus
+                    .status()
+                    .first { it.paramsHash == h.pipeline.currentParamsHash(h.settings.current, h.repository.granted) }
+                    .counters.stale,
+            )
+
+            h.settings.set { it.copy(write = it.write.copy(startBeforeSource = false)) }
+            assertEquals(
+                0,
+                h.homeStatus
+                    .status()
+                    .first { it.paramsHash == h.pipeline.currentParamsHash(h.settings.current, h.repository.granted) }
+                    .counters.stale,
+            )
+
             h.estimator.hashSalt = "personal model"
             val model =
                 PersonalModel(biasDeltas = listOf(0.1, 0.0, 0.0, -0.1), provenance = PersonalProvenance(PersonalModelKind.CALIBRATED, 3))

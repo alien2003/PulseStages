@@ -93,6 +93,20 @@ class SettingsViewModelTest {
                 assertTrue(vm.prompts().isEmpty(), "back to the parameters the nights were estimated with")
                 assertEquals(0, staleNights.recomputes)
             }
+
+        @Test
+        fun `Sleep as Android compatibility makes nights stale and offers to recompute them`() =
+            runTest(main.dispatcher) {
+                val vm = viewModel()
+
+                vm.onEdit(SettingsEdit.Switch("write.startBeforeSource", true))
+
+                assertTrue(repository.current.write.startBeforeSource)
+                assertEquals(UiText.of(R.string.settings_stale_recompute), vm.prompts().single().action)
+
+                vm.onEdit(SettingsEdit.Switch("write.startBeforeSource", false))
+                assertTrue(vm.prompts().isEmpty(), "off again: the nights are up to date")
+            }
     }
 
     @Nested

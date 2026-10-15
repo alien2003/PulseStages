@@ -89,8 +89,24 @@ data class InputSelection(
 
 /** Input selection and output options that change what is estimated or written and therefore belong in the params hash. */
 object OutputOptions {
-    /** The output part of the params hash's `extra` for [write] (the title template is deliberately not part of it). */
-    fun hashExtra(write: WriteSettings): String = "awakeAsLight=${write.awakeAsLight}"
+    /** How much earlier than its night a record starts with `write.startBeforeSource`. */
+    const val START_BEFORE_SOURCE_MS: Long = 1_000L
+
+    /**
+     * The output part of the params hash's `extra` for [write] (the title template is deliberately not part of it).
+     * `startBeforeSource` is appended only when it is on, so the hashes of nights written without it stay the same.
+     */
+    fun hashExtra(write: WriteSettings): String =
+        "awakeAsLight=${write.awakeAsLight}" + if (write.startBeforeSource) ";startBeforeSource=true" else ""
+
+    /**
+     * The start of the record written for a night that starts at [nightStartMs]: [START_BEFORE_SOURCE_MS] earlier with
+     * `startBeforeSource`.
+     */
+    fun recordStartMs(
+        nightStartMs: Long,
+        write: WriteSettings,
+    ): Long = if (write.startBeforeSource) nightStartMs - START_BEFORE_SOURCE_MS else nightStartMs
 
     /**
      * The `extra` part of the params hash of nights estimated with [settings] and the [granted] permissions: the

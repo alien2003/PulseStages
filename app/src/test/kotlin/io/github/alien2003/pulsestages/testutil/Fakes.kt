@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.testutil
 
+import io.github.alien2003.pulsestages.data.hc.pipeline.OutputOptions
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.local.db.LogDao
 import io.github.alien2003.pulsestages.data.local.db.LogEntryEntity
@@ -203,7 +204,8 @@ class FakeWorkScheduler : WorkScheduler {
 }
 
 /**
- * [StaleNightsSource] over [settings]: the params hash follows the algorithm and write settings, and [staleWhenChanged]
+ * [StaleNightsSource] over [settings]: the params hash follows the algorithm and the output options of the write
+ * settings ([OutputOptions.hashExtra]), and [staleWhenChanged]
  * nights are stale whenever they differ from the defaults (like nights estimated with the defaults).
  */
 class FakeStaleNightsSource(
@@ -215,8 +217,8 @@ class FakeStaleNightsSource(
 
     override fun staleNights(): Flow<StaleNights> =
         settings.settings.map { s ->
-            val key = s.algo to s.write.awakeAsLight
-            val defaults = AppSettings().let { it.algo to it.write.awakeAsLight }
+            val key = s.algo to OutputOptions.hashExtra(s.write)
+            val defaults = AppSettings().let { it.algo to OutputOptions.hashExtra(it.write) }
             StaleNights(paramsHash = key.hashCode().toString(), count = if (key == defaults) 0 else staleWhenChanged)
         }
 

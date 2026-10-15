@@ -259,6 +259,27 @@ class HealthConnectRepositoryTest {
         }
 
     @Test
+    fun `a rewrite that starts one second earlier is verified by its first read-back and replaces the record in place`() =
+        runTest {
+            client.store(
+                OWN,
+                sleepRecord(start, metadata = Metadata.unknownRecordingMethod(clientRecordId = "ps:abc", clientRecordVersion = 1000)),
+            )
+            val earlier = start - 1_000
+            val v1001 = write(1001)
+            val moved = v1001.copy(startMs = earlier, stages = listOf(v1001.stages.first().copy(startMs = earlier)) + v1001.stages.drop(1))
+
+            val result = repository().writeEstimatedSession(moved)
+
+            assertEquals(1001L, result.storedVersion)
+            assertTrue(client.deleteCalls.isEmpty(), "no delete-then-insert fallback")
+            val stored = client.stored.single().second as SleepSessionRecord
+            assertEquals(Instant.ofEpochMilli(earlier), stored.startTime)
+            assertEquals(Instant.ofEpochMilli(earlier), stored.stages.first().startTime)
+            assertEquals(1001L, stored.metadata.clientRecordVersion)
+        }
+
+    @Test
     fun `a stale higher version is replaced by delete-then-insert`() =
         runTest {
             client.store(
