@@ -18,6 +18,7 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   `PulseStages-<version>.apk` with the APK filter `^PulseStages-[0-9.]+\.apk$` (never the `-debug` APK) and expects
   the release signing certificate. The app itself still has no update check and no internet access
   ([user guide](https://github.com/alien2003/PulseStages/blob/main/docs/user-guide.md#install-and-update-with-obtainium)).
+  The release notes link to that section.
 
 ## [0.1.1] - 2026-10-15
 

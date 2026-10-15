@@ -287,6 +287,9 @@ jobs:
           The two APKs are signed with different keys, so neither can update the other. To switch, uninstall first.
           The sessions PulseStages wrote stay in Health Connect; grant its permissions again after the reinstall.
 
+          To get every later release installed as an update, add PulseStages to Obtainium
+          ([user guide](https://github.com/$GH_REPO/blob/$GITHUB_REF_NAME/docs/user-guide.md#install-and-update-with-obtainium)).
+
           Release signing certificate SHA-256: \`$RELEASE_CERT\`
 
           Debug signing certificate SHA-256: \`$DEBUG_CERT\` (a later debug APK installs over an earlier one only if this value is the same)
