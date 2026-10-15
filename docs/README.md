@@ -11,7 +11,7 @@ Russian.
 | [User guide](user-guide.md) | The complete manual: installation, permissions, every screen, nights and naps, automatic runs, backfill and recompute, exports, deleting data, Health Connect priority, Sleep as Android, battery settings, troubleshooting, FAQ |
 | [Settings reference](settings-reference.md) | Every setting with its key in the JSON export, default, allowed values, effect and whether it enters the params hash. Generated from the code |
 | [Privacy](privacy.md) | What the app processes, where it stays, what it stores, logs and exports, and how to delete it |
-| [Health Connect](health-connect.md) | The permissions and why each is needed, what is read and written (record fields, stage mapping, notes), the Changes API, quotas, priority, deleting the app's data |
+| [Health Connect](health-connect.md) | The permissions and why each is needed, what is read and written (record fields, stage mapping, notes), the Changes API, quotas, priority and what other readers such as Sleep as Android see, deleting the app's data |
 | [Changelog](../CHANGELOG.md) | Changes of every release |
 
 ## How it works

@@ -34,7 +34,9 @@ heart rate to Health Connect; the default source is OHealth, the app of OPPO wat
 5. **Optional.** "Backfill history" on Home estimates your past nights. To also estimate daytime naps, lower Settings →
    "Sources" → "Minimum session length" (90 min by default) to e.g. 30 min. In Health Connect → "Permissions and data"
    → "Manage data" → "Data sources and priority", put PulseStages above the watch app for sleep, so that apps using
-   Health Connect's sleep totals get the stages (if it is not listed yet, check again after the first estimate).
+   Health Connect's sleep totals get the stages (if it is not listed yet, check again after the first estimate). If you
+   view your sleep in Sleep as Android, which imports only the session that starts first, see Settings → "Written
+   sessions" → "Sleep as Android compatibility" and the [user guide](docs/user-guide.md#sleep-as-android).
 
 **Using it.** It runs by itself: an hourly check for new nights and a daily run. Results appear in the Nights tab and
 in Health Connect, next to the watch app's own session; "Estimate new" on Home runs it right away. Naps are written to
@@ -197,6 +199,9 @@ already in Health Connect keep their stages until they are recomputed. The
   (asleep / awake only by default, the estimated stages, or nothing).
 - **Its own, clearly marked Health Connect record** per night: title "Sleep stages from heart rate (estimate)", the
   algorithm version and a hash of every parameter in its notes; the source data are never modified.
+- **Sleep as Android compatibility** (off by default): PulseStages' session starts 1 second before the watch app's,
+  for Sleep as Android, which imports only the first of overlapping sessions
+  ([user guide](docs/user-guide.md#sleep-as-android)).
 - **Idempotent writes**: one output per night, keyed by the source sessions and rewritten under the same key on
   recompute, verified by reading it back; fragments of a night are merged, and deleted sources remove the output.
 - **Selectable sources** with a priority order: OHealth by default, any app that writes sleep sessions to Health
@@ -224,7 +229,7 @@ already in Health Connect keep their stages until they are recomputed. The
 | [docs/user-guide.md](docs/user-guide.md) | End-user manual: install, permissions, every screen, naps, automatic runs, backfill, export, deletion, Sleep as Android, troubleshooting, FAQ |
 | [docs/settings-reference.md](docs/settings-reference.md) | Every setting with its JSON key, default, allowed values and effect (generated from the code) |
 | [docs/architecture.md](docs/architecture.md) | Modules, data flow, the Room ledger, idempotency, background work, error handling, testing strategy |
-| [docs/health-connect.md](docs/health-connect.md) | Permissions, data read and written, notes schema, Changes API, quotas, priority |
+| [docs/health-connect.md](docs/health-connect.md) | Permissions, data read and written, notes schema, Changes API, quotas, priority, what other readers such as Sleep as Android see |
 | [docs/privacy.md](docs/privacy.md) | What is processed and stored, where it stays, logs, exports, deletion |
 | [docs/development.md](docs/development.md) | Toolchain setup, build, tests, lint, running on a phone, CI and releases |
 | [ALGORITHM.md](ALGORITHM.md) | The algorithm, every parameter, the validation protocol and all validation numbers |
@@ -255,9 +260,14 @@ already in Health Connect keep their stages until they are recomputed. The
   ([tools/device-test/README.md](tools/device-test/README.md)) runs against the installed app and the phone's real
   Health Connect data, writes only one short-lived test record and checks that nothing else changed; it needs a phone
   connected over adb, and CI does not run it.
-- **Not verified yet.** How Sleep as Android handles the two overlapping sessions of a night (OHealth's and
-  PulseStages'); whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the behaviour
-  of readers that filter by recording method or device type.
+- **Sleep as Android** imports only the first of overlapping sessions by start time. PulseStages' session, which starts
+  at the same moment as the watch app's, loses that tie, so Sleep as Android showed OHealth's nights without stages
+  (observed with Sleep as Android 20261006 and confirmed on the development phone). Settings → "Written sessions" →
+  "Sleep as Android compatibility" (off by default) starts PulseStages' session 1 second earlier
+  ([user guide](docs/user-guide.md#sleep-as-android)).
+- **Not verified yet.** Whether "Sleep as Android compatibility" makes Sleep as Android import PulseStages' session
+  (not yet confirmed on a device); whether OHealth writes SpO2 or respiratory rate at night (the app works either
+  way); the behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
 
 ## Licence

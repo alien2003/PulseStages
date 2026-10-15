@@ -118,7 +118,8 @@ runs do not write them again; they no longer have a record in Health Connect.
 For every estimated night (and, depending on "Written for a nap", every nap) PulseStages writes one
 `SleepSessionRecord`:
 
-- the start and end of the source session, with time-zone offsets;
+- the start and end of the source session, with time-zone offsets (with "Sleep as Android compatibility" the start is
+  1 second earlier);
 - the estimated stages (awake, light, deep, REM, unknown; for a nap written as "Asleep / awake" only awake and
   asleep);
 - a title, by default "Sleep stages from heart rate (estimate)";
@@ -188,7 +189,9 @@ transfers them is governed by Health Connect, not by PulseStages.
 
 No action in PulseStages ever deletes or changes data of OHealth or any other app: Health Connect only lets an app
 delete its own records, and PulseStages deletes only its own, by their `clientRecordId`
-([health-connect.md §6](health-connect.md#6-deleting-records)).
+([health-connect.md §6](health-connect.md#6-deleting-records)). Copies that other apps made of PulseStages' sessions
+are not deleted either: Sleep as Android, for example, keeps the nights it imported as its own records
+([user guide](user-guide.md#sleep-as-android)). Delete them in those apps.
 
 ## 9. Uninstalling and reinstalling
 

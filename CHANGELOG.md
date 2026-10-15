@@ -10,6 +10,39 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+### Added
+
+- **Sleep as Android compatibility** (Settings → "Written sessions" → "Sleep as Android compatibility",
+  `write.startBeforeSource`, off by default). Sleep as Android imports only the first of overlapping Health Connect
+  sessions by start time. PulseStages' session started at exactly the source session's start and always lost that tie to
+  the older source session, so Sleep as Android showed OHealth's nights without stages. With the setting on, every
+  written session, naps included, starts 1 second before its source session and its first stage is extended back by that
+  second; the end, zone offsets, record key, title and the notes' keys are unchanged (the params hash in the notes
+  changes), and the app's screens keep the night's own times. That Sleep as Android then imports PulseStages' session is
+  not yet confirmed on a device. The setting changes the written data and is part of the params hash only while it is
+  on: the update changes no hash, and turning it on (or off again) makes every written night stale; "Recompute" rewrites
+  them in place (same record key, next version), never under "Never overwrite". Nights Sleep as Android already imported
+  stay as they are until they are deleted there and synced again. English and Russian texts
+  ([user guide](docs/user-guide.md#sleep-as-android-compatibility),
+  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+- **On-device suite**: the shadow pipeline's `policy-start-before-source` scenario checks that every captured session
+  starts exactly one second before its night, and the real-write sequence's second version moves the record's start by
+  that second, so an in-place upsert with another start is checked on the phone
+  ([tools/device-test/README.md](tools/device-test/README.md)).
+
+### Changed
+
+- **Sleep as Android in the documentation**: its import is no longer "not verified". Observed with Sleep as Android
+  20261006 and confirmed on the development phone, it syncs only when you tap Sync, when it saves a record and when its
+  own tracking ends; it keeps the first of overlapping sessions by start time, whatever Health Connect's priority list
+  says; it never imports a session that overlaps a record it already has and never picks up later changes; it drops
+  Health Connect's "unknown" and "sleeping" stages, so a nap written as asleep / awake, once imported, shows only its
+  awake parts there; and the thin stripes on nights without stages are its own heart-rate awake detection. The user
+  guide's setup replaces "delete the stage-less session" and "Write awake as light sleep" with the compatibility
+  setting, a recompute, deleting the imported nights (cloud icon) in Sleep as Android and syncing again, and warns
+  against its Backup → "Download from Health Connect" ([user guide](docs/user-guide.md#sleep-as-android),
+  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android)).
+
 ## [0.2.0] - 2026-10-15
 
 Nights and naps are updated automatically when their heart rate reaches Health Connect after they were written, so a

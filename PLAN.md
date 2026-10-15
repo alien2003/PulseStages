@@ -49,7 +49,8 @@ from memory.
   `HmmParams.PHYSIOLOGY` ("reset to physiology table"). In `loso-v2` they scored higher but failed the gate, so the
   shipped HMM defaults are the table.
 - **paramsHash** = SHA-256 of canonical JSON of `AlgoParams` + hybrid-model fingerprint + personal-model fingerprint
-  + output options that change the written data (`awakeAsLight`). The title template does not change the hash.
+  + output options that change the written data (`awakeAsLight`, and `startBeforeSource` only while it is on, so
+  earlier hashes stay valid). The title template does not change the hash.
 - **Idempotency.** `clientRecordId = "ps:" + sha256(sorted source uuids)`, `clientRecordVersion = ALGO_VERSION·1000 +
   recomputeCount`, never below the version already stored in Health Connect (+1). Upsert by clientRecordId is
   guaranteed on Android 14+ (platform updates in place iff `newVersion ≥ storedVersion`, see §4); the write is
@@ -221,14 +222,14 @@ from memory.
     NOT_ESTIMATED rows, so no nap skipped by `SKIP`. A target whose source got its own stages or became a lower-priority
     duplicate follows the normal rules (`retireStagedOutputs`). Under `RECOMPUTE_ALL` a current target is refreshed
     instead of being recomputed on every sync.
-  - **Rewrite only on a changed record.** Unchanged fingerprint: nothing is estimated or written, only
-    `inputCheckedAt` moves. Changed: the night is estimated again; when it can no longer be estimated, or the session
-    estimate now has fewer heart-rate samples than at the last write (a source replacing its records, data deleted on
-    purpose),
-    the previous output stays: an automatic update never makes a night worse, a recompute uses the data as it is. The record is rewritten only when it differs from our stored record in Health Connect in its stages
-    (sorted; for a sleep / wake nap the AWAKE / SLEEPING stages as written), title or notes; otherwise the ledger takes
-    the new estimate and fingerprint (for a sleep / wake nap also the estimated stages) and keeps its record id,
-    version, `statusReason` and `updatedAt`, and nothing is written to Health Connect.
+  - **Rewrite only on a changed record.** Unchanged fingerprint: nothing is estimated or written, only `inputCheckedAt`
+    moves. Changed: the night is estimated again; when it can no longer be estimated, or the session estimate now has
+    fewer heart-rate samples than at the last write (a source replacing its records, data deleted on purpose), the
+    previous output stays: an automatic update never makes a night worse, a recompute uses the data as it is. The record
+    is rewritten only when it differs from our stored record in Health Connect in its start, its stages (sorted; for a
+    sleep / wake nap the AWAKE / SLEEPING stages as written), title or notes; otherwise the ledger takes the new
+    estimate and fingerprint (for a sleep / wake nap also the estimated stages) and keeps its record id, version,
+    `statusReason` and `updatedAt`, and nothing is written to Health Connect.
   - **Same record, version + 1.** A rewrite keeps the `clientRecordId` and takes the next version
     (`nextRecomputeCount`), like a recompute, so Health Connect replaces the record in place; `statusReason` records
     why (`INPUT_UPDATED: MORE_HEART_RATE 46 57 - …`, shown as "Updated automatically" in the night detail), and a
@@ -243,6 +244,40 @@ from memory.
     state and leave the user without a result; the cost of an early write is one rewrite (version + 1).
   - **No setting.** The refresh rewrites only when the data changed, so it needs no switch of its own; "Existing
     sessions" = "Never overwrite" already turns it off, with every other rewrite.
+- **Sleep as Android compatibility (`write.startBeforeSource`, off by default).** Sleep as Android keeps only the first
+  of overlapping Health Connect sessions by start time, and Health Connect returns sessions with the same start in the
+  order they were inserted (§4). Our record copied the night's start exactly, so it always lost the tie to the older
+  source session: Sleep as Android showed OHealth's nights without stages, and deleting such a night there and syncing
+  brought the stage-less session back every time (development phone). Settings → "Written sessions" → "Sleep as
+  Android compatibility" moves our record's start instead:
+  - **1 s earlier.** The record starts `OutputOptions.START_BEFORE_SOURCE_MS` = 1000 ms before the night
+    (`OutputOptions.recordStartMs`), and the first written stage is extended back to it (`StageMapping.startingAt`).
+    End, zone offsets, `clientRecordId`, title and the notes keys are unchanged. Any earlier start sorts first; a whole
+    second also sorts first for a reader that keeps times in whole seconds, and it adds only one second that no source
+    recorded (a minute would add a visible minute of sleep that nobody measured).
+  - **Validated twice.** The mapped stages are validated against the night `[start, end)` first, so a gap before the
+    first estimated stage is still reported and not hidden by the extension; the extended stages are validated again
+    against `[record start, end)`, so every invariant of docs/health-connect.md §4.3 holds for the written record.
+  - **Only the Health Connect record moves.** The ledger keeps the night's own start and end and the estimated stages
+    in the night's times; source-change detection, superseding, the overlap rules, the night detail and the CSV export
+    are unchanged, and the record's start follows from the setting.
+  - **Opt-in.** It changes the written data (the session starts one second before the source session, a second no
+    source recorded) for the benefit of one reader; other readers have no use for it, and turning it on rewrites every
+    written night.
+  - **In the params hash only while on.** `OutputOptions.hashExtra` appends `;startBeforeSource=true` only when the
+    option is on, so no hash of a night written without it changes and the update makes nothing stale. Turning it on
+    (or off again) makes every written night stale; Settings offers "Recompute", the night detail has its own
+    "Recompute", and a recompute rewrites the record in place (same `clientRecordId`, `clientRecordVersion` + 1). Under
+    `NEVER` existing records are never rewritten. The refresh of written nights compares the record's start as well
+    (it rewrites only when the start, the stages, the title or the notes would change).
+  - **Naps too.** Every written session moves: Sleep as Android's selection treats a nap's session like a night's, and
+    one rule for every record is simpler to explain. A `SLEEP_WAKE` nap still shows only its awake parts there, because
+    Sleep as Android drops SLEEPING (and UNKNOWN); "Written for a nap" = "Stages" stays the user's choice, unvalidated.
+  - **Limits, documented rather than worked around.** That Sleep as Android then imports our session is not yet
+    confirmed on a device (the mechanism is, §4). A session of another app that starts even earlier still wins. Nights
+    Sleep as Android already imported stay until the user deletes them there and syncs again, and later versions of a
+    record (refresh, recompute) never reach it, so the user guide tells users to sync Sleep as Android only after the
+    night was written.
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 
@@ -319,9 +354,22 @@ property.
   background; writes 1000/15 min & 8000/day. ([rate limiting](https://developer.android.com/health-and-fitness/health-connect/rate-limiting))
 - Sleep priority: Health Connect dedupes sleep only in `aggregate()` by the user's "Data sources and priority" list;
   `readRecords` returns every app's overlapping sessions. ([aggregate data](https://developer.android.com/health-and-fitness/health-connect/aggregate-data))
-- Sleep as Android imports third-party sleep from Health Connect ("Settings → Services → Health Connect", beta);
-  duplicate handling for two overlapping HC sources is not documented → to be checked on the device.
-  ([SaA docs](https://sleep.urbandroid.org/docs/services/health_connect.html))
+- Sleep as Android imports third-party sleep from Health Connect ("Settings → Services → Health Connect", beta;
+  [SaA docs](https://sleep.urbandroid.org/docs/services/health_connect.html)). Its documentation does not describe the
+  import; observed with Sleep as Android 20261006 and confirmed on the development phone:
+  - it syncs only on a tap on Sync, when it saves a record (added, edited or saved automatically) and when its own
+    tracking ends; no periodic import for a user who only views data in it;
+  - it reads the sleep sessions of all apps, orders them by start time and keeps only the first of every group of
+    overlapping sessions (sessions that merely touch overlap); Health Connect's "Data sources and priority" list does
+    not change this. Health Connect returns equal starts in insertion order, so the older source session wins a tie
+    and our session is dropped silently → `write.startBeforeSource` (§2);
+  - it never imports a session that overlaps a record it already has (including its earlier imports, cloud icon), and
+    never picks up later changes of an imported record (refresh, recompute); deleting a night in it removes nothing
+    from Health Connect;
+  - stages: 1 → awake, 4 → light, 5 → deep, 6 → REM; 0 (UNKNOWN) and 2 (SLEEPING) are dropped. A record without light,
+    deep or REM gets no hypnogram, only short awake bars from its own heart-rate awake detection (on by default);
+  - Backup → "Download from Health Connect" creates records without the cloud icon, which it later exports to Health
+    Connect as its own sessions (duplicates).
 
 Doc inconsistencies found (code follows the sources): the sleep-guide sample uses the internal `Metadata(...)`
 constructor; pagination samples loop on `!= null`; some pages put `<uses-permission>` inside `<application>`.
@@ -344,7 +392,8 @@ Attribution notice for produced works (ODC-By §4.3) is in README and in the app
 
 ## 6. Open questions (none blocking)
 
-- Sleep as Android behaviour when OHealth's and our session overlap — verify on the device after install.
+- Whether "Sleep as Android compatibility" (`write.startBeforeSource`) makes Sleep as Android import our session
+  instead of OHealth's: not yet confirmed on a device (the selection by start time and the lost tie are, §4).
 - Whether OHealth writes SpO2 / respiratory rate at night — the app works with or without them.
 - OHealth HeartRateRecord granularity (one sample per record or series) — handled either way by the 24 h left
   padding.

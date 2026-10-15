@@ -286,14 +286,22 @@ The outcome is either `Estimated` or `NotEstimated` (`NO_HR_DATA`, `LOW_COVERAGE
 
 1. maps the estimated stages to Health Connect stage types (`StageMapping.toHcStages`, or `toSleepWakeHcStages` for a
    nap with the `SLEEP_WAKE` output policy, the default for naps);
-2. validates them (`StageMapping.validate`): non-empty, sorted, contiguous, covering the session exactly, only
-   written types, every stage at least one epoch long. A violation is a bug upstream: the night is marked FAILED
-   (`InvalidStagesException`);
-3. computes `clientRecordVersion` ([5.1](#51-record-keys));
-4. writes through `HealthRepository.writeEstimatedSession` ([5.3](#53-read-back-verification));
-5. stores the result in one Room transaction (`EstimatedNightDao.recordNight`: the night row, its source links, the
+2. validates them against the night (`StageMapping.validate`): non-empty, sorted, contiguous, covering the night
+   exactly, only written types, every stage at least one epoch long. A violation is a bug upstream: the night is
+   marked FAILED (`InvalidStagesException`);
+3. sets the record's start (`OutputOptions.recordStartMs`): the night's start, or `OutputOptions.START_BEFORE_SOURCE_MS`
+   (1 s) earlier with `write.startBeforeSource` ("Sleep as Android compatibility",
+   [health-connect.md §8.3](health-connect.md#83-sleep-as-android)). With the earlier start the validated first stage
+   is extended back to it (`StageMapping.startingAt`) and the stages are validated again against `[record start, end)`,
+   so a gap before the first estimated stage is still reported in step 2 and never filled. The ledger keeps the
+   night's start (`sessionStartMs`) and the estimated stages in the night's times, so source-change detection,
+   superseding, the overlap rules and the screens see the night as before; `PlannedRecord` carries the record's start;
+4. computes `clientRecordVersion` ([5.1](#51-record-keys));
+5. writes through `HealthRepository.writeEstimatedSession` ([5.3](#53-read-back-verification)); the log line of the
+   write adds ", starting 1 s before its source" when the start was moved;
+6. stores the result in one Room transaction (`EstimatedNightDao.recordNight`: the night row, its source links, the
    source rows and, for a WRITTEN night with a nadir, its baseline row);
-6. supersedes the nights this one replaces and deletes our own Health Connect records of the same night that the
+7. supersedes the nights this one replaces and deletes our own Health Connect records of the same night that the
    ledger does not know ([5.4](#54-one-output-per-night)).
 
 The written record is specified in [health-connect.md §4](health-connect.md#4-data-written).
@@ -323,18 +331,18 @@ unchanged, current `ALGO_VERSION` and params hash) goes to `NightRun.refresh`:
    uses the data as it is.
 4. A row written before ledger schema 3 has no fingerprint: when the new estimate has the stored heart-rate sample
    count and coverage (three decimals), the input is taken as unchanged and only the fingerprint is stored.
-5. The record the estimate gives (the stages as written, so AWAKE / SLEEPING only for a `SLEEP_WAKE` nap; the title;
-   the notes) is compared with our stored record (`storedOwnSessions`, read once per run). When our record is no
-   longer in Health Connect, it was deleted outside the app: it is not written again, only the fingerprint is stored
-   (warning "refresh: … our session of this night is no longer in Health Connect (deleted outside PulseStages?); not
-   written again").
-6. The same stages (sorted), title and notes: a ledger-only update. The row takes the new estimate (stages, minutes,
-   flags, nadir, coverage, confidence, heart-rate samples) and the new fingerprint, but keeps `hcRecordId`,
-   `clientRecordVersion`, `recomputeCount`, `statusReason` and `updatedAt`; nothing is written to Health Connect.
-   Result `INPUT_CHECKED` (info "refresh: the input changed (…); the written session stays the same"). When our record
-   has a higher version than the row, an earlier refresh wrote exactly this estimate and was interrupted before its
-   ledger transaction: the row takes the record's id, version and modification time, the matching recompute count and
-   the update's reason instead (info "updated: … (written by an earlier run that was interrupted)").
+5. The record the estimate gives (its start, [3.5](#35-writing); the stages as written, so AWAKE / SLEEPING only for a
+   `SLEEP_WAKE` nap; the title; the notes) is compared with our stored record (`storedOwnSessions`, read once per run).
+   When our record is no longer in Health Connect, it was deleted outside the app: it is not written again, only the
+   fingerprint is stored (warning "refresh: … our session of this night is no longer in Health Connect (deleted outside
+   PulseStages?); not written again").
+6. The same start, stages (sorted), title and notes: a ledger-only update. The row takes the new estimate (stages,
+   minutes, flags, nadir, coverage, confidence, heart-rate samples) and the new fingerprint, but keeps `hcRecordId`,
+   `clientRecordVersion`, `recomputeCount`, `statusReason` and `updatedAt`; nothing is written to Health Connect. Result
+   `INPUT_CHECKED` (info "refresh: the input changed (…); the written session stays the same"). When our record has a
+   higher version than the row, an earlier refresh wrote exactly this estimate and was interrupted before its ledger
+   transaction: the row takes the record's id, version and modification time, the matching recompute count and the
+   update's reason instead (info "updated: … (written by an earlier run that was interrupted)").
 7. Otherwise the record is rewritten through the normal write path ([3.5](#35-writing)): the same `clientRecordId`,
    version + 1 (`nextRecomputeCount`), `updatedAt` = now and `statusReason` = `InputUpdate.reason()`, for example
    `INPUT_UPDATED: MORE_HEART_RATE 46 57 - more heart rate arrived (46 -> 57 heart-rate samples)`; superseding works as
@@ -359,7 +367,7 @@ only marked as checked (`markInputChecked` with its fingerprint), so it moves ba
 
 | Table | Key | Content |
 |---|---|---|
-| `estimated_nights` | `id`; `clientRecordId` unique | One row per output night: source uuids and package, session start / end and zone offsets, our Health Connect record id (`hcRecordId`, non-null exactly while we believe our record exists), `algoVersion`, `paramsHash`, estimator, model id, coverage, confidence, `recomputeCount`, `clientRecordVersion`, `status` and `statusReason`, minutes per stage, flags (elevated heart rate, low confidence, calibrated, rules fallback), warnings, nadir, heart-rate sample count, the stages (`stagesJson`), timestamps, `mode` (NIGHT / NAP), `sleepWakeOnly`, and (schema 3) `inputFingerprint` (the fingerprint of the input the output was last compared with: per channel the sample count and a SHA-256 of the samples, never the samples) and `inputCheckedAt` (when that input was last read: the write or a later refresh check) ([3.6](#36-refreshing-written-nights)). |
+| `estimated_nights` | `id`; `clientRecordId` unique | One row per output night: source uuids and package, session start / end of the night (its source sessions' times; the written record starts 1 s earlier with `write.startBeforeSource`) and zone offsets, our Health Connect record id (`hcRecordId`, non-null exactly while we believe our record exists), `algoVersion`, `paramsHash`, estimator, model id, coverage, confidence, `recomputeCount`, `clientRecordVersion`, `status` and `statusReason`, minutes per stage, flags (elevated heart rate, low confidence, calibrated, rules fallback), warnings, nadir, heart-rate sample count, the stages (`stagesJson`), timestamps, `mode` (NIGHT / NAP), `sleepWakeOnly`, and (schema 3) `inputFingerprint` (the fingerprint of the input the output was last compared with: per channel the sample count and a SHA-256 of the samples, never the samples) and `inputCheckedAt` (when that input was last read: the write or a later refresh check) ([3.6](#36-refreshing-written-nights)). |
 | `night_sources` | (`clientRecordId`, `sourceUuid`) | Links a night to each of its source sessions (indexed by `sourceUuid`). |
 | `source_sessions` | `uuid` | Every source session seen: package, start, end, `outcome` (`ESTIMATED`, `NAP`, `HAS_STAGES`, `OWN`, `LOWER_PRIORITY_DUPLICATE`, `NOT_ESTIMATED`, `FAILED`, `DELETED`), reason, the night it belongs to, `lastSeenAt`. The Home counters are built from it. |
 | `night_baselines` | `clientRecordId` | Heart-rate nadir and end of every written session, for the rolling baseline. Naps get a row too; the baseline query counts only sessions at least as long as the nap threshold, so a changed threshold applies to the whole history. |
@@ -466,7 +474,7 @@ own without a `clientRecordId`.
 `VerifiedUpsert.write` performs every write:
 
 1. `insertRecords` with the single record (an upsert by `clientRecordId`);
-2. read our own sessions starting within ±60 s of the session start (`VERIFY_LOOKUP_MARGIN_MS`) and compare the
+2. read our own sessions starting within ±60 s of the written record's start (`VERIFY_LOOKUP_MARGIN_MS`) and compare the
    stored `clientRecordVersion` and stage count with what was written;
 3. on a mismatch (a higher stale version is stored, or the Health Connect app on Android 9–13 ignored the insert):
    delete the record by `clientRecordId`, insert it again and verify once more;
@@ -549,11 +557,13 @@ The order inside a write is: Health Connect insert and verification, then the le
 `NightPipeline.currentParamsHash` = SHA-256 (lower-case hex) of the canonical JSON of `AlgoParams` +
 `"|model="` + the bundle fingerprint + `"|personal="` + the active personal model's fingerprint (when personalization
 is enabled) + `"|"` + the extra string
-`awakeAsLight=…;hrSources=…;spo2=…;respiratoryRate=…;hrv=…` (`ParamsHasher.hash`, `OutputOptions.hashExtra`,
-`InputSelection`). The title template is deliberately not part of it. A WRITTEN night with another `ALGO_VERSION` or
-hash is stale; stale nights are recomputed only on request (Home "Recompute stale nights", the offer that Settings
-shows after a change, or "Recompute" on one night) or under `RECOMPUTE_ALL`. Which settings enter the hash is listed
-in [settings-reference.md](settings-reference.md).
+`awakeAsLight=…[;startBeforeSource=true];hrSources=…;spo2=…;respiratoryRate=…;hrv=…` (`ParamsHasher.hash`,
+`OutputOptions.hashExtra`, `InputSelection`). `;startBeforeSource=true` is appended only while
+`write.startBeforeSource` is on, so the hashes of nights estimated without it, those of earlier versions included,
+stay the same; turning it on or off makes every written night stale. The title template is deliberately not part of
+it. A WRITTEN night with another `ALGO_VERSION` or hash is stale; stale nights are recomputed only on request (Home
+"Recompute stale nights", the offer that Settings shows after a change, or "Recompute" on one night) or under
+`RECOMPUTE_ALL`. Which settings enter the hash is listed in [settings-reference.md](settings-reference.md).
 
 ### 5.9 Refreshes
 
@@ -562,12 +572,12 @@ The refresh of written nights ([3.6](#36-refreshing-written-nights)) keeps the s
 - **An unchanged input writes nothing.** When the fingerprint is the one stored, nothing is estimated and nothing is
   written to Health Connect; the ledger only records the check (`inputFingerprint`, `inputCheckedAt`). Running a sync
   any number of times therefore rewrites no night whose data did not change.
-- **A changed input rewrites only a changed record.** The record is rewritten only when its stages, title or notes
-  differ from our stored record; otherwise only the ledger row takes the new estimate. A rewrite is an ordinary write
-  under the same `clientRecordId` with the next version ([5.1](#51-record-keys)), verified like every write
+- **A changed input rewrites only a changed record.** The record is rewritten only when its start, stages, title or
+  notes differ from our stored record; otherwise only the ledger row takes the new estimate. A rewrite is an ordinary
+  write under the same `clientRecordId` with the next version ([5.1](#51-record-keys)), verified like every write
   ([5.3](#53-read-back-verification)), so Health Connect still holds one record per night, and superseding
-  ([5.4](#54-one-output-per-night)) applies unchanged. When a refresh rewrite is interrupted after the insert but
-  before the ledger transaction ([5.7](#57-crash-consistency)), the next check finds our record already holding the new
+  ([5.4](#54-one-output-per-night)) applies unchanged. When a refresh rewrite is interrupted after the insert but before
+  the ledger transaction ([5.7](#57-crash-consistency)), the next check finds our record already holding the new
   estimate: the ledger row then takes over its record id, version and modification time and the update's reason
   ("updated: … (written by an earlier run that was interrupted)") instead of writing it again.
 - **It never recreates a record.** When our stored record of a target is no longer in Health Connect (deleted outside
@@ -877,7 +887,7 @@ can make.
 | Candidates and keys | [`NightCandidates.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightCandidates.kt) |
 | Pipeline | [`NightPipeline.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightPipeline.kt), [`NightRun.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightRun.kt), [`NightInputReader.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightInputReader.kt) |
 | Refresh of written nights | [`InputFingerprint.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/InputFingerprint.kt); `NightRun.refresh`, `NewNightsSync.refreshWritten`, `InputUpdate` in `EstimatedNightEntity.kt` |
-| Stages, title, notes | [`StageMapping.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/StageMapping.kt), [`SessionText.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/SessionText.kt) |
+| Stages, title, notes | [`StageMapping.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/StageMapping.kt), [`SessionText.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/SessionText.kt); the record's start and the output part of the params hash: `OutputOptions` in [`PipelineModels.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/PipelineModels.kt) |
 | Jobs | [`NewNightsSync.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NewNightsSync.kt), [`BackfillEngine.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/BackfillEngine.kt), [`NightRecomputer.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/NightRecomputer.kt), [`MyDataEraser.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/MyDataEraser.kt) |
 | Access checks and the ledger lock | [`HealthAccessGuard.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/HealthAccessGuard.kt) |
 | Ledger | [`PulseStagesDatabase.kt`](../data-local/src/main/kotlin/io/github/alien2003/pulsestages/data/local/db/PulseStagesDatabase.kt), [`EstimatedNightEntity.kt`](../data-local/src/main/kotlin/io/github/alien2003/pulsestages/data/local/db/EstimatedNightEntity.kt), [`LedgerEntities.kt`](../data-local/src/main/kotlin/io/github/alien2003/pulsestages/data/local/db/LedgerEntities.kt), [`LedgerMigrations.kt`](../data-local/src/main/kotlin/io/github/alien2003/pulsestages/data/local/db/LedgerMigrations.kt) |

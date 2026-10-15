@@ -301,7 +301,8 @@ The path is Health Connect → "Permissions and data" → "Manage data" → "Dat
 
 **Recommendation:** for sleep, put PulseStages above OHealth. Sleep totals in Health Connect, and in apps that use
 them, then come from PulseStages' staged session instead of OHealth's session without stages. This does not change
-what apps that list sessions see, and it does not change which sessions PulseStages reads: PulseStages has its own
+what apps that list sessions see (Sleep as Android, for example, chooses by start time,
+[Sleep as Android](#sleep-as-android)), and it does not change which sessions PulseStages reads: PulseStages has its own
 priority list on the [Sources](#sources) screen. Whether PulseStages appears in Health Connect's list before it has
 written its first session was not verified; if it is missing, check again after the first estimate.
 
@@ -517,6 +518,7 @@ The settings most people use:
 | "Session title" (Written sessions) | empty | Title of the written sessions; placeholders `{estimator}`, `{version}`, `{confidence}`; empty = "Sleep stages from heart rate (estimate)" in the phone's language |
 | "Existing sessions" (Written sessions) | "Skip up-to-date nights" | What runs do with nights that already have a session ([overwrite policy](#existing-sessions)) |
 | "Write awake as light sleep" (Written sessions) | off | For apps that show awakenings poorly; changes the written data |
+| "Sleep as Android compatibility" (Written sessions) | off | Starts each written session 1 second before the source session, for Sleep as Android, which imports only the session that starts first ([Sleep as Android compatibility](#sleep-as-android-compatibility)); changes the written data |
 | "Estimator" (Algorithm) | "Hybrid" | "Hybrid", "HMM" or "Rules" |
 | "Nap threshold" (Naps) | 180 min | Shorter sessions are naps; 0 = no naps |
 | "Written for a nap" (Naps) | "Asleep / awake" | "Asleep / awake" (only sleep and awakenings), "Stages" or "Nothing" ([Nights and naps](#nights-and-naps)) |
@@ -644,8 +646,12 @@ What this means:
 - **In Health Connect** the nap's session has only "awake" and Health Connect's generic "sleeping" stage, which does
   not say whether the sleep was light, deep or REM. Apps that read it see when you slept and when you were awake, but
   no sleep stages ([What other apps see](#what-other-apps-see)).
-- **In Sleep as Android** and other readers, how the generic "sleeping" stage is shown depends on the app; for Sleep
-  as Android it was not verified ([Sleep as Android](#sleep-as-android)).
+- **In Sleep as Android** the nap has no sleep phases. Without "Sleep as Android compatibility" it imports the watch
+  app's nap session, which has no stages ([Sleep as Android](#sleep-as-android)). With it, it should import
+  PulseStages' session (not yet confirmed on a device), but it drops Health Connect's generic "sleeping" stage, so a
+  nap written as "Asleep / awake" shows only its awake parts, and with "Write awake as light sleep" nothing of the nap
+  is left. To see nap phases there, turn on "Sleep as Android compatibility" and choose "Stages" (below); they are not
+  validated. Other readers show the "sleeping" stage in their own way.
 - Nights are not affected: they are still written with their stages.
 
 **Writing nap stages anyway.** Set Settings → "Naps" → "Written for a nap" to "Stages", then tap "Recompute stale
@@ -714,18 +720,18 @@ PulseStages uses Android's WorkManager for all background work:
   they ended) are looked at for 36 hours after they first appeared, with growing gaps (about 1, 2, 4, 8, 16 and 32
   hours after, with the hourly check). At most 8 written sessions are checked per run; the others wait for the next
   runs.
-- **Updates of written sessions.** A written session is rewritten only when it would change: its stages, its title or
-  its notes, which hold the coverage, the confidence and the number of heart-rate samples. It keeps its record key and
-  gets the next version, like a recompute, and the night detail says "Updated automatically" and why
-  ([Night detail](#night-detail)). A session written from part of the heart rate is upgraded this way: a night
-  estimated with the rules estimator because only 40–60 % of it had heart rate ("Rules fallback (low coverage)") gets
-  the configured estimator ("Hybrid" by default) once at least 60 % has heart rate. Not updated: anything under
-  "Existing sessions" = "Never overwrite"; stale nights (they wait for "Recompute stale nights"); sessions you deleted,
-  in PulseStages or in Health Connect, which are not written again; a session never gets worse automatically: when
-  the night now has fewer heart-rate samples than when it was written (the source app is replacing its data, or data
-  was deleted), it stays as it is ("Recompute" uses the data as it is). Heart rate that arrives after these 36 hours is
-  not picked up automatically: use "Recompute" on the night. The log has a line for every update, for example
-  "updated: more heart rate arrived (46 -> 57 heart-rate samples)".
+- **Updates of written sessions.** A written session is rewritten only when it would change: its start, its stages, its
+  title or its notes, which hold the coverage, the confidence and the number of heart-rate samples. It keeps its record
+  key and gets the next version, like a recompute, and the night detail says "Updated automatically" and why
+  ([Night detail](#night-detail)). A session written from part of the heart rate is upgraded this way: a night estimated
+  with the rules estimator because only 40–60 % of it had heart rate ("Rules fallback (low coverage)") gets the
+  configured estimator ("Hybrid" by default) once at least 60 % has heart rate. Not updated: anything under "Existing
+  sessions" = "Never overwrite"; stale nights (they wait for "Recompute stale nights"); sessions you deleted, in
+  PulseStages or in Health Connect, which are not written again; a session never gets worse automatically: when the
+  night now has fewer heart-rate samples than when it was written (the source app is replacing its data, or data was
+  deleted), it stays as it is ("Recompute" uses the data as it is). Heart rate that arrives after these 36 hours is not
+  picked up automatically: use "Recompute" on the night. The log has a line for every update, for example "updated: more
+  heart rate arrived (46 -> 57 heart-rate samples)".
 - **Background access.** Automatic runs read only with "Allow background" granted
   ([Permissions](#permissions)); "Last run" shows "no background access" otherwise.
 - **"Estimate new"** runs the same check at once, as a foreground service with the notification "Estimating new
@@ -744,9 +750,11 @@ up to date, and they never rewrite stale ones on their own (with the default "Ex
 A night is **stale** when it was estimated with another algorithm version or with other parameters than the current
 ones. PulseStages stores a version and a parameters hash with every session it writes; the hash covers every
 algorithm setting, the bundled model, the personal model, "Heart rate and steps from", which optional channels are
-read, and "Write awake as light sleep". The title and the schedule are not part of it. Things that make nights stale:
+read, "Write awake as light sleep" and "Sleep as Android compatibility" (only while it is on, so nights written
+without it keep their hash). The title and the schedule are not part of it. Things that make nights stale:
 
 - a change of an algorithm setting (including the "Naps" groups and "Features" → "Optional channels");
+- turning "Write awake as light sleep" or "Sleep as Android compatibility" on or off;
 - an app update with a new model or new defaults;
 - "Calibrate", "Reset to global model" or an unsupervised adaptation;
 - granting or revoking an optional permission while its "Use …" setting is on.
@@ -776,7 +784,9 @@ If a source session's start or end changes, the night is recomputed under every 
 
 A recompute runs as a foreground service with the notification "Recomputing nights" and the progress "Recomputing
 nights: … of …". It also writes a night whose session you deleted before asking for it, but not a night you delete
-while the recompute is pending or running.
+while the recompute is pending or running. A recompute of many nights can reach Health Connect's quota: it then stops,
+is retried automatically with a growing delay and skips the nights it already recomputed, so a long history can take
+several runs until no night is stale ([health-connect.md §7](health-connect.md#7-errors-quotas-and-backoff)).
 
 ## History backfill
 
@@ -854,6 +864,10 @@ The export does not contain the list of estimated nights, the personal model or 
   uninstalling if you do not want to keep them.
 - **Other apps' data** (OHealth's sessions, heart rate, steps) is never changed or deleted by PulseStages; Health
   Connect only lets an app delete its own records.
+- **Copies in other apps.** An app that imported PulseStages' sessions keeps its own copy. Sleep as Android, for
+  example, stores imported nights as its own records (with a cloud icon) and does not pick up later changes of them
+  ([Sleep as Android](#sleep-as-android)). Deleting PulseStages' sessions does not remove these copies; delete them in
+  that app.
 
 What is stored where is described in [privacy.md](privacy.md).
 
@@ -863,8 +877,10 @@ What is stored where is described in [privacy.md](privacy.md).
 
 For every estimated night, Health Connect contains two overlapping sleep sessions: the watch app's session (OHealth's
 has no stages) and PulseStages' session with stages, titled "Sleep stages from heart rate (estimate)" (or the
-"Session title" you set). Apps that list sessions see both; Health Connect's own sleep totals use the priority you
-set in [Data sources and priority](#data-sources-and-priority).
+"Session title" you set). PulseStages' session has the start and end of the watch app's session; with "Sleep as
+Android compatibility" it starts 1 second earlier. Apps that list sessions see both and decide themselves which to
+show (Sleep as Android imports only the one that starts first, [Sleep as Android](#sleep-as-android)); Health
+Connect's own sleep totals use the priority you set in [Data sources and priority](#data-sources-and-priority).
 
 PulseStages writes its sessions with the recording method "unknown" and the phone as the device, because no sensor
 measured the stages; the notes of the record name the algorithm, its version, the parameters hash and the source
@@ -884,40 +900,116 @@ this was not tested. The full record format, including every key of the notes, i
 | Gap between merged fragments | awake |
 
 A nap written as "Asleep / awake" (the default for naps) gets only awake and Health Connect's generic "sleeping"
-stage. The written stages cover the session exactly, with no gaps or overlaps.
+stage. The written stages cover the session exactly, with no gaps or overlaps. With "Sleep as Android compatibility"
+the session and its first stage start 1 second before the watch app's session, so the first stage is 1 second longer
+than the estimate shows.
 
 ## Sleep as Android
 
-Sleep as Android can import sleep that other apps wrote to Health Connect. Its documentation describes the
-integration as two-way (export of its own sleep phases and import of third-party sleep), marked beta: turn it on in
-Sleep as Android → Settings → Services → Health Connect, grant the permissions and tap Sync once; after that it syncs
-in the background ([Sleep as Android docs](https://sleep.urbandroid.org/docs/services/health_connect.html)).
+Sleep as Android can import sleep that other apps wrote to Health Connect: in Sleep as Android → Settings → Services →
+Health Connect, turn the integration on, grant the permissions and tap Sync. Its documentation marks the integration
+beta and describes it as two-way (it also exports its own sleep to Health Connect); it does not say how Sleep as
+Android chooses between overlapping sessions of different apps
+([Sleep as Android docs](https://sleep.urbandroid.org/docs/services/health_connect.html)). The import behaviour under
+[How Sleep as Android imports](#how-sleep-as-android-imports) was observed with Sleep as Android 20261006 and confirmed
+on the development phone (Android 16, ColorOS 16); other versions may behave differently. Whether "Sleep as Android
+compatibility" makes it import PulseStages' session is not yet confirmed on a device.
 
-**What is not verified.** Sleep as Android does not document how it handles two overlapping sessions of the same
-night from different Health Connect apps; it documents duplicate filtering only for Samsung Health and Google Fit.
-This guide has not verified on a device whether it shows OHealth's session, PulseStages' session or both, how it maps
-Health Connect's "unknown" and "sleeping" stages (its hypnogram has awake, REM, light and deep levels,
-[how to read its graphs](https://sleep.urbandroid.org/docs/sleep/how_to_read_sleep_graphs.html)), or whether it
-writes copies of imported sessions back to Health Connect. Naps are written with only "awake" and "sleeping" by default
-([Nights and naps](#nights-and-naps)), so how Sleep as Android shows a nap depends on that unverified mapping.
+### How Sleep as Android imports
 
-### Recommended setup (import only)
+- **Only when it syncs.** Sleep as Android syncs with Health Connect when you tap Sync, when it saves a record (added,
+  edited or saved automatically) and when its own sleep tracking ends. Its documentation says the integration then
+  works in the background, but there is no periodic import: if you only view your sleep in it, tap Sync.
+- **One session per night: the one that starts first.** It reads the sleep sessions of all apps, orders them by start
+  time and keeps only the first of every group of overlapping sessions; sessions that merely touch (one ends where the
+  next starts) count as overlapping. The others are dropped without a message. Health Connect's
+  [Data sources and priority](#data-sources-and-priority) list does not change this.
+- **A tie goes to the watch app.** Without "Sleep as Android compatibility", PulseStages' session starts at exactly the
+  same moment as the watch app's session. Health Connect returns sessions with the same start in the order they were
+  inserted, and the watch app's session is always the older one, so Sleep as Android imports OHealth's session, which
+  has no stages, and drops PulseStages' session. If another app's session of the night starts even earlier, Sleep as
+  Android keeps that one.
+- **An imported night stays as it was imported.** Sleep as Android never imports a session that overlaps a record it
+  already has, including the records it imported earlier (shown with a cloud icon), and it never picks up later changes
+  of an imported record, such as PulseStages' [automatic update](#automatic-runs) after late heart rate or a recompute.
+  A night stays as it was imported until you delete it in Sleep as Android and sync again.
+- **Stages.** It imports Health Connect's awake, light, deep and REM stages as its own awake, light, deep and REM, and
+  drops "unknown" and the generic "sleeping" stage. A night's "No data" spans, written as unknown by default, therefore
+  have no phase there, and a nap written as "Asleep / awake" (the default for naps) shows only its awake parts; with
+  "Write awake as light sleep" such a nap has nothing left. To see nap phases in Sleep as Android, set Settings →
+  "Naps" → "Written for a nap" to "Stages" and turn on
+  [Sleep as Android compatibility](#sleep-as-android-compatibility) (that Sleep as Android then imports PulseStages'
+  session is not yet confirmed on a device); those stages are not validated
+  ([Why naps are written as asleep / awake](#why-naps-are-written-as-asleep--awake)).
+- **Thin stripes instead of phases.** A record without light, deep or REM sleep gets no hypnogram in Sleep as Android.
+  It then shows only short awake bars from its own heart-rate-based awake detection, which is on by default
+  ([awake detection](https://sleep.urbandroid.org/docs/sleep/awake_detection.html)). These thin stripes are not
+  PulseStages' stages.
+- **Deleting a night in Sleep as Android** removes only its own record; nothing is deleted from Health Connect.
 
-1. Use Sleep as Android as a reader of PulseStages' sessions. If its Health Connect settings let you limit the
-   integration to import, do so; whether import and export can be switched separately was not verified.
-2. Keep Sleep as Android disabled on PulseStages' [Sources](#sources) screen (only OHealth is enabled by default)
+On the development phone, without "Sleep as Android compatibility", Sleep as Android showed OHealth's stage-less
+session for each night (cloud icon, OHealth's times, only thin awake stripes), and deleting such a night in Sleep as
+Android and syncing brought the stage-less session back every time. Nights with stages from an Apple Watch that another
+app wrote to Health Connect showed a full hypnogram.
+
+### Sleep as Android compatibility
+
+Settings → "Written sessions" → "Sleep as Android compatibility" (off by default): "Starts each written session 1
+second before the source session, so that Sleep as Android imports it instead of the source's session without stages.
+Nights Sleep as Android has already imported must be deleted there and synced again. Changes the written data."
+
+- **What changes.** Every session PulseStages writes, naps included, starts exactly 1 second before the night's start
+  (the start of its first source session), and its first stage starts there too, so that stage is 1 second longer than
+  estimated. The end, the time-zone offsets, the record key and the title stay the same, and the notes keep their
+  keys; only the parameters hash in the notes changes, because the setting is part of it. PulseStages' own screens
+  keep showing the night's times and the estimated stages.
+- **What it is for.** PulseStages' session then sorts before the watch app's session, so Sleep as Android should import
+  it instead of the session without stages. That Sleep as Android keeps the session that starts first is confirmed;
+  that it then imports PulseStages' session is not yet confirmed on a device. A session of another app that starts
+  even earlier still wins.
+- **Stale nights.** The setting changes the written data and is part of the [parameters hash](#what-stale-means) only
+  while it is on, so the update that added it makes no night stale. Turning it on, or off again, makes every written
+  night stale. Settings then offers "Recompute"; a recompute rewrites each session in place, under the same record
+  key with the next version. Stale nights are not updated automatically when more heart rate arrives, so recompute them.
+- **"Never overwrite".** With "Existing sessions" = "Never overwrite" existing sessions are never rewritten; only
+  nights written afterwards start earlier.
+
+### Recommended setup
+
+1. In PulseStages, turn on Settings → "Written sessions" → "Sleep as Android compatibility".
+2. Recompute the nights: tap "Recompute" in the message Settings shows, which recomputes every stale night (with many
+   nights Health Connect's write quota spreads this over several runs, see [Recompute](#recompute)), or later Home →
+   "Recompute stale nights". For a single night, use "Recompute" in its [night detail](#night-detail).
+3. In Sleep as Android, delete the affected nights. Delete only records with the cloud icon: they are the copies it
+   imported. A record without the icon is Sleep as Android's own data (from its own tracking or a backup), and
+   deleting it loses that data. Without Health Connect's history access Sleep as Android reads other apps' data
+   only from the last 29 days: delete an older night only when the history switch in its Health Connect screen is on,
+   otherwise the night does not come back.
+4. In Sleep as Android → Settings → Services → Health Connect, tap Sync. It should now import PulseStages' sessions of
+   the deleted nights (not yet confirmed on a device).
+5. For new nights, let Sleep as Android sync only after PulseStages has written the night (the night is "Estimated" in
+   the Nights tab; "Estimate new" on Home writes new nights at once). A sync before that imports the watch app's
+   session, and Sleep as Android keeps it for good: steps 3 and 4 are then needed again for that night. Remember that
+   Sleep as Android also syncs when it saves a record and when its own tracking ends. Later versions of a night, such
+   as an automatic update after late heart rate, reach Sleep as Android only through steps 3 and 4 as well.
+6. Keep Sleep as Android disabled on PulseStages' [Sources](#sources) screen (only OHealth is enabled by default)
    unless you also track sleep with Sleep as Android. Sessions it writes appear in the Sources list, and because they
    carry stages, an enabled and higher-priority Sleep as Android session would replace PulseStages' estimate for that
    night.
-3. Sessions with stages from Sleep as Android also appear in Compare as reference nights. Its phases are derived from
+7. Sessions with stages from Sleep as Android also appear in Compare as reference nights. Its phases are derived from
    its own sensor model (the documentation describes light and deep phases from actigraphy,
    [sleep tracking theory](https://sleep.urbandroid.org/docs/sleep/sleep_tracking_theory.html)), not from a sleep
    lab. If Compare lists Sleep as Android sessions for nights you did not track with it, do not calibrate on them.
-4. After the first sync, check Sleep as Android's list for one night. If both sessions appear, delete the stage-less
-   one inside Sleep as Android. That removes only Sleep as Android's copy; OHealth's data stays in Health Connect.
-   Whether a later sync imports it again is not documented.
-5. If Sleep as Android shows awakenings badly, turn on PulseStages' "Write awake as light sleep" (this changes the
-   written data and makes nights stale).
+
+**What not to do.**
+
+- Do not use Sleep as Android's Backup → "Download from Health Connect" for this. The records it creates get no cloud
+  icon, and Sleep as Android later exports them to Health Connect as its own sessions: duplicates of your nights in
+  Health Connect.
+- Do not turn on "Write awake as light sleep" for Sleep as Android. It imports awake as awake, the thin stripes come
+  from its own awake detection, and on a nap written as "Asleep / awake" the setting leaves nothing to show.
+- Do not expect Health Connect's [Data sources and priority](#data-sources-and-priority) to change what Sleep as
+  Android imports; it does not.
 
 The stages are always visible in PulseStages' Nights tab, whatever another app shows.
 
@@ -981,7 +1073,10 @@ the app is open.
 | Settings: "The stored settings could not be read; the defaults are shown." | The settings store could not be read (a storage error) | Restart the app; if it persists, import an exported settings file or set your values again. |
 | Settings are back at their defaults; the log has "Settings file was unreadable and has been reset to defaults" | The settings file was damaged, so PulseStages replaced it with the defaults | Import an exported settings file, or set your values again. |
 | Settings import: "Settings file rejected" | A value has the wrong type or is out of range | Fix the listed values in the file; nothing was changed. |
-| Sleep as Android shows two sessions for a night | OHealth's session and PulseStages' session are both in Health Connect | See [Sleep as Android](#sleep-as-android). |
+| Sleep as Android shows no stages, only thin stripes | It imported the watch app's session, which has no stages: of overlapping sessions it keeps the one that starts first, and without "Sleep as Android compatibility" PulseStages' session starts at the same moment and loses the tie. The stripes are Sleep as Android's own heart-rate-based awake detection. | Turn on "Sleep as Android compatibility", recompute the nights, delete the nights in Sleep as Android (only records with the cloud icon) and tap Sync in its Health Connect settings ([Recommended setup](#recommended-setup)). That Sleep as Android then imports PulseStages' session is not yet confirmed on a device. |
+| Sleep as Android still shows nights without stages after turning on "Sleep as Android compatibility" | The nights were not recomputed yet (they are "Stale"); "Existing sessions" is "Never overwrite"; Sleep as Android still holds the night it imported earlier; another app's session of the night starts even earlier; or the option does not have the expected effect (not yet confirmed on a device) | Recompute the stale nights; under "Never overwrite" existing sessions are never rewritten, so first set "Existing sessions" to "Skip up-to-date nights" ([Existing sessions](#existing-sessions)). Then delete the night in Sleep as Android (cloud icon) and tap Sync ([Recommended setup](#recommended-setup)). That Sleep as Android then imports PulseStages' session is not yet confirmed on a device. |
+| Sleep as Android shows an older version of a night | It never picks up later changes of a night it imported (an automatic update after late heart rate, a recompute) | Delete the night in Sleep as Android (cloud icon) and tap Sync. |
+| A nap shows only its awake parts, or nothing, in Sleep as Android | "Written for a nap" is "Asleep / awake", and Sleep as Android drops Health Connect's generic "sleeping" stage (with "Write awake as light sleep" nothing is left); or, without "Sleep as Android compatibility", it imported the watch app's nap session, which has no stages | Expected. To see nap phases, set "Written for a nap" to "Stages" (not validated) and turn on "Sleep as Android compatibility", recompute, then delete the nap in Sleep as Android (cloud icon) and tap Sync ([Recommended setup](#recommended-setup)). That Sleep as Android then imports PulseStages' session is not yet confirmed on a device. |
 | The release APK does not install over an installed version | The installed build is a debug build (or a self-built one) with another signing key | Uninstall first ([Release or debug APK](#release-or-debug-apk)). |
 | Obtainium asks to pick an APK, offers the `-debug` APK, or refuses an update because of the signing certificate | PulseStages was added to Obtainium without the APK filter, or the installed build is a debug build | Set the filter, or uninstall the debug build first ([Install and update with Obtainium](#install-and-update-with-obtainium)). |
 | "No app on this device can open this." | No app handles the requested screen (Play Store, Health Connect settings, file picker) | Open Health Connect or the Play Store manually. |
@@ -1003,6 +1098,12 @@ Connect does not let an app change or delete other apps' data.
 **Why are there two sleep sessions for every night?** PulseStages cannot add stages to OHealth's record, so it writes
 its own next to it. Set the priority in Health Connect so totals use the staged one
 ([Data sources and priority](#data-sources-and-priority)).
+
+**Why does Sleep as Android show my nights without stages?** Of overlapping sessions it imports only the one that
+starts first, and without "Sleep as Android compatibility" that is the watch app's session, which has no stages; the
+thin stripes are its own awake detection. Turn the setting on, recompute, delete those nights in Sleep as Android and
+tap Sync there ([Sleep as Android](#sleep-as-android)). That Sleep as Android then imports PulseStages' session is not
+yet confirmed on a device.
 
 **Can I use another watch?** Yes, if its app writes sleep sessions and heart rate to Health Connect: enable it on the
 Sources screen. The model was trained on Apple Watch heart rate thinned to 2 minutes; other watches were not
