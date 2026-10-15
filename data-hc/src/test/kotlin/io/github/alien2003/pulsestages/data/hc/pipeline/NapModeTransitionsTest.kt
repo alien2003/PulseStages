@@ -173,6 +173,7 @@ class NapModeTransitionsTest {
     @Test
     fun `STAGES - a night that becomes a nap when a fragment is deleted is rewritten as a nap`() =
         harnessTest(dir) { h ->
+            h.policy(NapOutputPolicy.STAGES)
             val (fragment, main) = h.fragmentAndMain()
             h.sync.run(inBackground = false)
 
