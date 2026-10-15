@@ -104,3 +104,45 @@ def test_log_loss():
     p = np.array([[0.7, 0.1, 0.1, 0.1], [0.25, 0.25, 0.25, 0.25]])
     assert models.log_loss(p, np.array([0, 3])) == pytest.approx(-(np.log(0.7) + np.log(0.25)) / 2)
     assert np.isnan(models.log_loss(p[:0], np.array([], dtype=int)))
+
+
+# ------------------------------------------------------------- row weights (docs/prereg/prereg-naps-realistic.md) ----
+
+@pytest.mark.parametrize("kind", ["lr", "mlp"])
+def test_row_weights_give_weighted_priors_and_no_prior_shift(kind):
+    X, y = _data(imbalance=True, seed=6)
+    w = np.where(y == 2, 3.0, 1.0) * (1.0 + (np.arange(len(y)) % 3))     # up-weights DEEP rows
+    tc = fit_classifier(X, y, ClassifierSpec(kind=kind, C=0.5, mlp_max_iter=40), masked=[1], sample_weight=w)
+    expected = np.bincount(y, weights=w, minlength=4) / w.sum()
+    np.testing.assert_allclose(tc.class_priors, expected, rtol=0, atol=1e-15)
+    assert not np.allclose(tc.class_priors, np.bincount(y, minlength=4) / len(y))
+    np.testing.assert_array_equal(tc.prior_shift, np.zeros(4))
+    Z = tc.standardizer.transform(X[:400])
+    np.testing.assert_allclose(layers_predict(tc.layers, Z), tc.model.predict_proba(Z), atol=1e-9, rtol=0)
+    assert tc.info["export_max_abs_diff"] <= 1e-9 and tc.info["weighted"] and tc.info["weightSum"] == w.sum()
+    assert (np.asarray(tc.layers[0]["weights"])[:, 1] == 0).all() and tc.standardizer.std[1] == models.MASK_STD
+
+
+def test_uniform_row_weights_fit_the_unweighted_logistic_regression():
+    X, y = _data(seed=7)
+    a = fit_classifier(X, y, ClassifierSpec(kind="lr", C=0.2))
+    b = fit_classifier(X, y, ClassifierSpec(kind="lr", C=0.2), sample_weight=np.ones(len(y)))
+    np.testing.assert_allclose(b.class_priors, a.class_priors, atol=1e-15)
+    np.testing.assert_allclose(np.asarray(b.layers[0]["weights"]), np.asarray(a.layers[0]["weights"]), atol=1e-6)
+
+
+def test_row_weights_are_checked_and_refused_with_class_weighting():
+    X, y = _data(n=300)
+    with pytest.raises(ValueError, match="refused"):
+        fit_classifier(X, y, ClassifierSpec(kind="lr", class_weight="balanced"), sample_weight=np.ones(len(y)))
+    for bad in (np.ones(len(y) - 1), np.full(len(y), np.nan), -np.ones(len(y)), np.zeros(len(y))):
+        with pytest.raises(ValueError, match="sample_weight"):
+            fit_classifier(X, y, ClassifierSpec(kind="lr"), sample_weight=bad)
+
+
+def test_weighted_fits_are_deterministic():
+    X, y = _data(seed=8)
+    w = 1.0 + (np.arange(len(y)) % 5)
+    a = fit_classifier(X, y, ClassifierSpec(kind="mlp", mlp_max_iter=30, seed=3), sample_weight=w)
+    b = fit_classifier(X, y, ClassifierSpec(kind="mlp", mlp_max_iter=30, seed=3), sample_weight=w)
+    assert a.layers_json() == b.layers_json()

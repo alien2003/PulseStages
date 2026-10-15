@@ -19,6 +19,9 @@
 - ``NAP_HYBRID_DURATION_MODEL``, ``NAP_HYBRID_EMISSION_WEIGHT``, ``NAP_HYBRID_TIME_PRIOR_WEIGHT``: the nap decoder
   overrides ``napMode.hybrid.*`` of the patch (``selection.napModel.decoderNote`` explains the choice), else ``null``
   (naps use the night's decoder parameters);
+- ``NAP_CONTEXT_MARGIN_MIN``: ``napMode.contextMarginMin`` of the patch, whole minutes of heart rate and steps a nap
+  reads on each side (the pre-registered realistic-nap experiment, :mod:`pulsetrain.napsrealistic`;
+  ``selection.napContextMargin.note``), at most ``preprocess.contextMarginMin``; else ``null`` (the night's margin);
 - ``HMM_EMISSIONS``, ``HMM_MEAN_BOUTS``, ``HMM_TRANSITIONS``, ``HMM_TIME_PRIOR``: the supervised MLE estimates when
   the trained HMM scored higher than the physiology table and passed the validity gate (``report.hmm_validity``),
   otherwise references to the specification's defaults (``EmissionTable.PHYSIOLOGY``, ``MeanBouts()``,
@@ -45,6 +48,7 @@ ESTIMATORS = ("RULES", "HMM", "HYBRID")
 DURATION_MODELS = ("EXPLICIT", "GEOMETRIC")
 NAP_OUTPUT_POLICIES = ("STAGES", "SLEEP_WAKE", "SKIP")
 DEFAULT_NAP_MAX_SESSION_MIN = 180.0     # the threshold of the baseline / sanity-check rules before the modes
+DEFAULT_CONTEXT_MARGIN_MIN = 30         # PreprocessParams.contextMarginMin, the margin the app reads
 STATE_ORDER = ("awake", "light", "deep", "rem")       # EmissionTable constructor order
 
 
@@ -102,7 +106,7 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
     """The ``NAP_*`` constants (see the module docstring)."""
     hyb = defaults.get("hybrid") or {}
     nap = defaults.get("napMode") or {}
-    unknown = sorted(set(nap) - {"maxSessionMin", "estimator", "outputPolicy", "hybrid"})
+    unknown = sorted(set(nap) - {"maxSessionMin", "estimator", "outputPolicy", "hybrid", "contextMarginMin"})
     if unknown:
         raise DefaultsError(f"napMode.{unknown[0]} is not a trained default")
     if "maxSessionMin" in nap and "shortSessionMaxMin" in hyb:
@@ -171,7 +175,27 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
         # a chosen value is a constant (detekt: MayBeConst, MagicNumber); null = the night's value
         L.append(f"    const val {name}: Double = {text}" if v is not None else f"    val {name}: Double? = null")
         L.append("")
+    L += _nap_context_margin(defaults, sel, run)
     return L
+
+
+def _nap_context_margin(defaults: Mapping, sel: Mapping, run: str) -> list[str]:
+    """``NAP_CONTEXT_MARGIN_MIN`` (see the module docstring): a whole number of minutes, 0 to the night's
+    ``preprocess.contextMarginMin``, or null."""
+    v = (defaults.get("napMode") or {}).get("contextMarginMin")
+    what = "Nap mode: minutes of heart rate, steps and optional channels used on each side of a nap"
+    if v is None:
+        L = _kdoc(f"{what} (not part of this run's selection: null = the night's preprocess.contextMarginMin, the "
+                  "margin the app reads).", "    ")
+        return L + ["    val NAP_CONTEXT_MARGIN_MIN: Int? = null", ""]
+    night = (defaults.get("preprocess") or {}).get("contextMarginMin", DEFAULT_CONTEXT_MARGIN_MIN)
+    if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= int(night):
+        raise DefaultsError(f"napMode.contextMarginMin must be a whole number of minutes in 0..{night} "
+                            f"(preprocess.contextMarginMin), got {v!r}")
+    why = str((sel.get("napContextMargin") or {}).get("note") or f"chosen in run {run}")
+    L = _kdoc(f"{what} ({why}; at most preprocess.contextMarginMin, the margin the app reads).", "    ")
+    # a chosen value is a constant (detekt: MayBeConst); null = the night's margin
+    return L + [f"    const val NAP_CONTEXT_MARGIN_MIN: Int = {v}", ""]
 
 
 def render(defaults: Mapping, selection: Mapping, run: str, created_at: str, dataset: str) -> str:

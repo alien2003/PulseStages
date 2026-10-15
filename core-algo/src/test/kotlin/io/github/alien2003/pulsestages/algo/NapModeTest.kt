@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.algo
 
+import io.github.alien2003.pulsestages.algo.hybrid.LengthBiasTable
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
@@ -216,6 +217,41 @@ class NapModeTest {
         assertNotEquals(estimate(nap(90), AlgoParams()).perEpoch, estimate(nap(90), AlgoParams(), withNap).perEpoch)
         assertEquals(estimate(night, AlgoParams()).perEpoch, estimate(night, AlgoParams(), withNap).perEpoch)
         assertNotEquals(stager.paramsHash(AlgoParams()), withNap.paramsHash(AlgoParams()), "the nap model is part of the fingerprint")
+    }
+
+    @Test
+    fun `a nap model's length table gives every nap the row of its length, interpolated between the anchors`() {
+        val r60 = listOf(0.5, -0.25, 0.0, -0.25)
+        val r120 = listOf(-0.5, 0.25, 0.5, -0.25)
+        val section = NapModels.from(MinimalBundles.logreg(), stageLogBias = null)
+        val table = LengthBiasTable(listOf(60.0, 120.0), listOf(r60, r120))
+        val withTable = SleepStager(model.copy(nap = section.copy(stageLogBiasByLength = table)))
+
+        fun constant(bias: List<Double>) = SleepStager(model.copy(nap = section.copy(stageLogBias = bias)))
+
+        assertNotEquals(estimate(nap(90), AlgoParams(), constant(r60)).perEpoch, estimate(nap(90), AlgoParams(), constant(r120)).perEpoch)
+        // Below the first anchor the first row, at an anchor its row, between them the interpolated row, above the last
+        // anchor the last row (90 min: halfway between 60 and 120, exactly representable).
+        val expected = listOf(30L to r60, 60L to r60, 90L to listOf(0.0, 0.0, 0.25, -0.25), 120L to r120, 170L to r120)
+        for ((minutes, bias) in expected) {
+            assertEquals(
+                estimate(nap(minutes), AlgoParams(), constant(bias)).perEpoch,
+                estimate(nap(minutes), AlgoParams(), withTable).perEpoch,
+                "$minutes min",
+            )
+        }
+        // A table with one row decodes exactly like that constant bias at every length (the estimate up to the hash).
+        val single = SleepStager(model.copy(nap = section.copy(stageLogBiasByLength = LengthBiasTable(listOf(90.0), listOf(r120)))))
+        for (minutes in listOf(45L, 90L, 150L)) {
+            assertEquals(
+                estimate(nap(minutes), AlgoParams(), constant(r120)).copy(paramsHash = ""),
+                estimate(nap(minutes), AlgoParams(), single).copy(paramsHash = ""),
+                "$minutes min",
+            )
+        }
+        // Nights never read it.
+        assertEquals(estimate(night, AlgoParams()).perEpoch, estimate(night, AlgoParams(), withTable).perEpoch)
+        assertEquals(estimate(night, AlgoParams(), constant(r60)).perEpoch, estimate(night, AlgoParams(), withTable).perEpoch)
     }
 
     @Test

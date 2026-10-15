@@ -12,6 +12,9 @@
     <string name="option_nap_output_skip">Nothing</string>
     <string name="set_nap_estimator_title">Estimator for naps</string>
     <string name="set_nap_estimator_hint">The estimator of naps. Same as nights (the default): the estimator set under Algorithm.</string>
+    <string name="settings_sub_nap_input">Heart rate around naps</string>
+    <string name="set_nap_context_margin_title">Context margin of naps</string>
+    <string name="set_nap_context_margin_hint">Minutes of heart rate and steps before and after a nap that its estimate uses, at most the context margin of nights (which sets how much is read). Empty = the value of nights. 0 = only the nap itself.</string>
     <string name="settings_sub_nap_post">Post-processing of naps</string>
     <string name="settings_sub_nap_hybrid">Hybrid decoder for naps</string>
     <string name="set_nap_check_proportions_title">Check the stage shares of naps</string>
@@ -62,7 +65,7 @@
     <string name="compare_mode_metrics">%1$s: kappa %2$s, accuracy %3$s</string>
     <!-- Settings: the algorithm values of naps (collapsed group) -->
     <string name="settings_section_naps_algorithm">Naps: algorithm</string>
-    <string name="settings_section_naps_algorithm_summary">Post-processing and hybrid decoder of naps; empty = the value of nights</string>
+    <string name="settings_section_naps_algorithm_summary">Heart-rate context, post-processing and hybrid decoder of naps; empty = the value of nights</string>
     <!-- Night detail of a nap written as asleep / awake, and of a night without output -->
     <string name="night_detail_hypnogram_sleep_wake">Hypnogram (the app\'s estimate; written to Health Connect as asleep / awake)</string>
     <string name="night_detail_hypnogram_not_written">Hypnogram (a new estimate; nothing was written)</string>

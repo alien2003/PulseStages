@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import io.github.alien2003.pulsestages.R
+import io.github.alien2003.pulsestages.data.local.settings.AppSettings
 import io.github.alien2003.pulsestages.ui.common.SingleChoice
 import io.github.alien2003.pulsestages.ui.common.UiText
 import io.github.alien2003.pulsestages.ui.common.resolve
@@ -101,7 +102,7 @@ fun SettingField(
             TimeSetting(spec, spec.read(state.settings), problems, onEdit, modifier)
         }
 
-        is TextSpec, is OptionalDoubleSpec -> {
+        is TextSpec, is OptionalDoubleSpec, is OptionalIntSpec -> {
             NumberSetting(spec, state, onEdit, modifier)
         }
 
@@ -129,7 +130,7 @@ fun NumberSetting(
     val title = spec.title.resolve()
     val keyboard =
         when (spec) {
-            is IntSpec -> KeyboardType.Number
+            is IntSpec, is OptionalIntSpec -> KeyboardType.Number
             is DoubleSpec, is OptionalDoubleSpec -> KeyboardType.Decimal
             else -> KeyboardType.Text
         }
@@ -137,6 +138,7 @@ fun NumberSetting(
         when (spec) {
             is TextSpec -> spec.placeholder
             is OptionalDoubleSpec -> UiText.of(R.string.settings_same_as_nights_value, formatSettingNumber(spec.inherited(state.settings)))
+            is OptionalIntSpec -> UiText.of(R.string.settings_same_as_nights_value, spec.inherited(state.settings).toString())
             else -> null
         }
     OutlinedTextField(
@@ -156,7 +158,7 @@ fun NumberSetting(
             if (compact && problems.isEmpty()) {
                 null
             } else {
-                { SupportingText(spec, problems, showHint = !compact) }
+                { SupportingText(spec, problems, state.settings, showHint = !compact) }
             },
     )
 }
@@ -167,30 +169,37 @@ private fun unitOf(spec: SettingSpec): String? =
         is IntSpec -> spec.unit?.resolve()
         is DoubleSpec -> spec.unit?.resolve()
         is OptionalDoubleSpec -> spec.unit?.resolve()
+        is OptionalIntSpec -> spec.unit?.resolve()
         else -> null
     }
 
+/** The accepted values of [spec] with [settings] (a range may depend on another setting). */
 @Composable
-private fun boundsOf(spec: SettingSpec): String? =
+private fun boundsOf(
+    spec: SettingSpec,
+    settings: AppSettings,
+): String? =
     when (spec) {
         is IntSpec -> spec.range?.let { stringResource(R.string.bounds_range, it.first.toString(), it.last.toString()) }
         is DoubleSpec -> spec.bounds?.resolve()
         is OptionalDoubleSpec -> spec.bounds?.resolve()
+        is OptionalIntSpec -> spec.range(settings).let { stringResource(R.string.bounds_range, it.first.toString(), it.last.toString()) }
         else -> null
     }
 
-/** Problems (in the error colour), the hint and the accepted values of [spec]. */
+/** Problems (in the error colour), the hint and the accepted values of [spec] with [settings]. */
 @Composable
 private fun SupportingText(
     spec: SettingSpec,
     problems: List<FieldProblem>,
+    settings: AppSettings,
     showHint: Boolean = true,
 ) {
     Column {
         ProblemTexts(spec.path, problems)
         if (showHint) {
             Text(spec.hint.resolve())
-            boundsOf(spec)?.let { Text(stringResource(R.string.settings_allowed_values, it)) }
+            boundsOf(spec, settings)?.let { Text(stringResource(R.string.settings_allowed_values, it)) }
         }
     }
 }

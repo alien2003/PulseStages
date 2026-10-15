@@ -224,11 +224,51 @@ interface HybridComponents {
 }
 
 /**
+ * A per-stage log-bias that depends on the session length (key `nap.stageLogBiasByLength`, docs/INTERCHANGE.md §3):
+ * one row `[bA, bL, bD, bR]` per anchor length. A session of L minutes (end − start) gets the row interpolated linearly
+ * in L between the two anchors around it, exactly the row of an anchor at that anchor, and the first / last row below
+ * the first / above the last anchor ([at]).
+ *
+ * @property lengthsMin the anchor lengths in minutes: at least one, finite, positive and strictly increasing.
+ * @property bias one row of 4 finite numbers (in [SleepStage.index] order) per anchor of [lengthsMin].
+ */
+@Serializable
+data class LengthBiasTable(
+    val lengthsMin: List<Double>,
+    val bias: List<List<Double>>,
+) {
+    /** The log-bias of a session of [sessionMin] minutes (see the class documentation). */
+    fun at(sessionMin: Double): List<Double> {
+        val last = lengthsMin.lastIndex
+        val upper = lengthsMin.indexOfFirst { it >= sessionMin }
+        return when {
+            upper == 0 -> {
+                bias.first()
+            }
+
+            upper < 0 -> {
+                bias[last]
+            }
+
+            lengthsMin[upper] == sessionMin -> {
+                bias[upper]
+            }
+
+            else -> {
+                val lo = lengthsMin[upper - 1]
+                val w = (sessionMin - lo) / (lengthsMin[upper] - lo)
+                bias[upper - 1].zip(bias[upper]) { a, b -> a + w * (b - a) }
+            }
+        }
+    }
+}
+
+/**
  * The optional nap model of a bundle (key `nap`, docs/INTERCHANGE.md §3): a complete second set of [HybridComponents]
  * fitted on nap-length sessions, used for sessions of [io.github.alien2003.pulsestages.algo.model.SessionMode.NAP]
- * instead of the main model (which then also replaces its `stageLogBiasShort` by this model's [stageLogBias]). It shares
- * the bundle's `schemaVersion`, `classOrder` and `modelId` and is part of the bundle's fingerprint. Personal classifier
- * deltas are fitted for the main classifier and never apply to it.
+ * instead of the main model (which then also replaces its `stageLogBiasShort` by this model's [stageLogBias] or
+ * [stageLogBiasByLength]). It shares the bundle's `schemaVersion`, `classOrder` and `modelId` and is part of the bundle's
+ * fingerprint. Personal classifier deltas are fitted for the main classifier and never apply to it.
  *
  * @property featureSetVersion must equal [HybridFeatureExtractor.FEATURE_SET_VERSION] to be usable.
  * @property featureNames must equal [HybridFeatureExtractor.FEATURE_NAMES] to be usable.
@@ -241,6 +281,10 @@ interface HybridComponents {
  * @property timePrior `P(stage | time bin since the session start)` of naps.
  * @property stageLogBias optional per-stage log-bias of the nap classifier's scaled likelihoods (null = no bias).
  * @property training optional provenance of the nap model.
+ * @property stageLogBiasByLength optional per-stage log-bias by session length ([LengthBiasTable]) used instead of a
+ *   constant one: a nap of L minutes gets `stageLogBiasByLength.at(L)`. Exclusive with [stageLogBias] (a bundle with
+ *   both is invalid); null = the constant [stageLogBias] (or none). Left out of the bundle's canonical JSON when absent,
+ *   so a bundle without it keeps its fingerprint. Nights never read it.
  */
 @Serializable
 data class NapSubModel(
@@ -255,7 +299,14 @@ data class NapSubModel(
     override val timePrior: TimePrior,
     override val stageLogBias: List<Double>? = null,
     val training: TrainingInfo? = null,
-) : HybridComponents
+    val stageLogBiasByLength: LengthBiasTable? = null,
+) : HybridComponents {
+    /**
+     * The log-bias of a nap of [sessionMin] minutes: [stageLogBiasByLength] at that length when the section has a table,
+     * otherwise the constant [stageLogBias] (null = no bias).
+     */
+    fun stageLogBiasFor(sessionMin: Double): List<Double>? = stageLogBiasByLength?.at(sessionMin) ?: stageLogBias
+}
 
 /**
  * The hybrid model bundle (docs/INTERCHANGE.md §3): standardization and weights of the emission classifier, class
@@ -319,27 +370,32 @@ data class HybridModel(
         HybridModelValidator.validate(this)
     }
 
-    private val fingerprintValue: String by lazy {
-        val tree = JSON.encodeToJsonElement(serializer(), this).jsonObject
-        Fingerprints.of(JsonObject(tree.filterNot { (key, value) -> key in OMITTED_WHEN_ABSENT && value is JsonNull }))
-    }
+    private val fingerprintValue: String by lazy { Fingerprints.of(canonicalTree()) }
 
     private val nightModelFingerprintValue: String by lazy {
+        Fingerprints.of(JsonObject(canonicalTree().filterKeys { it !in NOT_DECODING_NIGHTS }))
+    }
+
+    /**
+     * The JSON tree both fingerprints are computed from: every field with nulls explicit, except the optional fields
+     * added after the first bundles when they are absent ([OMITTED_WHEN_ABSENT] at the top level,
+     * [NAP_OMITTED_WHEN_ABSENT] inside the [nap] object), so a bundle without them keeps the fingerprint it always had.
+     */
+    private fun canonicalTree(): JsonObject {
         val tree = JSON.encodeToJsonElement(serializer(), this).jsonObject
-        Fingerprints.of(
-            JsonObject(
-                tree.filterNot { (key, value) ->
-                    key in NOT_DECODING_NIGHTS || (key in OMITTED_WHEN_ABSENT && value is JsonNull)
-                },
-            ),
-        )
+        val kept = tree.filterNot { (key, value) -> key in OMITTED_WHEN_ABSENT && value is JsonNull }
+        val nap = kept[NAP_KEY] as? JsonObject ?: return JsonObject(kept)
+        val napKept = nap.filterNot { (key, value) -> key in NAP_OMITTED_WHEN_ABSENT && value is JsonNull }
+        return JsonObject(kept + (NAP_KEY to JsonObject(napKept)))
     }
 
     /**
      * SHA-256 (lower-case hex) of the canonical JSON of the bundle (every field, object keys sorted, no whitespace;
      * the [nap] model included). It identifies the model in the params hash. Optional fields introduced after the
-     * first bundles ([stageLogBias], [stageLogBiasShort], [nap]) are left out when absent, so a bundle without them
-     * keeps the fingerprint it always had (and personal models fitted for it stay valid).
+     * first bundles ([stageLogBias], [stageLogBiasShort], [nap], and inside the nap model
+     * [NapSubModel.stageLogBiasByLength]) are left out when absent, so a bundle without them keeps the fingerprint it
+     * always had (and personal models fitted for it stay valid). A null nap `stageLogBias` or `training` stays in the
+     * canonical JSON, as it always did.
      */
     fun fingerprint(): String = fingerprintValue
 
@@ -367,6 +423,15 @@ data class HybridModel(
 
         /** Optional keys that do not enter the fingerprint when they are null (added after schema 1 shipped). */
         private val OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBias", "stageLogBiasShort", "nap")
+
+        /** Key of the nap model in the bundle JSON. */
+        private const val NAP_KEY: String = "nap"
+
+        /**
+         * Optional keys of the nap model that do not enter the fingerprint when they are null (added after nap models
+         * shipped).
+         */
+        private val NAP_OMITTED_WHEN_ABSENT: Set<String> = setOf("stageLogBiasByLength")
 
         /** Keys left out of [nightModelFingerprint]: metadata and the parts used by naps only. */
         private val NOT_DECODING_NIGHTS: Set<String> = setOf("modelId", "training", "stageLogBiasShort", "nap")
@@ -411,7 +476,25 @@ internal object HybridModelValidator {
         validateComponents(model, prefix = "")
         model.hmm?.emissions?.let { validateEmissions(it) }
         stageBias("stageLogBiasShort", model.stageLogBiasShort)
-        model.nap?.let { validateComponents(it, prefix = "nap.") }
+        model.nap?.let { validateNap(it) }
+    }
+
+    /** The nap model: the shared checks plus its optional length table, which excludes a constant log-bias. */
+    private fun validateNap(nap: NapSubModel) {
+        validateComponents(nap, prefix = "nap.")
+        val table = nap.stageLogBiasByLength ?: return
+        ensure(nap.stageLogBias == null) {
+            "nap.stageLogBias and nap.stageLogBiasByLength are mutually exclusive: a nap model has at most one of them"
+        }
+        val name = "nap.stageLogBiasByLength"
+        val lengths = table.lengthsMin
+        ensure(lengths.isNotEmpty()) { "$name.lengthsMin needs at least one anchor length" }
+        ensure(lengths.all { it.isFinite() && it > 0 }) { "$name.lengthsMin entries must be positive and finite: $lengths" }
+        ensure(lengths.zipWithNext().all { (a, b) -> a < b }) { "$name.lengthsMin must be strictly increasing: $lengths" }
+        ensure(table.bias.size == lengths.size) {
+            "$name.bias needs one row per anchor length (${lengths.size}), has ${table.bias.size}"
+        }
+        table.bias.forEachIndexed { i, row -> stageBias("$name.bias[$i]", row) }
     }
 
     /** The checks shared by the main model and the nap model; [prefix] names the section in the messages. */

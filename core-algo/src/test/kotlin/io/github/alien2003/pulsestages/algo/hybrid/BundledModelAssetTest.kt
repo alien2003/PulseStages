@@ -65,6 +65,11 @@ class BundledModelAssetTest {
             assertEquals(SleepStage.COUNT, bias.size)
             assertTrue(bias.all { it.isFinite() } && abs(bias.sum()) < 1e-6, "$bias")
         }
+        // Its log-bias by session length (docs/prereg/prereg-naps-realistic.md), when present: every row centred, finite.
+        nap.stageLogBiasByLength?.let { table ->
+            assertNull(nap.stageLogBias)
+            for (row in table.bias) assertTrue(row.size == SleepStage.COUNT && row.all { it.isFinite() } && abs(row.sum()) < 1e-6, "$row")
+        }
         assertTrue(checkNotNull(nap.training?.dataset).isNotBlank())
     }
 

@@ -120,7 +120,10 @@ internal val napsSection =
             ),
     )
 
-/** The algorithm values of naps (collapsed, like the other algorithm groups): post-processing and decoder overrides. */
+/**
+ * The algorithm values of naps (collapsed, like the other algorithm groups): the heart-rate context, post-processing
+ * and decoder overrides.
+ */
 internal val napsAlgorithmSection =
     SettingsSection(
         id = "naps_algorithm",
@@ -129,6 +132,20 @@ internal val napsAlgorithmSection =
         expandedByDefault = false,
         items =
             listOf(
+                subheader(R.string.settings_sub_nap_input),
+                // At most the night's margin: the app reads heart rate and steps with it, a nap cannot use more.
+                SettingsItem.Field(
+                    OptionalIntSpec(
+                        path = "$NAP.contextMarginMin",
+                        title = text(R.string.set_nap_context_margin_title),
+                        hint = text(R.string.set_nap_context_margin_hint),
+                        read = { it.algo.napMode.contextMarginMin },
+                        write = { s, v -> s.nap { it.copy(contextMarginMin = v) } },
+                        inherited = { it.algo.preprocess.contextMarginMin },
+                        range = { 0..it.algo.preprocess.contextMarginMin },
+                        unit = UNIT_MIN,
+                    ),
+                ),
                 subheader(R.string.settings_sub_nap_post),
                 switchSetting(
                     "$NAP.post.checkProportions",

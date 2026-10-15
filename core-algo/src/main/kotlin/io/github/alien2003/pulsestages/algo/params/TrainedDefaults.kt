@@ -71,6 +71,12 @@ object TrainedDefaults {
     const val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double = 0.0
 
     /**
+     * Nap mode: minutes of heart rate, steps and optional channels used on each side of a nap (not part of this
+     * run's selection: null = the night's preprocess.contextMarginMin, the margin the app reads).
+     */
+    val NAP_CONTEXT_MARGIN_MIN: Int? = null
+
+    /**
      * HMM emissions: the supervised estimates scored 0.117 vs 0.070 for the physiology table but failed the
      * validity gate (hrNorm means violate DEEP < LIGHT < REM < AWAKE; instantaneous: predicted DEEP share 46.6%
      * outside [3%, 35%]; mean2min: predicted DEEP share 42.4% outside [3%, 35%]), so the table stays the default.

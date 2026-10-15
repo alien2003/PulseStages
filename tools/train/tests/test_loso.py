@@ -76,6 +76,17 @@ def test_variants_and_grid():
     assert len(loso.grid_points(loso.GRIDS["small"])) == 8
 
 
+def test_nap_evidence_grid():
+    """The decoder grid of the evidence nap model (docs/prereg/prereg-naps-realistic.md section 6.2): 8 points, time
+    prior off, EXPLICIT before GEOMETRIC, emission weight 1, 0.7, 0.5, 0.3; the same relative order as in the full
+    grid (napmodel.final_choice breaks ties by the full grid's order)."""
+    pts = loso.grid_points(loso.GRIDS["nap-evidence"])
+    assert [(p["hybrid"]["durationModel"], p["hybrid"]["emissionWeight"], p["hybrid"]["timePriorWeight"])
+            for p in pts] == [(d, w, 0.0) for d in ("EXPLICIT", "GEOMETRIC") for w in (1.0, 0.7, 0.5, 0.3)]
+    full = [p["hybrid"] for p in loso.grid_points(loso.GRIDS["full"])]
+    assert [full.index(p["hybrid"]) for p in pts] == sorted(full.index(p["hybrid"]) for p in pts)
+
+
 def test_pipeline_config_round_trip(tmp_path):
     cfg = loso.PipelineConfig(run="r", out_dir=tmp_path, nights_root=tmp_path / "n", heldout_datasets=("walch",),
                               install_model=tmp_path / "m.json")

@@ -36,7 +36,7 @@ object AlgoParamsValidator {
         checker.hybrid(params.hybrid)
         checker.post(params.post)
         checker.personal(params.personal)
-        checker.napMode(params.napMode, params.post)
+        checker.napMode(params.napMode, params.post, params.preprocess)
         return checker.problems.toList()
     }
 
@@ -211,10 +211,14 @@ private fun Checker.post(v: PostprocessParams) {
     inRange("$p.lowConfidenceThreshold", v.lowConfidenceThreshold, UNIT)
 }
 
-/** The nap mode; a relation between two values is checked when a nap override is involved ([night] = the night's). */
+/**
+ * The nap mode; a relation between two values is checked when a nap override is involved ([night] and
+ * [nightPreprocess] = the night's).
+ */
 private fun Checker.napMode(
     v: NapModeParams,
     night: PostprocessParams,
+    nightPreprocess: PreprocessParams,
 ) {
     val p = "napMode"
     inRange("$p.maxSessionMin", v.maxSessionMin, 0.0..MAX_SESSION_THRESHOLD_MIN)
@@ -229,6 +233,22 @@ private fun Checker.napMode(
     post.lowConfidenceThreshold?.let { inRange("$p.post.lowConfidenceThreshold", it, UNIT) }
     v.hybrid.emissionWeight?.let { atLeast("$p.hybrid.emissionWeight", it, 0.0) }
     v.hybrid.timePriorWeight?.let { atLeast("$p.hybrid.timePriorWeight", it, 0.0) }
+    v.contextMarginMin?.let { napContextMargin(it, nightPreprocess.contextMarginMin) }
+}
+
+/**
+ * The nap context margin: at least 0 and at most the night's `preprocess.contextMarginMin`, the margin the app reads
+ * heart rate and steps with, so that a nap never uses more context than it receives.
+ */
+private fun Checker.napContextMargin(
+    margin: Int,
+    nightMargin: Int,
+) {
+    val path = "napMode.contextMarginMin"
+    when {
+        margin < 0 -> add(path, margin.toString(), ">= 0")
+        margin > nightMargin -> add(path, margin.toString(), "<= preprocess.contextMarginMin ($nightMargin)")
+    }
 }
 
 /** The nap DEEP corridor (overrides, else the night's values) must not be reversed; reported at the override. */

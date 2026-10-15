@@ -46,8 +46,10 @@ data class AlgoParams(
 
     /**
      * The parameters in effect for a session of [mode]: these parameters for [SessionMode.NIGHT]; for
-     * [SessionMode.NAP] the estimator [napEstimator] and the post-processing and hybrid decoder parameters with the
-     * overrides of `napMode` applied (every other group unchanged, [napMode] included).
+     * [SessionMode.NAP] the estimator [napEstimator], the post-processing and hybrid decoder parameters with the
+     * overrides of `napMode` applied, and `preprocess.contextMarginMin` = `napMode.contextMarginMin` when that is set
+     * (every other group unchanged, [napMode] included). With the override null a nap's preprocessing parameters are
+     * the night's, the same object.
      */
     fun forMode(mode: SessionMode): AlgoParams =
         when (mode) {
@@ -58,6 +60,7 @@ data class AlgoParams(
             SessionMode.NAP -> {
                 copy(
                     estimator = napEstimator,
+                    preprocess = napMode.contextMarginMin?.let { preprocess.copy(contextMarginMin = it) } ?: preprocess,
                     post = napMode.post.applyTo(post),
                     hybrid = napMode.hybrid.applyTo(hybrid),
                 )
@@ -84,7 +87,10 @@ data class PreprocessParams(
     val medianWindowEpochs: Int = 3,
     /** Moving-average length (epochs). */
     val smoothWindowEpochs: Int = 5,
-    /** Context read on both sides of the session, minutes. */
+    /**
+     * Context read on both sides of the session, minutes. Naps use `napMode.contextMarginMin` instead when it is set
+     * (at most this value).
+     */
     val contextMarginMin: Int = 30,
     /** Below this coverage the night is not estimated by HMM/HYBRID. */
     val minCoverage: Double = 0.6,

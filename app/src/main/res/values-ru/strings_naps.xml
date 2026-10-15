@@ -12,6 +12,9 @@
     <string name="option_nap_output_skip">Ничего</string>
     <string name="set_nap_estimator_title">Оценщик дневного сна</string>
     <string name="set_nap_estimator_hint">Оценщик для дневного сна. «Как для ночей» (по умолчанию): оценщик из раздела «Алгоритм».</string>
+    <string name="settings_sub_nap_input">Пульс вокруг дневного сна</string>
+    <string name="set_nap_context_margin_title">Контекстный запас дневного сна</string>
+    <string name="set_nap_context_margin_hint">Сколько минут пульса и шагов до и после дневного сна учитывает его оценка, не больше контекстного запаса ночей (он задаёт, сколько читается). Пусто — значение для ночей. 0 — только сам дневной сон.</string>
     <string name="settings_sub_nap_post">Постобработка дневного сна</string>
     <string name="settings_sub_nap_hybrid">Гибридный декодер для дневного сна</string>
     <string name="set_nap_check_proportions_title">Проверять доли стадий дневного сна</string>
@@ -62,7 +65,7 @@
     <string name="compare_mode_metrics">%1$s: каппа %2$s, точность %3$s</string>
     <!-- Настройки: параметры алгоритма для дневного сна (свёрнутая группа) -->
     <string name="settings_section_naps_algorithm">Дневной сон: алгоритм</string>
-    <string name="settings_section_naps_algorithm_summary">Постобработка и гибридный декодер дневного сна; пусто — значение для ночей</string>
+    <string name="settings_section_naps_algorithm_summary">Контекст пульса, постобработка и гибридный декодер дневного сна; пусто — значение для ночей</string>
     <!-- Подробности дневного сна, записанного как сон / бодрствование, и ночи без записи -->
     <string name="night_detail_hypnogram_sleep_wake">Гипнограмма (оценка приложения; в Health Connect записано как сон / бодрствование)</string>
     <string name="night_detail_hypnogram_not_written">Гипнограмма (новая оценка; ничего не записано)</string>

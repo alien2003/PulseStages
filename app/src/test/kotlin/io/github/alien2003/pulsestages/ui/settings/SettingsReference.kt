@@ -39,9 +39,10 @@ internal class SettingsReference(
     private val algorithmAnchors: List<String> = headingAnchors(algorithmMarkdown)
 
     /**
-     * The defaults with every choice switched to another option (e.g. another epoch length) and every empty nap override
-     * set to the night's value: a bound that differs on this base depends on another setting, a relation that differs
-     * names the override that replaces the night's value when it is set.
+     * The defaults with every choice switched to another option (e.g. another epoch length) and every empty decimal nap
+     * override set to the night's value: a bound that differs on this base depends on another setting, a relation that
+     * differs names the override that replaces the night's value when it is set. The nap context margin
+     * ([OptionalIntSpec]) stays empty: it replaces no night value in a relation, its own bound is the night's margin.
      */
     private val alternative: AppSettings =
         SettingsCatalog.specsByPath.values
@@ -266,7 +267,8 @@ internal class SettingsReference(
             is ChoiceSpec -> "${code(value.toString())} (${plain(text(spec.options.single { it.key == spec.read(defaults) }.label))})"
             is TimeSpec -> "${code(value.toString())} (${clock(spec.read(defaults))})"
             is TextSpec -> if (value is JsonNull) "`null` (“${plain(text(spec.placeholder))}”)" else code(value.toString())
-            is OptionalDoubleSpec -> optionalDefault(spec, value)
+            is OptionalDoubleSpec -> optionalDefault(value, formatSettingNumber(spec.inherited(defaults)), spec.unit)
+            is OptionalIntSpec -> optionalDefault(value, spec.inherited(defaults).toString(), spec.unit)
             is RangeSpec -> "${code(value.toString())} – ${code(jsonAt(defaultJson, spec.maxPath).toString())}"
             is IntSpec -> withUnit(code(value.toString()), spec.unit)
             is DoubleSpec -> withUnit(code(value.toString()), spec.unit)
@@ -274,15 +276,16 @@ internal class SettingsReference(
         }
     }
 
+    /** The default of an optional nap override: its value, or `null` with the night's value [inherited] it stands for. */
     private fun optionalDefault(
-        spec: OptionalDoubleSpec,
         value: JsonElement,
+        inherited: String,
+        unit: UiText?,
     ): String =
         if (value is JsonNull) {
-            val inherited = UiText.of(R.string.settings_same_as_nights_value, formatSettingNumber(spec.inherited(defaults)))
-            "`null` (${plain(withUnit(text(inherited), spec.unit))})"
+            "`null` (${plain(withUnit(text(UiText.of(R.string.settings_same_as_nights_value, inherited)), unit))})"
         } else {
-            withUnit(code(value.toString()), spec.unit)
+            withUnit(code(value.toString()), unit)
         }
 
     private fun withUnit(
@@ -331,6 +334,7 @@ internal class SettingsReference(
         return when (spec) {
             is IntSpec, is TimeSpec -> "$base (whole number)"
             is OptionalDoubleSpec -> "`null` (${plain(text(R.string.option_same_as_nights))}) or a number: $base"
+            is OptionalIntSpec -> "`null` (${plain(text(R.string.option_same_as_nights))}) or a whole number: $base"
             else -> base
         }
     }
@@ -389,6 +393,7 @@ internal class SettingsReference(
             is TimeSpec -> listOf(-1, MINUTES_PER_DAY, HUGE.toInt()).map { spec.write(base, it) }
             is DoubleSpec -> listOf(-HUGE, HUGE).map { spec.write(base, it) }
             is OptionalDoubleSpec -> listOf(-HUGE, HUGE).map { spec.write(base, it) }
+            is OptionalIntSpec -> INT_PROBES.map { spec.write(base, it) }
             is TextSpec -> listOf(" ", "x".repeat(SettingsLimits.TITLE_TEMPLATE_MAX_LENGTH + 1)).map { spec.write(base, it) }
             is SwitchSpec, is ChoiceSpec, is RangeSpec -> emptyList()
         }
@@ -410,6 +415,7 @@ internal class SettingsReference(
             is IntSpec -> spec.write(defaults, spec.read(defaults) + 2)
             is DoubleSpec -> spec.write(defaults, spec.read(defaults) + CHANGE)
             is OptionalDoubleSpec -> spec.write(defaults, (spec.read(defaults) ?: spec.inherited(defaults)) + CHANGE)
+            is OptionalIntSpec -> spec.write(defaults, (spec.read(defaults) ?: spec.inherited(defaults)) - 1)
             is TimeSpec -> spec.write(defaults, (spec.read(defaults) + 1) % MINUTES_PER_DAY)
             is TextSpec -> spec.write(defaults, "Stages {version}")
             is RangeSpec -> spec.write(defaults, spec.readMin(defaults) - CHANGE / 10, spec.readMax(defaults) + CHANGE / 10)

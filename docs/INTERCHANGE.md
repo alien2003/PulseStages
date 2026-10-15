@@ -80,8 +80,20 @@ for a fractional length); a night shorter than L gives none. Proxies follow the 
 length. `--param-grid` is a JSON array of partial AlgoParams
 objects ("patches"); each is deep-merged over the base parameters (objects merge key by key, other values replace;
 unknown keys are errors) and produces one metrics block, all in one JVM run. Nights are parsed once; preprocessing,
-features, hybrid features and classifier outputs are shared by all grid entries with equal `preprocess` and
-`features` parameters, so grids over decoder / post-processing parameters are cheap.
+features, hybrid features and classifier outputs are shared by all grid entries with the same preparation key
+(`NightPreparer.preparationKey`: the session's mode, the `preprocess` parameters in effect for that mode, the
+`features` parameters and, for a nap, `napMode.contextMarginMin`), so grids over decoder / post-processing parameters
+are cheap and a grid over `napMode.contextMarginMin` prepares only the naps again.
+
+**Nap context margin** (`napMode.contextMarginMin`, AlgoParams; `null` by default = the night's
+`preprocess.contextMarginMin`). With a value m (whole minutes, 0 ≤ m ≤ `preprocess.contextMarginMin`; a larger value
+is refused by the validator, exit 65, because the app reads heart rate and steps with the night's margin and a nap
+can never use more context than it receives) a nap is prepared, in `features`, `evaluate` and `estimate` alike and
+exactly as in the app, from its input restricted to heart-rate / SpO2 / respiratory-rate / HRV samples with
+`start − m ≤ t ≤ end + m` and step records ending in `(start − m, end + m]` (the cut convention of the nap proxies
+above), on an epoch grid with m minutes of context; what a night file or a proxy carries beyond that is ignored, so a
+nap decodes the same whatever the reader's margin. Nights never read the field: their preparation, features and
+decodes are identical for every value.
 
 Skip reasons: `NO_LABELS` (night has no labels), `NO_FOLD_MODEL` (no `<subject>.json` in --fold-models), and the
 NotEstimatedReason names (`NO_HR_DATA`, `LOW_COVERAGE`, `SESSION_TOO_SHORT` for sessions shorter than
@@ -170,17 +182,22 @@ row per session epoch, evaluated night and grid entry (label as in `features`).
     "initialStage": [pA, pL, pD, pR],
     "timePrior": { "binMinutes": 30, "table": [[pA, pL, pD, pR], ...] },
     "stageLogBias": [bA, bL, bD, bR],                     // optional log-bias of the nap classifier
-    "training": { "dataset": "...", "notes": "..." }      // optional provenance (any TrainingInfo fields)
+    "training": { "dataset": "...", "notes": "..." },     // optional provenance (any TrainingInfo fields)
+    "stageLogBiasByLength": {                             // optional, instead of stageLogBias: log-bias by session length
+      "lengthsMin": [30, 60, 90, 120, 150, 170],          // anchor lengths in minutes, strictly increasing
+      "bias": [[bA, bL, bD, bR], ...]                     // one row per anchor
+    }
   }
 }
 ```
 
 `HybridModel.fingerprint()` = SHA-256 of the canonical bundle bytes (the parsed bundle re-encoded as JSON with every
 field, object keys sorted, no whitespace — so formatting and key order do not matter); it is part of the params hash.
-Optional fields added after the first shipped bundles (`stageLogBias`, `stageLogBiasShort`, `nap`) are left out of the
-canonical JSON when they are absent, so a bundle without them keeps its fingerprint (and the personal models keyed to
-it stay valid); the `nap` section is part of the canonical JSON when present (a bundle with a nap model is a different
-model).
+Optional fields added after the first shipped bundles (`stageLogBias`, `stageLogBiasShort`, `nap`, and inside `nap`
+the `stageLogBiasByLength` table added after the first nap models) are left out of the canonical JSON when they are
+absent, so a bundle without them keeps its fingerprint (and the personal models keyed to it stay valid); the `nap`
+section is part of the canonical JSON when present (a bundle with a nap model is a different model), with its other
+keys as always (a null nap `stageLogBias` or `training` included).
 
 `stageLogBias` (optional; absent = all 0): per-stage additive log-bias b_s, AWAKE / LIGHT / DEEP / REM, added to the
 emission score of every epoch with heart-rate data, `e_k(s) = w_e · (ln p(s | x_k) − β · ln classPriors_s) + b_s`
@@ -212,6 +229,14 @@ the naps (only) fall back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. `tools/tra
 pre-registered nap-model experiment (`tools/train/pulsetrain/napmodel.py`, ALGORITHM.md section 13.12) with its own
 `stageLogBias` and a `training` block describing the nap proxies it was trained on.
 
+`nap.stageLogBiasByLength` (optional; absent = the nap's constant `stageLogBias`, or none): a per-stage log-bias that
+depends on the session length (`LengthBiasTable`; docs/prereg/prereg-naps-realistic.md). `lengthsMin` are anchor
+lengths in minutes, `bias` one row `[bA, bL, bD, bR]` per anchor. A nap of L = (`sessionEndMs` − `sessionStartMs`) /
+60 000 minutes gets the row interpolated linearly in L between the two anchors around it, exactly the anchor's row at
+an anchor length, and the first / last row below the first / above the last anchor; that row is the nap's b in the
+emission score. A nap section has at most one of `stageLogBias` and `stageLogBiasByLength`. Nights never read it (it
+is not part of the night-model fingerprint, section 4).
+
 Validation (`HybridModel.parse`, HybridModelException on failure): `schemaVersion` 1; `classOrder` exactly
 `["AWAKE","LIGHT","DEEP","REM"]` (every probability vector is in this order); distinct `featureNames`;
 `standardization` with one finite mean and one positive std per feature; layers chaining from `featureNames.size`
@@ -219,7 +244,9 @@ inputs to 4 outputs, `relu` on hidden layers and `softmax` on the last, `logreg`
 `classPriors` positive, `initialStage`, every `boutTransitions` row and every `timePrior.table` row non-negative,
 each summing to 1 (±1e-3); gamma `shape`/`scale` positive; `timePrior.binMinutes` positive; `stageLogBias` and
 `stageLogBiasShort`, when present, exactly 4 finite numbers each; a `nap` section passes every check of the main model
-(messages prefixed `nap.`). Unknown keys are ignored.
+(messages prefixed `nap.`), and its `stageLogBiasByLength`, when present, has at least one anchor, finite, positive and
+strictly increasing `lengthsMin`, one row of exactly 4 finite numbers per anchor, and no `stageLogBias` beside it.
+Unknown keys are ignored.
 A bundle whose `featureSetVersion` or `featureNames` differ from this build's `HybridFeatureExtractor` is valid but
 unusable: the estimator falls back to the HMM with `HYBRID_MODEL_UNAVAILABLE`. The `hmm` section is informational
 (the HMM always uses `AlgoParams.hmm`; the training pipeline may turn those estimates into the defaults).

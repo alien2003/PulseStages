@@ -104,6 +104,10 @@ GRIDS: dict[str, dict[str, tuple]] = {
     "small": {"durationModel": ("EXPLICIT", "GEOMETRIC"), "emissionWeight": (1.0, 0.5),
               "timePriorWeight": (1.0, 0.0)},
     "default": {"durationModel": ("EXPLICIT",), "emissionWeight": (1.0,), "timePriorWeight": (1.0,)},
+    # the evidence nap model of the realistic-nap pre-registration (docs/prereg/prereg-naps-realistic.md section
+    # 6.2): the time prior off, 8 points in the order of grid_points (ties: grid order)
+    "nap-evidence": {"durationModel": ("EXPLICIT", "GEOMETRIC"), "emissionWeight": (1.0, 0.7, 0.5, 0.3),
+                     "timePriorWeight": (0.0,)},
 }
 
 

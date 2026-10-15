@@ -32,8 +32,9 @@ import java.io.File
  * recording build does (there `estimator` applied to every session; now naps follow it while `napMode.estimator` is
  * null). The params hash is not compared: the parameters changed shape, so every hash
  * changed by design; the bundle fingerprint is compared and must be the one the old build computed. The parameters are
- * the defaults of the recording build ([PREVIOUS_DEFAULTS]: no nap decoder overrides, every stage written), so a later
- * trained nap default (TrainedDefaults `NAP_HYBRID_*`, `NAP_OUTPUT_POLICY`) does not change what is proved here.
+ * the defaults of the recording build ([PREVIOUS_DEFAULTS]: no nap decoder overrides, every stage written, the night's
+ * context), so a later trained nap default (TrainedDefaults `NAP_HYBRID_*`, `NAP_OUTPUT_POLICY`,
+ * `NAP_CONTEXT_MARGIN_MIN`) does not change what is proved here.
  */
 class NapModeRegressionTest {
     private val bundled: HybridModel by lazy {
@@ -202,11 +203,21 @@ class NapModeRegressionTest {
 
         /**
          * The defaults of the recording build: today's defaults without nap decoder overrides and without a nap
-         * estimator of its own (naps follow `estimator`), naps written as STAGES.
+         * estimator of its own (naps follow `estimator`), naps written as STAGES and read with the night's context
+         * (`napMode.contextMarginMin` null, so a later trained `TrainedDefaults.NAP_CONTEXT_MARGIN_MIN` does not change
+         * what is proved here either).
          */
         val PREVIOUS_DEFAULTS: AlgoParams =
             AlgoParams().let {
-                it.copy(napMode = it.napMode.copy(estimator = null, outputPolicy = NapOutputPolicy.STAGES, hybrid = NapHybridParams()))
+                it.copy(
+                    napMode =
+                        it.napMode.copy(
+                            estimator = null,
+                            outputPolicy = NapOutputPolicy.STAGES,
+                            hybrid = NapHybridParams(),
+                            contextMarginMin = null,
+                        ),
+                )
             }
 
         /**

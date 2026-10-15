@@ -19,6 +19,14 @@
     mise exec -- python -I tools/train/train.py nap-model-report --out-run nap-model   # re-render its report
     mise exec -- python -I tools/train/train.py nap-model-final --install-model        # its nap section + defaults
     mise exec -- python -I tools/train/train.py nap-model-verify                       # nights unchanged, new build
+    mise exec -- python -I tools/train/train.py naps-realistic-gates --out-run naps-realistic-gates   # G0-G4 (prereg)
+    mise exec -- python -I tools/train/train.py naps-realistic-timing --out-run naps-realistic-timing  # section 18
+    mise exec -- python -I tools/train/train.py naps-realistic --out-run naps-realistic  # realistic naps (prereg)
+    mise exec -- python -I tools/train/train.py naps-realistic-report --out-run naps-realistic   # re-render it
+    mise exec -- python -I tools/train/train.py naps-realistic-final --exp naps-realistic --out-run naps-realistic-final
+    mise exec -- python -I tools/train/train.py naps-realistic-external --exp naps-realistic --final ... --data ...
+    mise exec -- python -I tools/train/train.py naps-realistic-install --exp ... --final ... --external ...
+    mise exec -- python -I tools/train/train.py naps-realistic-verify --exp ... --final ... --out-run ...
 
 Features and decoding are computed by the Kotlin ``algo-cli`` (``mise exec -- ./gradlew :algo-cli:installDist``;
 override the launcher with ``--algo-cli`` or $ALGO_CLI). Reads untrusted data: run with ``python -I``.
@@ -36,7 +44,8 @@ from pathlib import Path
 TRAIN_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TRAIN_DIR))  # our own package only; `python -I` does not add the script directory
 
-from pulsetrain import bias, kotlin_defaults, loso, napmodel, naps, naps_posthoc, pipeline, robustness  # noqa: E402
+from pulsetrain import (bias, kotlin_defaults, loso, napmodel, naps, naps_posthoc, napsrealistic,  # noqa: E402
+                        pipeline, robustness)
 from pulsetrain.algocli import AlgoCliError  # noqa: E402
 from pulsetrain.bundle import BundleError  # noqa: E402
 from pulsetrain.features import FeatureFileError  # noqa: E402
@@ -48,7 +57,7 @@ from pulsetrain.util import read_json  # noqa: E402
 OUT_ROOT = TRAIN_DIR / "out"
 EXPECTED_ERRORS = (AlgoCliError, BundleError, FeatureFileError, MetricsFormatError, FileNotFoundError,
                    kotlin_defaults.DefaultsError, robustness.RobustnessError, bias.BiasError, naps.NapError,
-                   napmodel.NapModelError)
+                   napmodel.NapModelError, napsrealistic.NapsRealisticError)
 NIGHTS_ROOT = TRAIN_DIR / "data" / "nights"
 
 
@@ -209,7 +218,77 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--algo-cli", default=None)
     ph.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     _nap_model_parsers(sub)
+    _naps_realistic_parsers(sub)
     return p
+
+
+NAPS_REALISTIC = ("naps-realistic-gates", "naps-realistic-timing", "naps-realistic", "naps-realistic-report",
+                  "naps-realistic-final", "naps-realistic-external", "naps-realistic-install", "naps-realistic-verify")
+
+
+def _naps_realistic_parsers(sub) -> None:
+    """The subcommands of the pre-registered realistic-nap experiment (docs/prereg/prereg-naps-realistic.md section
+    18); each logs its START / END / RESULT lines in the commands log (default <out-root>/commands.log)."""
+    jobs = max(1, (os.cpu_count() or 2) - 2)
+    helps = {
+        "naps-realistic-gates": "reproduction-only gates G0, G1, G2, G3a, G4 (no candidate is fitted)",
+        "naps-realistic-timing": "featureless dry run of section 18 (previous bundle, one variant; timing only, NOTE)",
+        "naps-realistic": "the experiment: sessions, gates, nested inner CV, C0 / C1 / C2, LOSO, rules (i) and (ii)",
+        "naps-realistic-report": "re-render <out-run>/{summary.json,report.md} from the stored records (no algo-cli)",
+        "naps-realistic-final": "final nap section of the adopted candidate in the shipped bundle (section 14)",
+        "naps-realistic-external": "OpenNeuro ds006576: freeze check, decodes, rule (iii) (section 13)",
+        "naps-realistic-install": "apply rule (iii): install the bundle (--install-model) and write trained_defaults",
+        "naps-realistic-verify": "with the final build: nights unchanged, decodes reproduced (section 15)"}
+    for name in NAPS_REALISTIC:
+        q = sub.add_parser(name, help=helps[name])
+        q.add_argument("--out-root", type=Path, default=OUT_ROOT)
+        q.add_argument("--log", type=Path, default=None, help="commands log (default <out-root>/commands.log)")
+        if name in ("naps-realistic-report", "naps-realistic-install"):
+            if name == "naps-realistic-report":
+                q.add_argument("--out-run", default="naps-realistic")
+            else:
+                q.add_argument("--exp", default="naps-realistic")
+                q.add_argument("--final", default="naps-realistic-final")
+                q.add_argument("--external", default="naps-realistic-external")
+                q.add_argument("--install-model", action="store_true",
+                               help=f"copy an installed bundle to {APP_MODEL_PATH}")
+            continue
+        q.add_argument("--out-run", default=name)
+        q.add_argument("--run", default="bias-base", help="the night run with the fold bundles and groups (read only)")
+        q.add_argument("--naps", default="naps", help="the `naps` experiment (b_short_g(180))")
+        q.add_argument("--posthoc", default="naps-posthoc", help="`naps-posthoc` (read only)")
+        q.add_argument("--nap-model", default="nap-model", help="the `nap-model` experiment (N1; read only)")
+        q.add_argument("--g2-base", type=Path, default=None,
+                       help="saved base build references of gate G2 (default <out-root>/naps-realistic-base)")
+        q.add_argument("--previous", type=Path, default=napsrealistic.PREVIOUS_BUNDLE,
+                       help="the previous (shipped) bundle, SHA-256 583df315...")
+        q.add_argument("--nights-root", type=Path, default=NIGHTS_ROOT)
+        q.add_argument("--algo-cli", default=None)
+        q.add_argument("--jobs", type=int, default=jobs)
+        q.add_argument("--created-at", default=None, help="ISO-8601 timestamp of the bundles (default: the run's)")
+        if name == "naps-realistic-timing":
+            q.add_argument("--seeds", type=int, default=napsrealistic.FEATURELESS_SEED_CHOICES[0],
+                           choices=napsrealistic.FEATURELESS_SEED_CHOICES, help="featureless seeds 0..n-1 timed")
+        if name == "naps-realistic":
+            q.add_argument("--seeds", type=int, default=None, choices=napsrealistic.FEATURELESS_SEED_CHOICES,
+                           help="featureless seeds 0..n-1 (default: the dry run's logged decision, else 0-19; an "
+                                "explicit value must equal the logged decision; section 18)")
+            q.add_argument("--external-void", default=None, metavar="REASON",
+                           help="run without a frozen ds006576 test set (no manifest / yasa-summary NOTE pair in the "
+                                "log): the external test is void; REASON is logged before the START line")
+        if name == "naps-realistic-timing":
+            q.add_argument("--variant", default=None, help="the variant timed (default instantaneous)")
+        if name in ("naps-realistic-final", "naps-realistic-external", "naps-realistic-verify"):
+            q.add_argument("--exp", default="naps-realistic")
+        if name == "naps-realistic-final":
+            q.add_argument("--base-run", default="nap-model-final", help="run with the shipped bundle / defaults")
+        if name in ("naps-realistic-external", "naps-realistic-verify"):
+            q.add_argument("--final", default="naps-realistic-final")
+        if name == "naps-realistic-external":
+            q.add_argument("--data", type=Path, required=True, help="tools/train/data/external/ds006576")
+            q.add_argument("--lock", type=Path, default=None, help="requirements-external.lock (default: committed)")
+        if name == "naps-realistic-verify":
+            q.add_argument("--installed", type=Path, default=APP_MODEL_PATH, help="the installed bundle")
 
 
 def _nap_model_parsers(sub) -> None:
@@ -276,12 +355,108 @@ def config_from_args(a: argparse.Namespace) -> loso.PipelineConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     a = build_parser().parse_args(argv)
     try:
+        if a.cmd in NAPS_REALISTIC:
+            return _naps_realistic(a, argv)
         return _dispatch(a)
     except EXPECTED_ERRORS as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+
+
+def _naps_realistic(a: argparse.Namespace, argv: list[str]) -> int:
+    """A ``naps-realistic*`` subcommand between its START and END lines in the commands log; refused unless the
+    pre-registration NOTE is in the log (and the committed text has the registered digest)."""
+    log_path = a.log or a.out_root / "commands.log"
+    pre = napsrealistic.prereg_record(log_path)
+    if not pre["passed"]:
+        raise napsrealistic.NapsRealisticError(f"refused: the pre-registration does not match or its NOTE is not in "
+                                               f"{log_path}: {pre}")
+    rl = napsrealistic.RunLog(log_path, argv)
+    if a.cmd == "naps-realistic":          # seeds and the test-set freeze are checked before the START line
+        flight = napsrealistic.experiment_preflight(log_path, a.seeds, a.external_void)
+        a.seeds = flight["seeds"]
+        if flight["externalVoid"]:
+            rl.note(napsrealistic.external_void_note(flight["externalVoid"]))
+    rl.start()
+    rc = 1
+    try:
+        rc = _naps_realistic_run(a, rl, log_path)
+        return rc
+    except napsrealistic.GateFailure as e:
+        failed = [k for k, g in e.gates.items() if isinstance(g, dict) and g.get("passed") is False]
+        rl.result(getattr(a, "out_run", a.cmd), f"stopped by gate {', '.join(failed) or '?'}: {e}; gates.json written")
+        rc = 2
+        raise
+    except EXPECTED_ERRORS:
+        rc = 2
+        raise
+    finally:
+        rl.end(rc)
+
+
+def _naps_realistic_run(a: argparse.Namespace, rl, log_path: Path) -> int:
+    from pulsetrain.algocli import AlgoCli
+
+    nr = napsrealistic
+    if a.cmd == "naps-realistic-report":
+        res = nr.rerender(a.out_root / a.out_run)
+        rl.note(f"naps-realistic-report re-rendered {a.out_run}/summary.json and report.md: {nr.result_line(res)}")
+        print(json.dumps(res["decision"], indent=2))
+        print(a.out_root / a.out_run / "report.md")
+        return 0
+    if a.cmd == "naps-realistic-install":
+        rec = nr.install(a.out_root / a.exp, a.out_root / a.final, a.out_root / a.external,
+                         install_model=APP_MODEL_PATH if a.install_model else None)
+        rl.result(a.final, nr.install_result_line(rec))
+        print(json.dumps(rec, indent=2))
+        return 0
+    out = a.out_root / a.out_run
+    pipeline.setup_logging(out)
+    cli = AlgoCli.locate(a.algo_cli, commands_log=out / "algocli.log")
+    if a.cmd == "naps-realistic-external":
+        res = nr.external(cli, a.out_root / a.exp, a.out_root / a.final, a.data, out, log_path,
+                          previous_bundle=a.previous, lock_path=a.lock or nr.ds.LOCK_PATH)
+        rl.result(a.out_run, nr.external_result_line(res))
+        print(json.dumps(nr.naps._clean(res["ruleIII"]), indent=2))
+        print(out / "report.md")
+        return 0
+    inp = nr.Inputs(a.out_root / a.run, a.out_root / a.naps, a.out_root / a.nap_model, a.nights_root,
+                    posthoc_dir=a.out_root / a.posthoc if a.posthoc else None,
+                    g2_base=a.g2_base or a.out_root / "naps-realistic-base", previous_bundle=a.previous)
+    if a.cmd == "naps-realistic-gates":
+        g = nr.run_gates(inp, cli, out, jobs=a.jobs, created_at=a.created_at, log_path=log_path)
+        rl.result(a.out_run, "G0, G1, G2, G3a passed; G4 " + ("passed" if g["G4"]["passed"] else
+                                                              "failed (C0 would be dropped)")
+                  + f"; gates.json in out/{a.out_run}")
+        print(json.dumps({k: v.get("passed") for k, v in g.items() if isinstance(v, dict)}, indent=2))
+    elif a.cmd == "naps-realistic-timing":
+        t = nr.featureless_timing(inp, cli, out, a.jobs, seeds=a.seeds, variant=a.variant)
+        from pulsetrain.util import write_json
+        write_json(out / "timing.json", t)
+        rl.note(nr.timing_note(t))
+        print(json.dumps(t, indent=2))
+    elif a.cmd == "naps-realistic":
+        res = nr.run_experiment(inp, cli, out, jobs=a.jobs, seeds=a.seeds, created_at=a.created_at,
+                                log_path=log_path, external_void=a.external_void)
+        rl.result(a.out_run, nr.result_line(res))
+        print(json.dumps(res["decision"], indent=2))
+        print(out / "report.md")
+    elif a.cmd == "naps-realistic-final":
+        res = nr.final_model(inp, cli, a.out_root / a.exp, a.out_root / a.base_run, out, jobs=a.jobs,
+                             created_at=a.created_at, log_path=log_path)
+        rl.result(a.out_run, f"final bundle of {res['adopted'] or 'none (shipped bundle unchanged)'}"
+                             f" sha256 {res['bundleSha256']}")
+        print(json.dumps(nr.naps._clean({k: v for k, v in res.items() if k != "fit"}), indent=2))
+    elif a.cmd == "naps-realistic-verify":
+        res = nr.verify(inp, cli, a.out_root / a.exp, a.out_root / a.final, out, installed_bundle=a.installed,
+                        jobs=a.jobs, log_path=log_path)
+        rl.result(a.out_run, f"verification of {res['model']} passed: " + ", ".join(
+            k for k in res if k.startswith("item") and isinstance(res[k], dict) and res[k].get("passed")))
+        print(json.dumps(nr.naps._clean({k: v for k, v in res.items() if k not in ("algoCli", "code")}), indent=2))
+    return 0
 
 
 def _dispatch(a: argparse.Namespace) -> int:

@@ -11,7 +11,9 @@ import io.github.alien2003.pulsestages.algo.night.NightPreparer
  * already among them: cyclePhase (empty where undefined) and steps (hrNorm, hrVar, hrSlope and t are the identical
  * hybrid columns). `--nap-proxies` adds the rows of the nap proxies of every night ([NapProxies], night id
  * `<night id>-nap<L>`), the training rows of a bundle's nap model; the features are the same for nights and naps (a nap
- * model must declare the same feature set).
+ * model must declare the same feature set). A nap's rows are computed as the estimator computes them
+ * (`NightPreparer.prepare`): with `napMode.contextMarginMin` set, from its input restricted to that margin on both sides
+ * of the session and on a grid with that much context.
  */
 internal object FeaturesCommand {
     /** Columns before the features. */

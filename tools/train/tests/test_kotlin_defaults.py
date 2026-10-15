@@ -188,3 +188,26 @@ def test_invalid_nap_defaults(nap, msg):
         render({"estimator": "HYBRID", "hybrid": dict(HYBRID, shortSessionMaxMin=1.0), "napMode": {"maxSessionMin": 2.0}},
                SELECTION, "r", "2026", "x")
 
+
+
+def test_nap_context_margin_is_rendered():
+    """NAP_CONTEXT_MARGIN_MIN (docs/prereg/prereg-naps-realistic.md section 16): null unless a run chose it, a whole
+    number of minutes up to the night's preprocess.contextMarginMin otherwise, read by NapModeParams."""
+    src = render({"estimator": "HYBRID", "hybrid": HYBRID}, SELECTION, "r", "2026-10-15", "x")
+    assert "    val NAP_CONTEXT_MARGIN_MIN: Int? = null" in src
+    assert "null = the night's preprocess.contextMarginMin" in _flat(src)
+    sel = dict(SELECTION, napContextMargin={"note": "realistic-nap run: C2 installed"})
+    for v in (0, 30):
+        chosen = render({"estimator": "HYBRID", "hybrid": HYBRID, "napMode": {"contextMarginMin": v}}, sel, "r",
+                        "2026", "x")
+        assert f"    const val NAP_CONTEXT_MARGIN_MIN: Int = {v}" in chosen and "C2 installed" in _flat(chosen)
+    wide = render({"estimator": "HYBRID", "hybrid": HYBRID, "preprocess": {"contextMarginMin": 60},
+                   "napMode": {"contextMarginMin": 45}}, SELECTION, "r", "2026", "x")
+    assert "const val NAP_CONTEXT_MARGIN_MIN: Int = 45" in wide and "chosen in run r" in _flat(wide)
+    for bad in (-1, 31, 1.5, True, "0"):
+        with pytest.raises(DefaultsError, match="contextMarginMin"):
+            render({"estimator": "HYBRID", "hybrid": HYBRID, "napMode": {"contextMarginMin": bad}}, SELECTION, "r",
+                   "2026", "x")
+    kt = (kotlin_defaults.KOTLIN_PATH.parent / "NapModeParams.kt").read_text(encoding="utf-8")
+    assert "val contextMarginMin: Int? = TrainedDefaults.NAP_CONTEXT_MARGIN_MIN" in kt
+    assert "NAP_CONTEXT_MARGIN_MIN" in kotlin_defaults.KOTLIN_PATH.read_text(encoding="utf-8")

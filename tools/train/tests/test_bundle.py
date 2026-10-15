@@ -47,8 +47,13 @@ def test_bundle_keys_match_interchange_doc():
     biased = bundle.with_stage_log_bias_short(bundle.with_stage_log_bias(b, [0.1, 0.0, -0.2, 0.1]), [0.0, 0.2, 0.1, -0.3])
     full = bundle.with_nap_model(biased, bundle.nap_section(bundle.with_stage_log_bias(_make("lr"), [0.0, 0.1, 0.0, -0.1])))
     assert list(full) == list(bundle.TOP_LEVEL_KEYS)
-    assert list(full["nap"]) == list(bundle.NAP_KEYS)
-    assert _keys(full) == bundle_doc_keys()
+    assert list(full["nap"]) == [k for k in bundle.NAP_KEYS if k != "stageLogBiasByLength"]
+    # a nap section has a constant stageLogBias or a stageLogBiasByLength table, never both: the documented keys are
+    # the union of the two forms
+    table = bundle.length_bias_table([30, 60], [[0.0, 0.1, 0.0, -0.1], [0.1, 0.0, -0.1, 0.0]])
+    tabled = bundle.with_nap_model(biased, bundle.nap_section(_make("lr"), length_bias=table))
+    assert list(tabled["nap"]) == [k for k in bundle.NAP_KEYS if k != "stageLogBias"]
+    assert _keys(full) | _keys(tabled) == bundle_doc_keys()
     assert b["classOrder"] == ["AWAKE", "LIGHT", "DEEP", "REM"] and b["schemaVersion"] == 1
     assert [layer["activation"] for layer in b["classifier"]["layers"]] == ["relu", "relu", "softmax"]
 
@@ -135,7 +140,7 @@ def test_nap_section_round_trip_and_helpers(tmp_path):
     b = bundle.with_stage_log_bias_short(bundle.with_stage_log_bias(_make(), [0.1, 0.0, -0.2, 0.1]), [0.0, 0.2, 0.1, -0.3])
     nap_model = bundle.with_stage_log_bias(_make("mlp", hmm=False), [0.0, 0.3, 0.0, -0.3])
     nap = bundle.nap_section(nap_model, training={"notes": "nap model"})
-    assert list(nap) == [k for k in bundle.NAP_KEYS]
+    assert list(nap) == [k for k in bundle.NAP_KEYS if k != "stageLogBiasByLength"]   # absent: not written
     assert nap["classifier"] == nap_model["classifier"] and nap["stageLogBias"] == [0.0, 0.3, 0.0, -0.3]
     with_nap = bundle.with_nap_model(b, nap)
     assert list(with_nap)[-1] == "nap" and with_nap["stageLogBiasShort"] == b["stageLogBiasShort"]
@@ -149,3 +154,63 @@ def test_nap_section_round_trip_and_helpers(tmp_path):
     without_bias = bundle.nap_section(_make())
     assert "stageLogBias" not in without_bias
 
+
+
+# --------------------------------------------------- nap length table (docs/prereg/prereg-naps-realistic.md 6.4) ----
+
+def test_nap_length_table_round_trip_interpolation_and_absence(tmp_path):
+    anchors = [30, 60, 90, 120, 150, 170]
+    rows = [[0.1 * i, -0.05 * i, 0.02 * i, -0.07 * i] for i in range(len(anchors))]
+    table = bundle.length_bias_table(anchors, rows)
+    sec = bundle.nap_section(_make("mlp", hmm=False), length_bias=table)
+    assert list(sec)[-1] == "stageLogBiasByLength" and "stageLogBias" not in sec
+    b = bundle.with_nap_model(_make(), sec)
+    p = bundle.write_bundle(tmp_path / "t.json", b)
+    assert bundle.read_bundle(p) == b and json.loads(p.read_text())["nap"]["stageLogBiasByLength"] == table
+    assert bundle.length_bias_at(table, 60) == rows[1]                     # exactly an anchor's row
+    assert bundle.length_bias_at(table, 10) == rows[0] and bundle.length_bias_at(table, 179) == rows[-1]
+    np.testing.assert_allclose(bundle.length_bias_at(table, 75), [(a + c) / 2 for a, c in zip(rows[1], rows[2])])
+    np.testing.assert_allclose(bundle.length_bias_at(table, 160),
+                               [a + 0.5 * (c - a) for a, c in zip(rows[4], rows[5])])
+    one = bundle.length_bias_table([45], [rows[3]])
+    assert bundle.length_bias_at(one, 1) == bundle.length_bias_at(one, 500) == rows[3]
+    # absent = not written; the level can be replaced in either direction
+    plain = bundle.nap_section(_make("mlp", hmm=False))
+    assert "stageLogBiasByLength" not in plain
+    assert "stageLogBiasByLength" not in bundle.with_nap_model(_make(), plain)["nap"]
+    scal = bundle.with_nap_level(sec, bias=[0.1, 0.0, -0.1, 0.0])
+    assert scal["stageLogBias"] == [0.1, 0.0, -0.1, 0.0] and "stageLogBiasByLength" not in scal
+    back = bundle.with_nap_level(scal, length_bias=table)
+    assert back == sec and list(back) == list(sec)
+    assert "stageLogBias" not in bundle.with_nap_level(scal)
+    assert "stageLogBiasByLength" not in bundle.with_nap_level(sec)
+
+
+@pytest.mark.parametrize("table,msg", [
+    ({"lengthsMin": [], "bias": []}, "at least one"),
+    ({"lengthsMin": [60, 30], "bias": [[0, 0, 0, 0]] * 2}, "strictly increasing"),
+    ({"lengthsMin": [30, 30], "bias": [[0, 0, 0, 0]] * 2}, "strictly increasing"),
+    ({"lengthsMin": [0, 30], "bias": [[0, 0, 0, 0]] * 2}, "positive and finite"),
+    ({"lengthsMin": [30, float("inf")], "bias": [[0, 0, 0, 0]] * 2}, "positive and finite"),
+    ({"lengthsMin": [30, 60], "bias": [[0, 0, 0, 0]]}, "one row per anchor"),
+    ({"lengthsMin": [30], "bias": [[0, 0, 0]]}, r"bias\[0\] must be 4"),
+    ({"lengthsMin": [30], "bias": [[0, 0, 0, float("nan")]]}, r"bias\[0\] must be 4"),
+    ({"lengthsMin": [30]}, "exactly"),
+])
+def test_nap_length_table_validation(table, msg):
+    b = bundle.with_nap_model(_make(), bundle.nap_section(_make("mlp", hmm=False)))
+    b["nap"]["stageLogBiasByLength"] = table
+    with pytest.raises(bundle.BundleError, match=msg):
+        bundle.validate_bundle(b)
+
+
+def test_nap_length_table_is_exclusive_with_the_constant_nap_bias():
+    b = bundle.with_nap_model(_make(), bundle.nap_section(bundle.with_stage_log_bias(_make("lr"), [0.0] * 4)))
+    b["nap"]["stageLogBiasByLength"] = bundle.length_bias_table([30], [[0.0] * 4])
+    with pytest.raises(bundle.BundleError, match="mutually exclusive"):
+        bundle.validate_bundle(b)
+    with pytest.raises(bundle.BundleError, match="not both"):
+        bundle.nap_section(bundle.with_stage_log_bias(_make("lr"), [0.0] * 4),
+                           length_bias=bundle.length_bias_table([30], [[0.0] * 4]))
+    with pytest.raises(bundle.BundleError, match="not both"):
+        bundle.with_nap_level(b["nap"], bias=[0.0] * 4, length_bias=bundle.length_bias_table([30], [[0.0] * 4]))

@@ -7,7 +7,10 @@ log-bias of the scaled likelihoods fitted by the proportion matching of :mod:`pu
 nap experiment of :mod:`pulsetrain.naps`), when the bundle has no ``nap`` section. ``nap`` (optional) is a complete
 second model for naps (:data:`NAP_KEYS`: classifier, standardization, feature list, class priors, durations, bout
 transitions, initial stage, time prior, optional ``stageLogBias`` and ``training``), validated like the main model;
-core-algo decodes naps with it instead of the main model (docs/INTERCHANGE.md section 3).
+core-algo decodes naps with it instead of the main model (docs/INTERCHANGE.md section 3). The nap section may carry
+``stageLogBiasByLength`` (``{"lengthsMin": [...], "bias": [[bA, bL, bD, bR], ...]}``, the pre-registered
+realistic-nap experiment, docs/prereg/prereg-naps-realistic.md) instead of a constant ``stageLogBias``: core-algo
+interpolates the row linearly in the session length (:func:`length_bias_at`). Absent keys are never written.
 """
 
 from __future__ import annotations
@@ -30,8 +33,9 @@ TOP_LEVEL_KEYS = ("schemaVersion", "modelId", "featureSetVersion", "featureNames
 OPTIONAL_KEYS = ("hmm", "stageLogBias", "stageLogBiasShort", "nap")
 COMPONENT_KEYS = ("featureSetVersion", "featureNames", "standardization", "classifier", "classPriors", "durations",
                   "boutTransitions", "initialStage", "timePrior")
-NAP_KEYS = (*COMPONENT_KEYS, "stageLogBias", "training")       # Kotlin NapSubModel, in declaration order
-NAP_OPTIONAL_KEYS = ("stageLogBias", "training")
+NAP_KEYS = (*COMPONENT_KEYS, "stageLogBias", "training", "stageLogBiasByLength")   # Kotlin NapSubModel, in order
+NAP_OPTIONAL_KEYS = ("stageLogBias", "training", "stageLogBiasByLength")
+LENGTH_BIAS_KEYS = ("lengthsMin", "bias")                      # Kotlin LengthBiasTable
 STAGE_BIAS_KEYS = ("stageLogBias", "stageLogBiasShort")
 REQUIRED_KEYS = tuple(k for k in TOP_LEVEL_KEYS if k not in OPTIONAL_KEYS)
 TRAINING_KEYS = ("dataset", "license", "subjects", "nights", "variants", "createdAt", "notes")
@@ -239,8 +243,57 @@ def _validate_nap(nap: Any, errs: list[str]) -> None:
         v = nap["stageLogBias"]
         if not isinstance(v, list) or len(v) != N_STAGES or not all(_is_num(x) for x in v):
             errs.append(f"nap.stageLogBias must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
+    if "stageLogBiasByLength" in nap:
+        _validate_length_bias(nap["stageLogBiasByLength"], errs)
+        if "stageLogBias" in nap:
+            errs.append("nap.stageLogBias and nap.stageLogBiasByLength are mutually exclusive: a nap model has at most "
+                        "one of them")
     if "training" in nap and (not isinstance(nap["training"], Mapping) or not set(nap["training"]) <= set(TRAINING_KEYS)):
         errs.append(f"nap.training may only have {list(TRAINING_KEYS)}")
+
+
+def _validate_length_bias(t: Any, errs: list[str]) -> None:
+    """The checks of core-algo's ``HybridModelValidator`` for ``nap.stageLogBiasByLength``: at least one anchor,
+    finite, positive and strictly increasing ``lengthsMin``, one row of exactly 4 finite numbers per anchor."""
+    name = "nap.stageLogBiasByLength"
+    if not isinstance(t, Mapping) or set(t) != set(LENGTH_BIAS_KEYS):
+        errs.append(f"{name} must have exactly {list(LENGTH_BIAS_KEYS)}")
+        return
+    lengths, rows = t["lengthsMin"], t["bias"]
+    if not isinstance(lengths, list) or not lengths:
+        errs.append(f"{name}.lengthsMin needs at least one anchor length")
+        return
+    if not all(_is_num(x) and x > 0 for x in lengths):
+        errs.append(f"{name}.lengthsMin entries must be positive and finite: {lengths}")
+    elif any(b <= a for a, b in zip(lengths, lengths[1:])):
+        errs.append(f"{name}.lengthsMin must be strictly increasing: {lengths}")
+    if not isinstance(rows, list) or len(rows) != len(lengths):
+        errs.append(f"{name}.bias needs one row per anchor length ({len(lengths)})")
+        return
+    for i, row in enumerate(rows):
+        if not isinstance(row, list) or len(row) != N_STAGES or not all(_is_num(x) for x in row):
+            errs.append(f"{name}.bias[{i}] must be {N_STAGES} finite numbers (AWAKE, LIGHT, DEEP, REM)")
+
+
+def length_bias_table(lengths_min: Sequence[float], rows: Sequence[Sequence[float]]) -> dict:
+    """The ``stageLogBiasByLength`` object of anchor lengths (minutes) and one 4-number row per anchor."""
+    return {"lengthsMin": [float(x) for x in lengths_min], "bias": [[float(x) for x in r] for r in rows]}
+
+
+def length_bias_at(table: Mapping, session_min: float) -> list[float]:
+    """core-algo's ``LengthBiasTable.at``: the row of an anchor at exactly that length, linear interpolation in the
+    session length between the two anchors around it, the first / last row below the first / above the last anchor."""
+    lengths, rows = list(table["lengthsMin"]), [list(map(float, r)) for r in table["bias"]]
+    upper = next((i for i, x in enumerate(lengths) if x >= session_min), -1)
+    if upper == 0:
+        return rows[0]
+    if upper < 0:
+        return rows[-1]
+    if lengths[upper] == session_min:
+        return rows[upper]
+    lo = lengths[upper - 1]
+    w = (session_min - lo) / (lengths[upper] - lo)
+    return [a + w * (b - a) for a, b in zip(rows[upper - 1], rows[upper])]
 
 
 def _validate_hmm(h: Any, errs: list[str]) -> None:
@@ -300,16 +353,25 @@ def with_stage_log_bias_short(bundle: Mapping, bias: Sequence[float] | None) -> 
     return out
 
 
-def nap_section(model: Mapping, training: Mapping | None = None) -> dict:
+def nap_section(model: Mapping, training: Mapping | None = None, length_bias: Mapping | None = None) -> dict:
     """The ``nap`` section made of the components of the bundle ``model`` (a bundle trained on nap-length sessions,
     e.g. by :func:`build_bundle`): its classifier, standardization, feature list, class priors, durations, bout
     transitions, initial stage, time prior and ``stageLogBias`` (when it has one), plus ``training`` (default: the
-    model's)."""
+    model's) and, when given, the ``stageLogBiasByLength`` table ``length_bias`` (:func:`length_bias_table`; refused
+    together with a ``stageLogBias`` of ``model``)."""
     validate_bundle(model)
     out = {k: model[k] for k in COMPONENT_KEYS}
     if "stageLogBias" in model:
         out["stageLogBias"] = model["stageLogBias"]
     out["training"] = dict(training if training is not None else model["training"])
+    if length_bias is not None:
+        if "stageLogBias" in out:
+            raise BundleError("a nap section has a stageLogBias or a stageLogBiasByLength table, not both")
+        out["stageLogBiasByLength"] = length_bias_table(length_bias["lengthsMin"], length_bias["bias"])
+        errs: list[str] = []
+        _validate_length_bias(out["stageLogBiasByLength"], errs)
+        if errs:
+            raise BundleError("; ".join(errs))
     return out
 
 
@@ -322,6 +384,25 @@ def with_nap_model(bundle: Mapping, nap: Mapping | None) -> dict:
         out["nap"] = {k: nap[k] for k in NAP_KEYS if k in nap}
     validate_bundle(out)
     return out
+
+
+def with_nap_level(section: Mapping, bias: Sequence[float] | None = None,
+                   length_bias: Mapping | None = None) -> dict:
+    """A copy of the nap section ``section`` with its level replaced: the constant ``stageLogBias`` ``bias``, the
+    ``stageLogBiasByLength`` table ``length_bias`` (:func:`length_bias_table`), or neither (no level); both together
+    are refused. Keys in :data:`NAP_KEYS` order."""
+    if bias is not None and length_bias is not None:
+        raise BundleError("a nap section has a stageLogBias or a stageLogBiasByLength table, not both")
+    out = {k: v for k, v in section.items() if k not in ("stageLogBias", "stageLogBiasByLength")}
+    if bias is not None:
+        out["stageLogBias"] = [float(x) for x in bias]
+    if length_bias is not None:
+        out["stageLogBiasByLength"] = length_bias_table(length_bias["lengthsMin"], length_bias["bias"])
+    errs: list[str] = []
+    _validate_nap(out, errs)
+    if errs:
+        raise BundleError("invalid nap section: " + "; ".join(errs))
+    return {k: out[k] for k in NAP_KEYS if k in out}
 
 
 def write_bundle(path: Path, bundle: Mapping) -> Path:

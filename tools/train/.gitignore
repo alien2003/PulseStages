@@ -4,3 +4,4 @@ out
 .venv
 __pycache__/
 *.part
+.venv-external

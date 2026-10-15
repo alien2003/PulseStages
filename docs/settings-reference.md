@@ -33,7 +33,7 @@ Besides the values marked **yes**, the params hash covers the fingerprint of the
 - [HMM priors](#hmm-priors): Time of night, REM lockout, cycles, steps, adaptation
 - [Hybrid estimator](#hybrid-estimator): Classifier with explicit durations
 - [Post-processing](#post-processing): Minimum bouts, sanity check, calibration
-- [Naps: algorithm](#naps-algorithm): Post-processing and hybrid decoder of naps; empty = the value of nights
+- [Naps: algorithm](#naps-algorithm): Heart-rate context, post-processing and hybrid decoder of naps; empty = the value of nights
 - [Personalization](#personalization): Personal model from your nights
 - [Debugging](#debugging): Internal log
 
@@ -282,10 +282,12 @@ Minimum bouts, sanity check, calibration. Collapsed until you open it. Algorithm
 
 ## Naps: algorithm
 
-Post-processing and hybrid decoder of naps; empty = the value of nights. Collapsed until you open it. Algorithm: [ALGORITHM.md, section 18](../ALGORITHM.md#18-night-and-nap-modes-napmode).
+Heart-rate context, post-processing and hybrid decoder of naps; empty = the value of nights. Collapsed until you open it. Algorithm: [ALGORITHM.md, section 18](../ALGORITHM.md#18-night-and-nap-modes-napmode).
 
 | Setting | Key in the JSON export | Default | Allowed values | Effect | In params hash |
 |---|---|---|---|---|---|
+| **Heart rate around naps** |  |  |  |  |  |
+| Context margin of naps | `algo.napMode.contextMarginMin` | `null` (Same as nights: 30 min) | `null` (Same as nights) or a whole number: ≥ 0; ≤ `algo.preprocess.contextMarginMin` | Minutes of heart rate and steps before and after a nap that its estimate uses, at most the context margin of nights (which sets how much is read). Empty = the value of nights. 0 = only the nap itself. | yes |
 | **Post-processing of naps** |  |  |  |  |  |
 | Check the stage shares of naps | `algo.napMode.post.checkProportions` | `false` | `true`, `false` | Apply the sanity check (and the proportion calibration, when it is on) to naps too. Off by default: the whole-night ranges do not describe a nap, which often has no deep or REM sleep at all. | yes |
 | Minimum DEEP bout of naps | `algo.napMode.post.minDeepMin` | `null` (Same as nights: 5 min) | `null` (Same as nights) or a number: ≥ 0 | Shorter deep-sleep bouts of a nap are absorbed by a neighbour. Empty = the value of nights. | yes |

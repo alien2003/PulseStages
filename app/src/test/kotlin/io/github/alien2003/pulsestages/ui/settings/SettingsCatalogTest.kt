@@ -71,6 +71,7 @@ class SettingsCatalogTest {
             is IntSpec -> spec.write(s, spec.read(s) + 2)
             is DoubleSpec -> spec.write(s, spec.read(s) + 0.25)
             is OptionalDoubleSpec -> spec.write(s, (spec.read(s) ?: spec.inherited(s)) + 0.25)
+            is OptionalIntSpec -> spec.write(s, (spec.read(s) ?: spec.inherited(s)) - 1)
             is TimeSpec -> spec.write(s, (spec.read(s) + 1) % MINUTES_PER_DAY)
             is TextSpec -> spec.write(s, "Stages {version}")
             is RangeSpec -> spec.write(s, spec.readMin(s) - 0.01, spec.readMax(s) + 0.01)
@@ -86,6 +87,7 @@ class SettingsCatalogTest {
             is IntSpec -> assertEquals(spec.read(defaults) + 2, spec.read(changed), spec.path)
             is DoubleSpec -> assertTrue(abs(spec.read(defaults) + 0.25 - spec.read(changed)) < 1e-12, spec.path)
             is OptionalDoubleSpec -> assertTrue(abs(spec.inherited(defaults) + 0.25 - checkNotNull(spec.read(changed))) < 1e-12, spec.path)
+            is OptionalIntSpec -> assertEquals((spec.read(defaults) ?: spec.inherited(defaults)) - 1, spec.read(changed), spec.path)
             is TimeSpec -> assertEquals((spec.read(defaults) + 1) % MINUTES_PER_DAY, spec.read(changed), spec.path)
             is TextSpec -> assertEquals("Stages {version}", spec.read(changed), spec.path)
             is RangeSpec -> assertTrue(spec.readMin(changed) < spec.readMin(defaults) && spec.readMax(changed) > spec.readMax(defaults))
@@ -183,7 +185,30 @@ class SettingsCatalogTest {
             naps.items.specs().map { it.path },
         )
         val algorithm = SettingsCatalog.sections.single { it.id == "naps_algorithm" }
-        assertTrue(algorithm.items.specs().all { it.path.startsWith("algo.napMode.post.") || it.path.startsWith("algo.napMode.hybrid.") })
+        val algorithmPaths = algorithm.items.specs().map { it.path }
+        assertEquals("algo.napMode.contextMarginMin", algorithmPaths.first())
+        assertTrue(algorithmPaths.drop(1).all { it.startsWith("algo.napMode.post.") || it.startsWith("algo.napMode.hybrid.") })
+    }
+
+    @Test
+    fun `the nap context margin is an optional whole number of minutes, at most the night's margin`() {
+        val spec = checkNotNull(SettingsCatalog.spec("algo.napMode.contextMarginMin")) as OptionalIntSpec
+        assertEquals(TrainedDefaults.NAP_CONTEXT_MARGIN_MIN, spec.read(defaults), "the trained default (null = the night's)")
+        assertEquals(defaults.algo.preprocess.contextMarginMin, spec.inherited(defaults))
+        assertEquals(0..defaults.algo.preprocess.contextMarginMin, spec.range(defaults))
+        val wider = defaults.copy(algo = defaults.algo.copy(preprocess = defaults.algo.preprocess.copy(contextMarginMin = 60)))
+        assertEquals(0..60, spec.range(wider), "the accepted range follows the night's margin")
+        assertEquals(60, spec.inherited(wider))
+        // The range is the validators' range.
+        for (base in listOf(defaults, wider)) {
+            val range = spec.range(base)
+            assertTrue(SettingsChecks.validate(spec.write(base, range.first)).isEmpty())
+            assertTrue(SettingsChecks.validate(spec.write(base, range.last)).isEmpty())
+            assertTrue(SettingsChecks.validate(spec.write(base, null)).isEmpty())
+            assertEquals(listOf(spec.path), SettingsChecks.validate(spec.write(base, range.last + 1)).map { it.path })
+            assertEquals(listOf(spec.path), SettingsChecks.validate(spec.write(base, range.first - 1)).map { it.path })
+        }
+        assertEquals(UNIT_MIN, spec.unit)
     }
 
     private companion object {

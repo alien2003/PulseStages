@@ -2,6 +2,7 @@ package io.github.alien2003.pulsestages.algo
 
 import io.github.alien2003.pulsestages.algo.night.PreparedNight
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.json.Json
@@ -50,9 +51,13 @@ class ParamsHasherTest {
     private fun mutate(leaf: Leaf): JsonPrimitive {
         val value = leaf.value
         return when {
-            // A null nap override ("the night's value"): any value is a change.
+            // A null nap override ("the night's value"): any value of its type is a change.
             value is JsonNull && leaf.descriptor.kind == SerialKind.ENUM -> {
                 JsonPrimitive(leaf.descriptor.getElementName(0))
+            }
+
+            value is JsonNull && leaf.descriptor.kind == PrimitiveKind.INT -> {
+                JsonPrimitive(1)
             }
 
             value is JsonNull -> {

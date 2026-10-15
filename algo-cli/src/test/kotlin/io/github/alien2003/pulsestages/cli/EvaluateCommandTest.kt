@@ -15,6 +15,7 @@ import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.DurationModel
 import io.github.alien2003.pulsestages.algo.params.HmmParams
 import io.github.alien2003.pulsestages.algo.params.HybridParams
+import io.github.alien2003.pulsestages.algo.params.TrainedDefaults
 import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
 import io.github.alien2003.pulsestages.algo.testing.NapModels
 import io.github.alien2003.pulsestages.algo.testing.SyntheticHybridModels
@@ -24,6 +25,7 @@ import io.github.alien2003.pulsestages.cli.CliTestSupport.readJson
 import io.github.alien2003.pulsestages.cli.CliTestSupport.record
 import io.github.alien2003.pulsestages.cli.CliTestSupport.writeModel
 import io.github.alien2003.pulsestages.cli.CliTestSupport.writeNights
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
@@ -489,6 +491,98 @@ class EvaluateCommandTest {
         ok("evaluate", "--nights", nights, "--fold-models", folds.toString(), "--nap-proxies", "60", "--out", plain.toString())
         assertTrue(readJson(plain).obj("byMode").obj("NAP") != readJson(out).obj("byMode").obj("NAP"))
         assertEquals(readJson(plain).obj("byMode").obj("NIGHT"), readJson(out).obj("byMode").obj("NIGHT"), "nights do not change")
+    }
+
+    /** [proxy] without anything outside its session (heart rate at start ≤ t ≤ end, steps ending in (start, end]). */
+    private fun withoutContext(proxy: NightRecord): NightRecord {
+        val start = proxy.input.sessionStartMs
+        val end = proxy.input.sessionEndMs
+        return proxy.copy(
+            input =
+                proxy.input.copy(
+                    heartRate = proxy.input.heartRate.filter { it.timeMs in start..end },
+                    steps = proxy.input.steps.filter { it.endMs > start && it.endMs <= end },
+                ),
+        )
+    }
+
+    @Test
+    fun `napMode contextMarginMin restricts the naps only, in a grid and in the features`() {
+        val model = writeModel(dir.resolve("model.json"))
+        val nights = nightsDir().toString()
+        val grid =
+            Files.writeString(
+                dir.resolve("margin-grid.json"),
+                """[{"napMode": {"contextMarginMin": null}}, {"napMode": {"contextMarginMin": 0}}, {}]""",
+            )
+        val out = dir.resolve("margin-grid-out.json")
+        val perEpoch = dir.resolve("margin-per-epoch.csv")
+        val common = arrayOf("--model", model.toString(), "--nap-proxies", "30,90", "--param-grid", grid.toString())
+        ok("evaluate", "--nights", nights, *common, "--out", out.toString(), "--per-epoch", perEpoch.toString())
+        val blocks = checkNotNull(readJson(out)["grid"]).jsonArray.map { it.jsonObject }
+        assertEquals(JsonNull, blocks[0].obj("params").obj("napMode")["contextMarginMin"], "null: the night's margin")
+        assertEquals(0, blocks[1].obj("params").obj("napMode").int("contextMarginMin"))
+        // The defaults (entry {}) decode like the entry of the trained default.
+        val trained = if (TrainedDefaults.NAP_CONTEXT_MARGIN_MIN == null) blocks[0] else blocks[1]
+        assertTrue(TrainedDefaults.NAP_CONTEXT_MARGIN_MIN in listOf(null, 0))
+        assertEquals(trained.obj("pooled"), blocks[2].obj("pooled"), "the default is the trained default")
+
+        // Nights are identical in every entry; the proxies (30 min of heart rate before the start) change with margin 0.
+        fun perNight(block: JsonObject): Map<String, JsonObject> =
+            checkNotNull(block["perNight"]).jsonArray.associate { checkNotNull(it.jsonObject["id"]).jsonPrimitive.content to it.jsonObject }
+        val plain = perNight(blocks[0])
+        val zero = perNight(blocks[1])
+        for (record in records) assertEquals(plain.getValue(record.id), zero.getValue(record.id), record.id)
+        assertEquals(blocks[0].obj("byMode").obj("NIGHT"), blocks[1].obj("byMode").obj("NIGHT"))
+        assertTrue(blocks[0].obj("byMode").obj("NAP") != blocks[1].obj("byMode").obj("NAP"), "margin 0 changes the proxies")
+        val rows = Files.readAllLines(perEpoch).drop(1).groupBy({ it.substringBefore(',') }, { it.substringAfter(',') })
+        val nightRows = { g: String -> checkNotNull(rows[g]).filter { row -> records.any { row.startsWith("${it.id},") } } }
+        assertEquals(nightRows("0"), nightRows("1"), "per-epoch rows of the nights are byte-identical")
+
+        // With margin 0 a proxy decodes, and has the features, of the same proxy without its context.
+        val proxies = records.flatMap { r -> listOf(30.0, 90.0).mapNotNull { NapProxies.cut(r, it) } }
+        val cut = writeNights(dir.resolve("cut-proxies"), proxies.map { withoutContext(it) }).toString()
+        val margin0 = Files.writeString(dir.resolve("margin0.json"), """{"napMode": {"contextMarginMin": 0}}""").toString()
+        val cutOut = dir.resolve("cut-out.json")
+        ok("evaluate", "--nights", cut, "--model", model.toString(), "--params", margin0, "--out", cutOut.toString())
+        val cutPerNight = perNight(readJson(cutOut))
+        for (proxy in proxies) assertEquals(zero.getValue(proxy.id), cutPerNight.getValue(proxy.id), proxy.id)
+        val features = dir.resolve("features.csv")
+        ok("features", "--nights", nights, "--nap-proxies", "30,90", "--params", margin0, "--out", features.toString())
+        val cutFeatures = dir.resolve("cut-features.csv")
+        ok("features", "--nights", cut, "--params", margin0, "--out", cutFeatures.toString())
+        val proxyIds = proxies.map { it.id }.toSet()
+        val proxyRows =
+            Files
+                .readAllLines(features)
+                .drop(1)
+                .filter { it.substringBefore(',') in proxyIds }
+                .sorted()
+        assertEquals(Files.readAllLines(cutFeatures).drop(1).sorted(), proxyRows)
+        assertTrue(proxyRows.isNotEmpty())
+    }
+
+    @Test
+    fun `a nap context margin above the night's context margin is refused`() {
+        val nights = nightsDir().toString()
+        val out = dir.resolve("refused.json").toString()
+        val wider = Files.writeString(dir.resolve("wider.json"), """{"napMode": {"contextMarginMin": 31}}""")
+        val refused = cli("evaluate", "--nights", nights, "--out", out, "--params", wider.toString())
+        assertEquals(ExitCodes.DATA_ERROR, refused.code)
+        assertTrue(
+            refused.err.contains("napMode.contextMarginMin") && refused.err.contains("preprocess.contextMarginMin (30)"),
+            refused.err,
+        )
+        val negative = Files.writeString(dir.resolve("negative-grid.json"), """[{}, {"napMode": {"contextMarginMin": -1}}]""")
+        val badEntry = cli("evaluate", "--nights", nights, "--out", out, "--param-grid", negative.toString())
+        assertEquals(ExitCodes.DATA_ERROR, badEntry.code)
+        assertTrue(badEntry.err.contains("grid entry 1") && badEntry.err.contains("napMode.contextMarginMin"), badEntry.err)
+        val both =
+            Files.writeString(
+                dir.resolve("both.json"),
+                """{"preprocess": {"contextMarginMin": 60}, "napMode": {"contextMarginMin": 60}}""",
+            )
+        ok("evaluate", "--nights", nights, "--out", out, "--params", both.toString())
     }
 
     @Test

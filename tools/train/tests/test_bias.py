@@ -71,6 +71,66 @@ def test_fixed_point_backtracks_and_stops_early():
     assert fit0["decodes"] == 1 and fit0["bias"] == [0.0, 0.0, 0.0, 0.0]
 
 
+def _table_decoder(specs):
+    """decode(rows) for several anchors, each a toy decoder of its own (``specs``: anchor -> (truth counts, scale,
+    seed)) on weighted sessions: the epochs are split into sessions with fixed weights, the weighted pooled matrix of
+    every anchor is returned."""
+    decs = {a: _toy_decoder(truth_counts=c, scale=sc, seed=sd) for a, (c, sc, sd) in specs.items()}
+    calls = []
+
+    def decode(rows):
+        calls.append({a: np.array(r, float) for a, r in rows.items()})
+        return {a: decs[a][0](rows[a]) for a in specs}
+
+    return decode, calls
+
+
+@pytest.mark.parametrize("scale", [0.5, 1.0, 3.0, 6.0])
+def test_table_with_one_anchor_and_unit_weights_is_the_fixed_point(scale):
+    fit = bias.fit_stage_bias(_toy_decoder(scale=scale)[0], max_decodes=12)
+    decode, calls = _table_decoder({60.0: ((60, 560, 140, 240), scale, 0)})
+    tab = bias.fit_stage_bias_table(decode, [60], max_decodes=12)
+    a = tab["anchors"]["60"]
+    assert tab["bias"] == [fit["bias"]] and tab["lengthsMin"] == [60.0] and len(calls) == tab["decodes"]
+    assert (a["D"], a["trueShares"], a["predShares"], a["bestIndex"], tab["decodes"]) == (
+        fit["D"], fit["trueShares"], fit["predShares"], fit["bestIndex"], fit["decodes"])
+    assert [{k: t["anchors"]["60"][k] for k in ("bias", "eta", "D", "predShares", "accepted")}
+            for t in tab["trace"]] == [{k: t[k] for k in ("bias", "eta", "D", "predShares", "accepted")}
+                                       for t in fit["trace"]]
+
+
+def test_table_anchors_run_in_lockstep_within_one_budget():
+    specs = {30.0: ((300, 500, 100, 100), 0.5, 1), 90.0: ((60, 560, 140, 240), 6.0, 2),
+             170.0: ((100, 500, 150, 250), 1.0, 3)}
+    decode, calls = _table_decoder(specs)
+    tab = bias.fit_stage_bias_table(decode, [30, 90, 170])
+    assert len(calls) == tab["decodes"] <= bias.FP_MAX_DECODES
+    assert [r for r in tab["bias"]] == [tab["anchors"][k]["bias"] for k in ("30", "90", "170")]
+    for k in ("30", "90", "170"):
+        a = tab["anchors"][k]
+        assert abs(sum(a["bias"])) < 1e-12 and a["D"] < tab["trace"][0]["anchors"][k]["D"]
+        seen = [t["anchors"][k] for t in tab["trace"] if k in t["anchors"]]
+        acc = [x["D"] for x in seen if x["accepted"]]
+        assert acc == sorted(acc, reverse=True)
+    # each anchor follows its own fixed point: the same as fitting it alone while it is active
+    for k, a in ((30.0, "30"), (90.0, "90"), (170.0, "170")):
+        alone = bias.fit_stage_bias(_toy_decoder(*specs[k])[0], max_decodes=tab["decodes"])
+        assert tab["anchors"][a]["bias"] == alone["bias"]
+    # an anchor at D <= tol keeps its row while the others move
+    exact = np.diag([10.0, 50.0, 20.0, 20.0])
+    d2, calls2 = _table_decoder({60.0: ((60, 560, 140, 240), 1.0, 0)})
+    tab2 = bias.fit_stage_bias_table(lambda rows: {**d2(rows), 30.0: exact}, [30, 60])
+    assert tab2["anchors"]["30"]["bias"] == [0.0] * 4 and all("30" not in t["anchors"] for t in tab2["trace"][1:])
+    assert all((c[30.0] == 0).all() for c in calls2)
+    assert bias.fit_stage_bias_table(lambda rows: {60.0: exact}, [60])["decodes"] == 1
+    with pytest.raises(bias.BiasError, match="distinct"):
+        bias.fit_stage_bias_table(decode, [30, 30])
+    m1 = np.array([[10, 0, 0, 0], [0, 40, 10, 0], [0, 0, 20, 0], [0, 0, 0, 20]], float)   # D > 0: a second decode
+    shifting = iter([m1, m1 + np.diag([5.0, 0.0, 0.0, 0.0])])                                  # ... with other truth
+    with pytest.raises(bias.BiasError, match="true shares"):
+        bias.fit_stage_bias_table(lambda rows: {60.0: next(shifting)}, [60])
+
+
 def test_choose_beta_rule():
     pts = [{"beta": 1.0, "kappa": 0.30, "E": 200.0}, {"beta": 0.75, "kappa": 0.295, "E": 150.0},
            {"beta": 0.5, "kappa": 0.285, "E": 100.0}, {"beta": 0.25, "kappa": 0.31, "E": 100.03},

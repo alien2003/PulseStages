@@ -29,9 +29,10 @@ import io.github.alien2003.pulsestages.algo.post.Postprocessor
  * ([DurationModel.GEOMETRIC]); then the shared post-processing.
  *
  * Naps ([SessionMode.NAP]) are decoded with the bundle's nap model ([HybridModel.nap]) when it has one: its classifier,
- * standardization, class priors, durations, bout transitions, initial distribution, time prior and log-bias; without
- * one, with the main model and its short-session bias `stageLogBiasShort` (or `stageLogBias` when that is absent),
- * exactly as before the two modes existed. Nights always use the main model.
+ * standardization, class priors, durations, bout transitions, initial distribution, time prior and log-bias (its
+ * length table at the session length when it has one, [NapSubModel.stageLogBiasByLength]); without one, with the main
+ * model and its short-session bias `stageLogBiasShort` (or `stageLogBias` when that is absent), exactly as before the
+ * two modes existed. Nights always use the main model.
  *
  * [personalModel]'s classifier bias deltas are applied when `params.personal.enabled` (and they were fitted for this
  * bundle's main classifier; never to the nap model). A bundle that does not match this build's features
@@ -78,14 +79,19 @@ class HybridEstimator(
         val personal: Boolean,
     )
 
-    /** The model that decodes a session of [mode] (see the class documentation). */
-    private fun activeModel(mode: SessionMode): ActiveModel {
+    /**
+     * The model that decodes [night] (see the class documentation). A nap model's log-bias is its length table at the
+     * session length (end − start, minutes) when it has one ([NapSubModel.stageLogBiasFor]); the classifier outputs, and
+     * so the logits cache key, do not depend on it.
+     */
+    private fun activeModel(night: PreparedNight): ActiveModel {
         val nap = model.nap
         val napNetwork = napNetwork
-        return if (mode == SessionMode.NAP && nap != null && napNetwork != null) {
-            ActiveModel(nap, napNetwork, nap.stageLogBias, model.fingerprint() + NAP_LOGITS_SUFFIX, personal = false)
+        return if (night.mode == SessionMode.NAP && nap != null && napNetwork != null) {
+            val sessionMin = (night.input.sessionEndMs - night.input.sessionStartMs) / MS_PER_MINUTE
+            ActiveModel(nap, napNetwork, nap.stageLogBiasFor(sessionMin), model.fingerprint() + NAP_LOGITS_SUFFIX, personal = false)
         } else {
-            ActiveModel(model, network, HybridEmissions.mainModelBias(model, mode), model.fingerprint(), personal = true)
+            ActiveModel(model, network, HybridEmissions.mainModelBias(model, night.mode), model.fingerprint(), personal = true)
         }
     }
 
@@ -98,7 +104,7 @@ class HybridEstimator(
                     ?.takeIf { night.mode == SessionMode.NAP }
                     ?.let { "the nap model of hybrid model '${model.modelId}' is incompatible: $it" }
         if (problem != null) return HybridAttempt.Unavailable(problem)
-        val active = activeModel(night.mode)
+        val active = activeModel(night)
         val params = night.params
         val deltas =
             personalModel
@@ -162,5 +168,8 @@ class HybridEstimator(
     private companion object {
         /** Logits cache key suffix of the nap model (the bundle fingerprint covers the nap model). */
         const val NAP_LOGITS_SUFFIX = "#nap"
+
+        /** Milliseconds per minute (the session length that selects a row of a nap length table). */
+        const val MS_PER_MINUTE = 60_000.0
     }
 }

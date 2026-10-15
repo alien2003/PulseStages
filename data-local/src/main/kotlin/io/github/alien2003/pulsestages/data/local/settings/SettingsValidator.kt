@@ -151,6 +151,25 @@ private fun Checker.checkAlgo(a: AlgoParams) {
     checkPost("$ALGO.post", a.post)
     checkPersonal("$ALGO.personal", a.personal)
     checkNapMode("$ALGO.napMode", a.napMode, a.post)
+    a.napMode.contextMarginMin?.let { checkNapContextMargin("$ALGO.napMode.contextMarginMin", it, a.preprocess.contextMarginMin) }
+}
+
+/**
+ * The context margin of naps, when set: at least 0 ([SettingsErrorCode.OUT_OF_RANGE]) and at most the night's
+ * `algo.preprocess.contextMarginMin` ([SettingsErrorCode.MIN_ABOVE_MAX]), the margin the app reads heart rate and steps
+ * with, so that a nap never uses more context than it receives.
+ */
+private fun Checker.checkNapContextMargin(
+    path: String,
+    margin: Int,
+    nightMargin: Int,
+) {
+    if (margin < 0) {
+        int(path, margin, 0..Int.MAX_VALUE, constraint = ">= 0")
+    } else {
+        val constraint = "<= $ALGO.preprocess.contextMarginMin ($nightMargin)"
+        int(path, margin, Int.MIN_VALUE..nightMargin, constraint, SettingsErrorCode.MIN_ABOVE_MAX)
+    }
 }
 
 private fun Checker.checkPreprocess(
@@ -375,12 +394,15 @@ private fun Checker.checkPersonal(
 private class Checker {
     val errors = mutableListOf<SettingsError>()
 
+    /** [value] in [range]; otherwise [code] with [constraint] (by default the range). */
     fun int(
         path: String,
         value: Int,
         range: IntRange,
+        constraint: String = "${range.first}..${range.last}",
+        code: SettingsErrorCode = SettingsErrorCode.OUT_OF_RANGE,
     ) {
-        if (value !in range) add(path, SettingsErrorCode.OUT_OF_RANGE, value.toString(), "${range.first}..${range.last}")
+        if (value !in range) add(path, code, value.toString(), constraint)
     }
 
     fun oddInt(

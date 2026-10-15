@@ -95,3 +95,72 @@ def test_logged_nap_model_prereg_is_the_committed_text_and_precedes_every_run():
     assert log[start].startswith(written)
     runs = [i for i, x in enumerate(log) if " START " in x and "train.py nap-model" in x]
     assert all(start < end < i for i in runs)                                   # no run before the pre-registration
+
+
+# ------------------------------------------------------------------- realistic nap estimates pre-registration ----
+
+import pytest  # noqa: E402
+
+from pulsetrain import ds006576, napsrealistic  # noqa: E402
+
+NR_PREREG = REPO / napsrealistic.PREREG_PATH
+NR_LOG = NR_PREREG.parent / "commands-naps-realistic.log"
+NR_RUN = re.compile(r" START .*(\btrain\.py naps-realistic|\bexternal\.py |\bexternal_stage\.py)")
+
+
+def _nr_log() -> list[str]:
+    """The committed copy of tools/train/out/commands.log (made at the code commit; absent before it)."""
+    if not NR_LOG.is_file():
+        pytest.skip(f"{NR_LOG.name} is committed with the code commit (docs/prereg/prereg-naps-realistic.md "
+                    "section 19)")
+    return NR_LOG.read_text(encoding="utf-8").splitlines()
+
+
+def test_naps_realistic_prereg_sha256_matches_the_code():
+    digest = hashlib.sha256(NR_PREREG.read_bytes()).hexdigest()
+    assert digest == napsrealistic.PREREG_SHA256 == ds006576.PREREG_SHA256
+    assert (NR_PREREG.parent / "prereg-naps-realistic.md.sha256").read_text().split() == [digest, NR_PREREG.name]
+
+
+def test_naps_realistic_prereg_sha256_is_logged():
+    digest = hashlib.sha256(NR_PREREG.read_bytes()).hexdigest()
+    assert any(f" NOTE prereg-naps-realistic.md sha256 {digest}" in x for x in _nr_log())
+
+
+NR_GATES = re.compile(r" START .*\btrain\.py naps-realistic-(gates|timing)\b")
+
+
+def _nr_block(log: list[str], head: str, digest: str) -> tuple[int, int, list[str]]:
+    """The logged text between the line containing ``head`` and the NOTE line with ``digest``."""
+    start = next(i for i, x in enumerate(log) if head in x)
+    end = next(i for i, x in enumerate(log) if i > start and f" NOTE prereg-naps-realistic.md sha256 {digest}" in x)
+    return start, end, [x[2:] if x.startswith("  ") else x for x in log[start + 1:end]]
+
+
+def test_logged_naps_realistic_prereg_and_its_amendment_precede_every_run():
+    """The original text (the pre-registration commit 52517a7) is logged verbatim before every run; Amendment 1 (the
+    committed text) is logged verbatim after the reproduction-only gates and the featureless timing and before every
+    other naps-realistic run and every ds006576 step (section 19 and 'Amendment 1' of the text)."""
+    log = _nr_log()
+    start, end, original = _nr_block(log, " PRE-REGISTRATION naps-realistic ", napsrealistic.ORIGINAL_PREREG_SHA256)
+    original_text = "\n".join(original) + "\n"
+    assert hashlib.sha256(original_text.encode("utf-8")).hexdigest() == napsrealistic.ORIGINAL_PREREG_SHA256
+    a_start, a_end, amended = _nr_block(log, " AMENDMENT naps-realistic 1 ", napsrealistic.PREREG_SHA256)
+    assert amended == NR_PREREG.read_text(encoding="utf-8").splitlines()       # verbatim, the committed text
+    stamp = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+    times = [m.group(1) for x in log if (m := stamp.match(x))]
+    assert times == sorted(times)                                               # append-only, in time order
+    written = re.search(r"^Written (\S+),", NR_PREREG.read_text(encoding="utf-8"), re.M).group(1)
+    assert log[start][:10] >= written[:10]
+    runs = [i for i, x in enumerate(log) if stamp.match(x) and " START " in x[:40] and NR_RUN.search(x)]
+    assert all(start < end < i for i in runs)          # no naps-realistic run and no ds006576 step before the text
+    later = [i for i in runs if not NR_GATES.search(log[i])]
+    assert all(end < a_start < a_end < i for i in later)    # only gates / timing before the amendment
+
+
+def test_naps_realistic_test_set_freeze_order_of_the_committed_log():
+    """Section 13.6: whenever the lines exist, exactly one ds006576 manifest NOTE and one yasa-summary NOTE, and the
+    order pre-registration NOTE < fetch < staging < nights < the two NOTEs < the first START of train.py
+    naps-realistic < its RESULT < the START of train.py naps-realistic-external."""
+    rec = ds006576.freeze_order(_nr_log(), prereg_sha256=napsrealistic.PREREG_SHA256, complete=False)
+    assert rec["ok"], rec["failures"]

@@ -19,6 +19,12 @@ Class weighting ``balanced`` trains with sample weights n / (4 n_c). To keep the
 divided by the training class frequencies") the exported final-layer bias is shifted by log(freq_c / eff_c), where
 eff_c is the weighted class share (0.25 when balanced): softmax(z + log r) = p_w(c|x) r_c / Σ, i.e. the posterior
 under the natural class frequencies. Without weighting the shift is 0 and the export equals predict_proba exactly.
+
+Row weights (``sample_weight``, the pre-registered realistic-nap experiment, docs/prereg/prereg-naps-realistic.md
+section 6.2): the classifier is fitted with these weights, its posterior is calibrated to the weighted class
+distribution, so the exported class priors are the weighted class frequencies and the prior shift is 0 (the export
+equals predict_proba exactly). Row weights and class weighting together are refused. Without ``sample_weight`` the
+code path is the one above, unchanged.
 """
 
 from __future__ import annotations
@@ -187,11 +193,23 @@ def verify_export(tc: TrainedClassifier, Z: np.ndarray, tol: float = EXPORT_TOLE
     return diff
 
 
-def fit_classifier(X: np.ndarray, y: np.ndarray, spec: ClassifierSpec, masked: Sequence[int] = (),
-                   verify_rows: int = 5000) -> TrainedClassifier:
-    """Fits standardization + classifier on raw features ``X`` (NaN allowed) and stage labels ``y`` (0..3)."""
-    import warnings
+def row_weights(sample_weight, n: int) -> np.ndarray:
+    """``sample_weight`` checked as one finite, non-negative weight per row with a positive sum."""
+    w = np.asarray(sample_weight, dtype=float)
+    if w.shape != (n,):
+        raise ValueError(f"sample_weight must have one weight per row ({n}), has shape {w.shape}")
+    if not np.isfinite(w).all() or (w < 0).any() or not w.sum() > 0:
+        raise ValueError("sample_weight must be finite, non-negative and not all 0")
+    return w
 
+
+def fit_classifier(X: np.ndarray, y: np.ndarray, spec: ClassifierSpec, masked: Sequence[int] = (),
+                   verify_rows: int = 5000, sample_weight: np.ndarray | None = None) -> TrainedClassifier:
+    """Fits standardization + classifier on raw features ``X`` (NaN allowed) and stage labels ``y`` (0..3).
+
+    ``sample_weight`` (one weight per row): fitted with these row weights, class priors = the weighted class
+    frequencies, prior shift 0; refused together with class weighting (``spec.class_weight`` other than ``none``).
+    None: the unweighted path (class weighting as ``spec.class_weight`` says)."""
     y = np.asarray(y).astype(np.int64)
     if X.shape[0] != y.shape[0]:
         raise ValueError("X and y lengths differ")
@@ -199,16 +217,38 @@ def fit_classifier(X: np.ndarray, y: np.ndarray, spec: ClassifierSpec, masked: S
     if not present.all() or y.min() < 0 or y.max() >= N_STAGES:
         missing = [i for i in range(N_STAGES) if not present[i]]
         raise ValueError(f"training rows must contain all 4 stages (missing indices {missing}) and only 0..3")
+    if sample_weight is not None and spec.class_weight != "none":
+        raise ValueError(f"row weights and class_weight={spec.class_weight!r} together are refused")
     st = fit_standardizer(X, masked)
     Z = st.transform_train(X)
+    if sample_weight is not None:
+        return _fit_weighted(Z, y, spec, st, row_weights(sample_weight, len(y)), verify_rows)
     sw = class_sample_weights(y, spec.class_weight)
+    model, n_iter = _fit_model(Z, y, spec, sw, st.masked)
+    priors = class_priors(y)
+    eff = class_priors(y, sw) if sw is not None else priors
+    shift = np.log(priors) - np.log(eff)
+    tc = TrainedClassifier(spec=spec, standardizer=st, layers=export_layers(model, shift), class_priors=priors,
+                           model=model, prior_shift=shift, info={"n_iter": n_iter, "rows": int(len(y))})
+    if verify_rows:
+        idx = np.linspace(0, len(y) - 1, num=min(verify_rows, len(y)), dtype=np.int64)
+        tc.info["export_max_abs_diff"] = verify_export(tc, Z[idx])
+    return tc
+
+
+def _fit_model(Z: np.ndarray, y: np.ndarray, spec: ClassifierSpec, sw: np.ndarray | None,
+               masked: Sequence[int]) -> tuple[object, int]:
+    """The sklearn model of ``spec`` fitted on standardized rows ``Z`` with sample weights ``sw`` (None = unweighted),
+    single-threaded; masked columns get exactly zero (first-layer) weights. Returns (model, iterations)."""
+    import warnings
+
     with threadpool_limits(1), warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         if spec.kind == "lr":
             model = LogisticRegression(C=spec.C, solver="lbfgs", max_iter=spec.lr_max_iter)
             model.fit(Z, y, sample_weight=sw)
-            if st.masked:
-                model.coef_[:, list(st.masked)] = 0.0
+            if masked:
+                model.coef_[:, list(masked)] = 0.0
             n_iter = int(np.max(model.n_iter_))
         elif spec.kind == "mlp":
             model = MLPClassifier(hidden_layer_sizes=spec.mlp_hidden, activation="relu", solver="adam",
@@ -217,18 +257,26 @@ def fit_classifier(X: np.ndarray, y: np.ndarray, spec: ClassifierSpec, masked: S
                                   early_stopping=True, validation_fraction=spec.mlp_validation_fraction,
                                   n_iter_no_change=spec.mlp_n_iter_no_change, random_state=spec.seed)
             model.fit(Z, y, sample_weight=sw)
-            if st.masked:
-                model.coefs_[0][list(st.masked), :] = 0.0
+            if masked:
+                model.coefs_[0][list(masked), :] = 0.0
             n_iter = int(model.n_iter_)
         else:
             raise ValueError(f"classifier kind must be lr|mlp, got {spec.kind!r}")
     if list(model.classes_) != list(range(N_STAGES)):
         raise ValueError(f"unexpected class order {model.classes_}")
-    priors = class_priors(y)
-    eff = class_priors(y, sw) if sw is not None else priors
-    shift = np.log(priors) - np.log(eff)
-    tc = TrainedClassifier(spec=spec, standardizer=st, layers=export_layers(model, shift), class_priors=priors,
-                           model=model, prior_shift=shift, info={"n_iter": n_iter, "rows": int(len(y))})
+    return model, n_iter
+
+
+def _fit_weighted(Z: np.ndarray, y: np.ndarray, spec: ClassifierSpec, st: Standardizer, w: np.ndarray,
+                  verify_rows: int) -> TrainedClassifier:
+    """The row-weighted fit of :func:`fit_classifier`: class priors = the weighted class frequencies (the distribution
+    the posterior is calibrated to), prior shift 0, so the export equals predict_proba."""
+    model, n_iter = _fit_model(Z, y, spec, w, st.masked)
+    shift = np.zeros(N_STAGES)
+    tc = TrainedClassifier(spec=spec, standardizer=st, layers=export_layers(model, shift),
+                           class_priors=class_priors(y, w), model=model, prior_shift=shift,
+                           info={"n_iter": n_iter, "rows": int(len(y)), "weighted": True,
+                                 "weightSum": float(w.sum())})
     if verify_rows:
         idx = np.linspace(0, len(y) - 1, num=min(verify_rows, len(y)), dtype=np.int64)
         tc.info["export_max_abs_diff"] = verify_export(tc, Z[idx])

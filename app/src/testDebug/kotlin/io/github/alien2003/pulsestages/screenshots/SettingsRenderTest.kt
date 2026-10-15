@@ -48,6 +48,7 @@ import io.github.alien2003.pulsestages.ui.settings.ChoiceStyle
 import io.github.alien2003.pulsestages.ui.settings.DoubleSpec
 import io.github.alien2003.pulsestages.ui.settings.IntSpec
 import io.github.alien2003.pulsestages.ui.settings.OptionalDoubleSpec
+import io.github.alien2003.pulsestages.ui.settings.OptionalIntSpec
 import io.github.alien2003.pulsestages.ui.settings.RangeSpec
 import io.github.alien2003.pulsestages.ui.settings.SettingSpec
 import io.github.alien2003.pulsestages.ui.settings.SettingsActions
@@ -304,6 +305,7 @@ class SettingsRenderTest(
             is IntSpec -> spec.unit
             is DoubleSpec -> spec.unit
             is OptionalDoubleSpec -> spec.unit
+            is OptionalIntSpec -> spec.unit
             else -> null
         }
 
@@ -377,6 +379,10 @@ class SettingsRenderTest(
 
                 is OptionalDoubleSpec -> {
                     SettingsEdit.Text(spec.path, if (typo) "0,5," else "-1000000")
+                }
+
+                is OptionalIntSpec -> {
+                    SettingsEdit.Text(spec.path, if (typo) "1x" else (spec.range(settings.current).last + 1).toString())
                 }
 
                 is TextSpec -> {

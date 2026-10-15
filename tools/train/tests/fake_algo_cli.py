@@ -9,8 +9,15 @@ decoders, in the file formats of the real Kotlin algo-cli (header layout, metric
              [--param-grid <grid.json>] --out <metrics.json> [--per-epoch <csv>]
     feature-names
 
+Like core-algo: ``napMode.contextMarginMin`` = m restricts a nap's input to heart rate of [start - m, end + m] and
+step records ending in (start - m, end + m] (a value above ``preprocess.contextMarginMin`` is refused, exit 65); the
+nap section's ``stageLogBiasByLength`` gives a nap its row interpolated in the session length; a nap with
+``napMode.outputPolicy`` SKIP is not estimated (``NAP_SKIPPED``); a night id that occurs twice is refused (exit 65);
+``--per-epoch`` writes the columns of the real CSV with toy posteriors.
+
 Environment: FAKE_ALGO_CLI_NO_GRID=1 rejects --param-grid with exit code 64 (tests the fallback);
-FAKE_ALGO_CLI_LOG=<file> appends one JSON line per call (argv).
+FAKE_ALGO_CLI_LOG=<file> appends one JSON line per call (argv); FAKE_ALGO_CLI_DEFAULTS=<json> is a parameter patch
+under every --params (the defaults of a build with other trained defaults).
 """
 
 from __future__ import annotations
@@ -33,8 +40,17 @@ EPOCH_MS = 60_000
 DEFAULT_EMISSIONS = {"awake": (2.8, 0.9), "light": (1.0, 0.45), "deep": (0.1, 0.35), "rem": (1.7, 0.55)}
 
 
+PER_EPOCH_HEADER = ["grid_index", "night_id", "subject", "epoch", "start_ms", "has_data", "label", "stage", "p_awake",
+                    "p_light", "p_deep", "p_rem"]
+DEFAULT_CONTEXT_MARGIN_MIN = 30
+
+
 class Usage(Exception):
     pass
+
+
+class DataError(Exception):
+    """Invalid input data or parameters (exit 65, like the real algo-cli)."""
 
 
 def parse_args(argv, allowed):
@@ -51,8 +67,55 @@ def parse_args(argv, allowed):
 def load_nights(path):
     p = Path(path)
     if p.is_dir():
-        return [json.loads(f.read_text()) for f in sorted(p.glob("*.night.json"))]
-    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+        nights = [json.loads(f.read_text()) for f in sorted(p.glob("*.night.json"))]
+    else:
+        nights = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    seen = {}
+    for n in nights:
+        seen[n["id"]] = seen.get(n["id"], 0) + 1
+    dup = sorted(k for k, c in seen.items() if c > 1)
+    if dup:
+        raise DataError(f"night id '{dup[0]}' occurs {seen[dup[0]]} times")
+    return nights
+
+
+def build_defaults():
+    """The parameter defaults of the build ($FAKE_ALGO_CLI_DEFAULTS, a JSON patch; empty by default)."""
+    return json.loads(os.environ.get("FAKE_ALGO_CLI_DEFAULTS") or "{}")
+
+
+def nap_margin(params):
+    """napMode.contextMarginMin (None = the night's margin), checked against preprocess.contextMarginMin."""
+    m = (params.get("napMode") or {}).get("contextMarginMin")
+    night = (params.get("preprocess") or {}).get("contextMarginMin", DEFAULT_CONTEXT_MARGIN_MIN)
+    if m is not None and not 0 <= m <= night:
+        raise DataError(f"napMode.contextMarginMin = {m}: must be >= 0 and <= preprocess.contextMarginMin ({night})")
+    return m
+
+
+def prepared(n, params):
+    """The input a session is prepared from: a nap with napMode.contextMarginMin = m keeps heart rate of
+    [start - m, end + m] and step records ending in (start - m, end + m] (core-algo NapContext.restrict)."""
+    m = nap_margin(params)
+    if m is None or not is_nap(n, params):
+        return n
+    c0, c1 = n["sessionStartMs"] - m * 60_000, n["sessionEndMs"] + m * 60_000
+    return dict(n, hr=[h for h in n["hr"] if c0 <= h[0] <= c1],
+                steps=[x for x in n.get("steps", []) if c0 < x[1] <= c1])
+
+
+def length_bias_at(table, minutes):
+    """core-algo LengthBiasTable.at."""
+    lengths, rows = table["lengthsMin"], table["bias"]
+    upper = next((i for i, x in enumerate(lengths) if x >= minutes), -1)
+    if upper == 0:
+        return rows[0]
+    if upper < 0:
+        return rows[-1]
+    if lengths[upper] == minutes:
+        return rows[upper]
+    w = (minutes - lengths[upper - 1]) / (lengths[upper] - lengths[upper - 1])
+    return [a + w * (b - a) for a, b in zip(rows[upper - 1], rows[upper])]
 
 
 def percentile(vals, q):
@@ -138,6 +201,8 @@ def cmd_features(argv):
     a = parse_args(argv, {"nights", "out", "params", "nap-proxies"})
     out = Path(a["out"])
     nights = load_nights(a["nights"])
+    params = deep_merge(build_defaults(), json.loads(Path(a["params"]).read_text()) if "params" in a else {})
+    nap_margin(params)
     if "nap-proxies" in a:
         lengths = [float(x) for x in a["nap-proxies"].split(",") if x.strip()]
         nights = nights + [p for L in lengths for p in (nap_proxy(n, int(L) if L.is_integer() else L)
@@ -146,7 +211,7 @@ def cmd_features(argv):
         w = csv.writer(f)
         w.writerow(["night_id", "subject", "epoch", "start_ms", "has_data", "label"] + FEATURE_NAMES + TRAILING)
         for n in nights:
-            for r in night_epochs(n):
+            for r in night_epochs(prepared(n, params)):
                 w.writerow([n["id"], n["subject"], r["epoch"], r["start_ms"], 1 if r["has_data"] else 0,
                             r["label"] or ""] + [fmt(v) for v in r["hybrid"]]
                            + [fmt(r["base"][BASE.index(b)]) for b in TRAILING])
@@ -188,11 +253,14 @@ def is_nap(n, params):
 
 
 def predict(n, rows, estimator, params, bundle):
+    """(stages, reason, estimator used, warnings, posteriors per epoch)."""
     warnings = []
+    if is_nap(n, params) and (params.get("napMode") or {}).get("outputPolicy") == "SKIP":
+        return None, "NAP_SKIPPED", None, warnings, None             # like SleepStager: no heart rate is read
     coverage = sum(r["has_data"] for r in rows) / max(1, len(rows))
     used = estimator
     if coverage < 0.4:
-        return None, "LOW_COVERAGE", used, warnings
+        return None, "LOW_COVERAGE", used, warnings, None
     if coverage < 0.6 and estimator != "RULES":
         used = "RULES"
         warnings.append("RULES_FALLBACK_LOW_COVERAGE")
@@ -200,6 +268,7 @@ def predict(n, rows, estimator, params, bundle):
         used = "HMM"
         warnings.append("HYBRID_MODEL_UNAVAILABLE")
     pred = []
+    post = None
     if used == "RULES":
         for r in rows:
             h, st = r["base"][0], r["base"][5]
@@ -242,28 +311,36 @@ def predict(n, rows, estimator, params, bundle):
         beta = hp.get("priorExponent", 1.0)
         nap = bundle.get("nap") if short else None
         if nap is not None:
-            bundle, bias = nap, nap.get("stageLogBias") or [0.0] * 4
+            table = nap.get("stageLogBiasByLength")
+            minutes = (n["sessionEndMs"] - n["sessionStartMs"]) / 60_000.0
+            bundle = nap
+            bias = length_bias_at(table, minutes) if table else (nap.get("stageLogBias") or [0.0] * 4)
         else:
             bias = ((bundle.get("stageLogBiasShort") or bundle.get("stageLogBias")) if short
                     else bundle.get("stageLogBias")) or [0.0] * 4
         prior = bundle["classPriors"]
         table, bm = bundle["timePrior"]["table"], bundle["timePrior"]["binMinutes"]
+        post = []
         for r in rows:
             if not r["has_data"]:
                 pred.append("LIGHT")
+                post.append([0.25] * 4)
                 continue
             p = classify(bundle, r["hybrid"])
             tp = table[min(int(r["epoch"] // bm), len(table) - 1)]
             sc = [ew * (math.log(max(p[i], 1e-300)) - beta * math.log(prior[i])) + bias[i]
                   + tw * math.log(tp[i] / prior[i]) for i in range(4)]
             pred.append(STAGES[max(range(4), key=lambda i: sc[i])])
+            post.append(softmax(sc))
         if hp.get("durationModel", "EXPLICIT") == "GEOMETRIC":
             sm = list(pred)
             for k in range(1, len(pred) - 1):
                 if pred[k - 1] == pred[k + 1] != pred[k]:
                     sm[k] = pred[k - 1]
             pred = sm
-    return pred, None, used, warnings
+    if post is None:
+        post = [[1.0 if s == st else 0.0 for s in STAGES] for st in pred]
+    return pred, None, used, warnings, post
 
 
 def kappa(c):
@@ -284,10 +361,11 @@ def deep_merge(base, patch):
 
 def evaluate_once(nights, estimator, params, model_path, fold_dir, per_epoch_rows):
     estimator = params.get("estimator", estimator)
+    nap_margin(params)
     scored, skipped = [], []
     pooled = [[0] * 4 for _ in range(4)]
     for n in nights:
-        rows = night_epochs(n)
+        rows = night_epochs(prepared(n, params))
         bundle = None
         if not n.get("labels"):
             skipped.append({"id": n["id"], "subject": n["subject"], "reason": "NO_LABELS"})
@@ -300,7 +378,7 @@ def evaluate_once(nights, estimator, params, model_path, fold_dir, per_epoch_row
             bundle = json.loads(mp.read_text())
         elif model_path:
             bundle = json.loads(Path(model_path).read_text())
-        pred, reason, used, warns = predict(n, rows, estimator, params, bundle)
+        pred, reason, used, warns, post = predict(n, rows, estimator, params, bundle)
         if pred is None:
             skipped.append({"id": n["id"], "subject": n["subject"], "reason": reason})
             continue
@@ -312,8 +390,6 @@ def evaluate_once(nights, estimator, params, model_path, fold_dir, per_epoch_row
             if 0 <= k < len(pred):
                 c[STAGES.index(st)][STAGES.index(pred[k])] += 1
                 truth_min[st] += (b - a) / 60_000
-                if per_epoch_rows is not None:
-                    per_epoch_rows.append([n["id"], a, st, pred[k]])
         est_min = dict.fromkeys(STAGES, 0.0)
         for k, p in enumerate(pred):
             a = s0 + k * EPOCH_MS
@@ -321,6 +397,10 @@ def evaluate_once(nights, estimator, params, model_path, fold_dir, per_epoch_row
         for i in range(4):
             for j in range(4):
                 pooled[i][j] += c[i][j]
+        if per_epoch_rows is not None:
+            for r, st, p in zip(rows, pred, post):
+                per_epoch_rows.append([0, n["id"], n["subject"], r["epoch"], r["start_ms"], 1 if r["has_data"] else 0,
+                                       r["label"] or "", st] + [repr(float(x)) for x in p])
         scored.append({"id": n["id"], "subject": n["subject"], "variant": n.get("variant"), "estimator": used,
                        "mode": "NAP" if is_nap(n, params) else "NIGHT",
                        "kappa": kappa(c), "scoredChunks": sum(map(sum, c)), "confusion": c,
@@ -346,7 +426,7 @@ def cmd_evaluate(argv):
     if "model" in a and "fold-models" in a:
         raise Usage("--model and --fold-models are mutually exclusive")
     nights = load_nights(a["nights"])
-    params = json.loads(Path(a["params"]).read_text()) if "params" in a else {}
+    params = deep_merge(build_defaults(), json.loads(Path(a["params"]).read_text()) if "params" in a else {})
     params = dict(params, estimator=a["estimator"])
     pe = [] if "per-epoch" in a else None
     if "param-grid" in a:
@@ -365,8 +445,8 @@ def cmd_evaluate(argv):
     Path(a["out"]).write_text(json.dumps(res))
     if pe is not None:
         with open(a["per-epoch"], "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["night_id", "start_ms", "truth", "predicted"])
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(PER_EPOCH_HEADER)
             w.writerows(pe)
 
 
@@ -388,6 +468,9 @@ def main(argv):
     except Usage as e:
         print(f"usage error: {e}", file=sys.stderr)
         return 64
+    except DataError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 65
     return 0
 
 

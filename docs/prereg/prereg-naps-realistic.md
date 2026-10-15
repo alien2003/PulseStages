@@ -398,7 +398,7 @@ The target always lies inside its own band (unit-tested). Values used below (two
 | L = 30 | 17.54 | 2.57–27.45 | 0.83–6.87 |
 | L = 45, 60, 75 | 30.69, 43.84, 56.99 | 13.00–46.43 | 0.83–18.72 |
 | L = 90, 105 | 70.15, 83.30 | 13.00–49.01 | 5.10–26.58 |
-| L = 120 / 135 / 150 / 160 / 170 | 96.45 / 109.60 / 122.76 / 131.53 / 140.29 | 11.85–48.94 / 10.43–43.07 / 9.31–38.45 / 8.69–35.89 / 8.15–33.64 | 5.70–26.58 |
+| L = 120 / 135 / 150 / 160 / 170 | 96.45 / 109.60 / 122.76 / 131.53 / 140.29 | 11.85–48.94 / 10.43–43.06 / 9.31–38.45 / 8.69–35.89 / 8.15–33.64 | 5.70–26.58 |
 | ds006576 NREM group, Table 1 TST | 49.27 | 13.00–46.43 | 0.83–18.72 |
 | ds006576 REM group, Table 1 TST | 89.91 | 13.00–49.01 | 5.10–26.58 |
 
@@ -477,7 +477,9 @@ REM ≤ 45 bound was set after two Sleep-EDF bouts with 10.5 and 11.4 % REM). Fa
 
 **Feasibility rule.** If the dual does not converge or the Kish effective sample size (Σw)² / Σw² is below 10 sessions,
 the target is replaced by T(λ) = (1 − λ) · T* + λ · T_q (T_q = the base-weighted pooled composition), with λ the
-smallest value in {0.05, 0.10, …, 1} that converges with an effective sample size ≥ 10; λ is reported. (On all 31
+smallest value in {0.05, 0.10, …, 1} that converges with an effective sample size ≥ 10; λ is reported. If no λ in
+{0.05, …, 1} converges with an effective sample size ≥ 10, the base weights (λ = 1) are used, and the length is flagged
+infeasible and reported (Amendment 1). (On all 31
 Walch subjects every anchor and mid-anchor converges without it, section 2.5.)
 
 **Pooling.** The LIT confusion matrix of a model over a set of sessions: per length, Σ_i w_i C_i (C_i = the session's
@@ -637,7 +639,9 @@ s (predicted s chunks / predicted LIGHT + DEEP + REM chunks) over the sessions o
 from the labels (true s chunks / true sleep chunks). Δ_DEEP = mean over L ∈ {60, 90} of [P̄_DEEP(EARLY, L) −
 P̄_DEEP(LATE, L)]; Δ_REM = mean over L ∈ {60, 90} of [P̄_REM(LATE, L) − P̄_REM(EARLY, L)]; Δ^true from T̄; ratio r_s =
 Δ_s / Δ_s^true. CI: 10 000 resamples with replacement (`numpy.random.default_rng(0)`) of the subjects of S_F, each drawn
-subject contributing all its MATCHED sessions; pooled shares recomputed; 95 % percentile interval. Point estimates,
+subject contributing all its MATCHED sessions; pooled shares recomputed; 95 % percentile interval. A resample in
+which a (regime, length) cell has no session or no predicted sleep, so that its Δ is undefined, counts as Δ = −∞ (it
+can only lower the interval); the number of such resamples is reported (Amendment 1). Point estimates,
 Δ^true, r and the CI use the same subjects. A model's level is the same for both regimes within one length, so a prior
 cannot produce the contrast; shares of sleep keep a model from meeting it by predicting more AWAKE in LATE windows.
 Reported: the window-share version and the version over all MATCHED sessions. BIDSleep: the same on its subjects with
@@ -671,7 +675,7 @@ both regimes.
   "all LIGHT" accuracy of the same chunks.
 - The 13.12-style rule-(ii) margin: accuracy − "all LIGHT" accuracy over O ∪ W (nap proxies v2), Walch, worse variant.
 - Prior-matched metrics (label-shift reading): per anchor cell (all pools; a session belongs to the nearest anchor,
-  boundaries 45, 75, 105, 135 and 160 min), C_k = the pooled confusion row-normalised (a row with < 20 chunks replaced
+  boundaries 45, 75, 105, 135 and 160 min; a session exactly at a boundary belongs to the cell above, Amendment 1), C_k = the pooled confusion row-normalised (a row with < 20 chunks replaced
   by the row pooled over all cells), π'_k = (A_k, (1 − A_k)(1 − D* − R*), (1 − A_k) D*, (1 − A_k) R*) with A_k the
   pooled true AWAKE share of the held-out O sessions at L_k; acc' = Σ_s π'_s C_k[s, s], q = π' C_k,
   E' = 100 Σ_j |q_j − π'_j|, κ' = (acc' − Σ π' q) / (1 − Σ π' q); means over anchors.
@@ -908,9 +912,18 @@ LightGBM classifiers inside the wheel and downloads nothing. **The classifier is
 "auto" rule selects for EEG + EOG + EMG without metadata: the last of the sorted matches of `clf_eeg+eog+emg*.joblib`).
 The lock records, as comment lines, the SHA-256 of the yasa wheel (`114d9cab…b0c9`, section 2.5) and of that classifier
 file (`3d27d440…4beb`), as obtained by the self-test of the installed environment on synthetic input, which also asserts
-the resolved file name, fails on any warning raised while the classifier unpickles (for example a scikit-learn version
-warning), and runs `predict()` and `predict_proba()` twice on synthetic EEG requiring identical output hashes. At
-staging, a different yasa version, wheel digest or classifier digest makes the external test **void**. Applied to the
+the resolved file name, fails on any warning raised while the classifier unpickles except exactly one scikit-learn
+`InconsistentVersionWarning` for the classifier's `LabelEncoder` pickled with scikit-learn 0.24.2 (no scikit-learn that
+installs on Python ≥ 3.10, which YASA 0.7.0 requires, unpickles it silently; that warning is recorded in every stage
+file and in the manifest, and every predicted label must equal the classifier's class at the arg-max of
+`predict_proba`, the decoding the `LabelEncoder` performs; Amendment 1), and runs `predict()` and `predict_proba()`
+twice on synthetic EEG requiring identical output hashes. At staging, a different yasa version, wheel digest or
+classifier digest makes the external test **void**. LightGBM's Linux wheel needs the OpenMP runtime `libgomp.so.1`,
+which is not a pip dependency: libgomp1 14.2.0-4ubuntu2~24.04.1 (Ubuntu 24.04; `.deb` SHA-256
+`e8a95ec58125b4933597f30ff56c2ae10edf90f287262e366d4b6edea3019144`, library SHA-256
+`135f3c8f006d2fe5e68e51281c7974cb991a03de3bfb3593d68d174dfcf854d1`, both recorded in the lock as comment lines) is
+extracted into `tools/train/.venv-external/openmp/` and loaded by the stager before LightGBM; a different library
+digest makes the external test void, like a wheel digest (Amendment 1). Applied to the
 whole recording (time 0 to the end of the last complete 30-s epoch) on an MNE `RawArray` of the 128-Hz derivations in
 volts: `yasa.SleepStaging` with the EEG = the central derivation, EOG = `LOC-A2`, EMG = `EMG1-EMG2`, no metadata;
 `predict()` and `predict_proba()`. The central derivation is C3−A2 or C4−A1, whichever has the lower median over 30-s
@@ -1020,7 +1033,8 @@ Operational definitions (they govern):
 - **Void** (per model): fewer than 19 usable recordings in the NREM group, the REM group (oh windows) or the complete
   WAKE recordings (rec windows), in either variant — 19 = ⌈0.9 × 21⌉, at least 90 % of the 21 complete recordings of
   each group —; or YASA unavailable, a version / wheel / classifier / manifest / summary digest mismatch, a failed
-  snapshot pin, or a failed freeze check (section 13.6). A void test installs nothing new and demotes nothing.
+  snapshot pin, or a failed freeze check (section 13.6); also an OpenMP-runtime digest mismatch or an unpickle warning
+other than the one allowed in section 13.4 (Amendment 1). A void test installs nothing new and demotes nothing.
 - The demotion applies to whichever model is in effect after the installation decision (the adopted candidate, which
   passed (a)–(c), or N1, whose S decodes are always made): STAGES becomes SLEEP_WAKE if its sleep / wake κ of rule (ii)
   is ≥ 0.20, otherwise SKIP.
@@ -1194,6 +1208,11 @@ tools/train/.venv-external/bin/python -m pip download yasa==0.7.0 --no-deps -d t
 sha256sum tools/train/.venv-external/wheelhouse/yasa-0.7.0-py3-none-any.whl  # = the lock's yasa-wheel digest
 tools/train/.venv-external/bin/python -m pip install --no-deps --find-links tools/train/.venv-external/wheelhouse \
     -r tools/train/requirements-external.lock
+(cd tools/train/.venv-external/wheelhouse && apt-get download libgomp1=14.2.0-4ubuntu2~24.04.1)   # Amendment 1
+dpkg-deb -x tools/train/.venv-external/wheelhouse/libgomp1_14.2.0-4ubuntu2~24.04.1_amd64.deb <tmp>
+mkdir tools/train/.venv-external/openmp
+cp <tmp>/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0 tools/train/.venv-external/openmp/libgomp.so.1   # = the lock
+tools/train/.venv-external/bin/python -I tools/train/external_stage.py --self-test
 tools/train/.venv-external/bin/python -I tools/train/external_stage.py --data tools/train/data/external/ds006576
 mise exec -- python -I tools/train/external.py nights --data tools/train/data/external/ds006576  # digests only
 # the experiment: gates, LOSO, rules (i) and (ii) for N1 and the adopted candidate
@@ -1291,6 +1310,25 @@ derivations about 2 GB; raw ds006576 bytes are not stored. `--jobs` changes no r
   values known.
 - Night windows are not naps: LATE windows start inside sleep or after a nocturnal awakening, with nocturnal context;
   they test evidence-following, not daytime composition.
+
+## Amendment 1 (2026-10-15, after the pre-registration commit, before the code commit)
+
+The text committed as `52517a7` (SHA-256 `ff8e4c96ca9c224c6ded01a7324068cf88167b8f3e3127efc276eb0a914f22db`) was
+amended once, under the rule of section 19 (implementation details that cannot work as written; no candidate, pool,
+metric, threshold or rule changed), after the reproduction-only gates and the featureless timing had run and before
+the code commit. No candidate had been fitted or decoded and no ds006576 recording had been fetched, staged or decoded.
+The changes are marked "Amendment 1" in place:
+
+| | where | problem | change |
+|---|---|---|---|
+| A1 | 13.4, 13.8 (void), 18 | YASA 0.7.0 requires Python ≥ 3.10; its fixed classifier pickles a scikit-learn 0.24.2 `LabelEncoder`, which no installable scikit-learn unpickles without one `InconsistentVersionWarning`, so the self-test as written could never pass (external test always void). LightGBM's wheel needs the system OpenMP runtime `libgomp.so.1`, which is not a pip dependency and is absent here | exactly that one warning is allowed and recorded, with an arg-max check of the decoded labels; the OpenMP runtime is pinned by digest, loaded from the environment, and a mismatch makes the test void |
+| A2 | 7.3 | the gate-F bootstrap did not say how a resample with an empty (regime, length) cell enters the interval | it counts as Δ = −∞ (can only lower the interval) and is counted |
+| A3 | 5.5 | no outcome was named when no λ reaches an effective sample size of 10 (happens in some inner folds) | the base weights (λ = 1) are used and the length is flagged infeasible |
+| A4 | 7.5 (reported only) | the anchor cell of a session exactly at a boundary was not stated | the cell above |
+| A5 | 5.2 | the DEEP band at L = 135 was printed from the rounded t (43.07) | 43.06, the value from the unrounded t that the rules use |
+
+The amended text is logged verbatim with its new digest before the gates are run again on the committed code and
+before any step of the experiment; the original text and digest stay in the log and in the git history.
 
 ## Appendix A. Deferred covariates: local clock time and time since the main sleep (specified, not built here)
 

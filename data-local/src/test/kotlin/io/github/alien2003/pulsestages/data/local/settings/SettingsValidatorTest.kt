@@ -12,6 +12,7 @@ import io.github.alien2003.pulsestages.algo.params.NapPostprocessParams
 import io.github.alien2003.pulsestages.algo.params.PersonalParams
 import io.github.alien2003.pulsestages.algo.params.PostprocessParams
 import io.github.alien2003.pulsestages.algo.params.PreprocessParams
+import io.github.alien2003.pulsestages.algo.params.TrainedDefaults
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -249,6 +250,39 @@ class SettingsValidatorTest {
                     "$p.post.sanityDeepMax",
                 )
             },
+        )
+    }
+
+    @Test
+    fun `the nap context margin is empty or 0 up to the night's context margin`() {
+        fun margins(
+            nap: Int?,
+            night: Int = defaults.algo.preprocess.contextMarginMin,
+        ) = algo { copy(preprocess = preprocess.copy(contextMarginMin = night), napMode = napMode.copy(contextMarginMin = nap)) }
+
+        val path = "algo.napMode.contextMarginMin"
+        assertEquals(TrainedDefaults.NAP_CONTEXT_MARGIN_MIN, defaults.algo.napMode.contextMarginMin, "the trained default")
+        assertValid(defaults)
+        assertAll(
+            { assertValid(margins(null)) },
+            { assertValid(margins(0)) },
+            { assertValid(margins(30)) },
+            { assertValid(margins(60, night = 60)) },
+            { assertValid(margins(0, night = 0)) },
+            { assertRejected(margins(-1), path) },
+            { assertRejected(margins(31), path, SettingsErrorCode.MIN_ABOVE_MAX) },
+            { assertRejected(margins(30, night = 20), path, SettingsErrorCode.MIN_ABOVE_MAX) },
+        )
+        val above = SettingsValidator.validate(margins(31)).errors.single()
+        assertEquals("<= algo.preprocess.contextMarginMin (30)", above.constraint)
+        assertEquals("31", above.value)
+        assertEquals(
+            ">= 0",
+            SettingsValidator
+                .validate(margins(-1))
+                .errors
+                .single()
+                .constraint,
         )
     }
 

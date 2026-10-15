@@ -61,6 +61,7 @@ data class SettingsUiState(
             is IntSpec -> spec.read(settings).toString()
             is DoubleSpec -> formatSettingNumber(spec.read(settings))
             is OptionalDoubleSpec -> spec.read(settings)?.let(::formatSettingNumber).orEmpty()
+            is OptionalIntSpec -> spec.read(settings)?.toString().orEmpty()
             is TextSpec -> spec.read(settings).orEmpty()
             else -> ""
         }
@@ -370,6 +371,10 @@ class SettingsViewModel
                     onOptionalNumber(spec, text)
                 }
 
+                is OptionalIntSpec -> {
+                    onOptionalInt(spec, text)
+                }
+
                 is TextSpec -> {
                     apply(spec) { spec.write(it, text.takeIf { value -> value.isNotBlank() }) }
                 }
@@ -389,6 +394,19 @@ class SettingsViewModel
             when {
                 text.isBlank() -> apply(spec) { spec.write(it, null) }
                 value == null -> setProblems(spec, listOf(FieldProblem.NotANumber(integer = false)))
+                else -> apply(spec) { spec.write(it, value) }
+            }
+        }
+
+        /** An optional whole number: empty text stores null (the night's value), anything else must be a whole number. */
+        private fun onOptionalInt(
+            spec: OptionalIntSpec,
+            text: String,
+        ) {
+            val value = text.trim().toIntOrNull()
+            when {
+                text.isBlank() -> apply(spec) { spec.write(it, null) }
+                value == null -> setProblems(spec, listOf(FieldProblem.NotANumber(integer = true)))
                 else -> apply(spec) { spec.write(it, value) }
             }
         }

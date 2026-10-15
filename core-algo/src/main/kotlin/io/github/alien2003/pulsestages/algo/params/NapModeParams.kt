@@ -31,9 +31,10 @@ enum class NapOutputPolicy {
  * A nap is never compared with the nadir baseline (no elevated-HR check) and never counts for it, and is estimated
  * with [estimator] (the night's estimator when null), the bundle's nap sub-model when the bundle has one (otherwise its
  * main model with the short-session bias `stageLogBiasShort`), the night's post-processing and decoder parameters with
- * the overrides of [post] and [hybrid], and written as [outputPolicy] says. The estimator and the post-processing
- * overrides are null by default (= the night's value); the decoder overrides and the output policy default to the
- * values of the pre-registered nap-model experiment (ALGORITHM.md section 13.12) in [TrainedDefaults].
+ * the overrides of [post] and [hybrid], the heart-rate context of [contextMarginMin], and written as [outputPolicy]
+ * says. The estimator, the post-processing overrides and the context margin are null by default (= the night's value);
+ * the decoder overrides and the output policy default to the values of the pre-registered nap-model experiment
+ * (ALGORITHM.md section 13.12) in [TrainedDefaults].
  *
  * @property maxSessionMin sessions shorter than this many minutes are naps; 0 disables the nap mode (every session is a
  *   night). Replaces the three earlier thresholds `features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin` and
@@ -46,6 +47,14 @@ enum class NapOutputPolicy {
  * @property post post-processing of naps: overrides of the night's `post` values and whether the stage-share checks
  *   apply.
  * @property hybrid decoder overrides of the hybrid estimator for naps.
+ * @property contextMarginMin minutes of heart rate, steps and optional channels (SpO2, respiratory rate, HRV) used on
+ *   each side of a nap, or null for the night's `preprocess.contextMarginMin`. With a value m, a nap's input is
+ *   restricted to heart-rate and optional samples at `start − m ≤ t ≤ end + m` and to step records ending in
+ *   `(start − m, end + m]` before preprocessing, and its epoch grid has m minutes of context
+ *   ([AlgoParams.forMode]), so the estimate does not depend on what the caller read around the session (0 = the nap
+ *   itself only). At most `preprocess.contextMarginMin`, the margin the app reads. Nights never read it. The default
+ *   is [TrainedDefaults.NAP_CONTEXT_MARGIN_MIN]: null unless the pre-registered realistic-naps experiment
+ *   (docs/prereg/prereg-naps-realistic.md) installs a nap model trained without context.
  */
 @Serializable
 data class NapModeParams(
@@ -59,6 +68,7 @@ data class NapModeParams(
             emissionWeight = TrainedDefaults.NAP_HYBRID_EMISSION_WEIGHT,
             timePriorWeight = TrainedDefaults.NAP_HYBRID_TIME_PRIOR_WEIGHT,
         ),
+    val contextMarginMin: Int? = TrainedDefaults.NAP_CONTEXT_MARGIN_MIN,
 ) {
     /** [maxSessionMin] in whole milliseconds, rounded up (0 for a non-positive or undefined value: no naps). */
     val maxSessionMs: Long get() = minutesToWholeMs(maxSessionMin)

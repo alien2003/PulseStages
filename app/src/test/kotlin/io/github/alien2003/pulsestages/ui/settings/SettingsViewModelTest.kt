@@ -167,6 +167,43 @@ class SettingsViewModelTest {
             }
 
         @Test
+        fun `the nap context margin takes a whole number up to the night's margin, empty means the night's`() =
+            runTest(main.dispatcher) {
+                // Empty, whatever the trained default (TrainedDefaults.NAP_CONTEXT_MARGIN_MIN) is.
+                repository.set { it.copy(algo = it.algo.copy(napMode = it.algo.napMode.copy(contextMarginMin = null))) }
+                val vm = viewModel()
+                val path = "algo.napMode.contextMarginMin"
+                val spec = checkNotNull(SettingsCatalog.spec(path)) as OptionalIntSpec
+                assertEquals("", vm.state.value.textOf(spec), "no override: an empty field")
+                assertEquals(30, spec.inherited(repository.current))
+                assertEquals(0..30, spec.range(repository.current))
+
+                vm.onEdit(SettingsEdit.Text(path, "0"))
+                assertEquals(0, repository.current.algo.napMode.contextMarginMin)
+                assertEquals("0", vm.state.value.textOf(spec))
+                vm.onEdit(SettingsEdit.Text(path, "12.5"))
+                assertEquals(listOf(FieldProblem.NotANumber(integer = true)), vm.problemsOf(path))
+                assertEquals(0, repository.current.algo.napMode.contextMarginMin, "an invalid text is not stored")
+                vm.onEdit(SettingsEdit.Text(path, "31"))
+                val above = (vm.problemsOf(path).single() as FieldProblem.Invalid).error
+                assertEquals(SettingsErrorCode.MIN_ABOVE_MAX, above.code)
+                assertEquals("algo.preprocess.contextMarginMin", above.constraint.substringAfter("<= ").substringBefore(' '))
+                vm.onEdit(SettingsEdit.Text(path, "-1"))
+                assertEquals(SettingsErrorCode.OUT_OF_RANGE, (vm.problemsOf(path).single() as FieldProblem.Invalid).error.code)
+                vm.onEdit(SettingsEdit.Text(path, "30"))
+                assertEquals(30, repository.current.algo.napMode.contextMarginMin)
+                assertTrue(vm.problemsOf(path).isEmpty())
+                // The night's margin cannot go below a nap margin that is set.
+                vm.onEdit(SettingsEdit.Text("algo.preprocess.contextMarginMin", "20"))
+                assertEquals(30, repository.current.algo.preprocess.contextMarginMin)
+                vm.onEdit(SettingsEdit.Text(path, " "))
+                assertEquals(null, repository.current.algo.napMode.contextMarginMin, "empty again: the night's value")
+                vm.onEdit(SettingsEdit.Text("algo.preprocess.contextMarginMin", "20"))
+                assertEquals(20, repository.current.algo.preprocess.contextMarginMin)
+                assertEquals(0..20, spec.range(repository.current))
+            }
+
+        @Test
         fun `text that is not a number is rejected with the expected kind`() =
             runTest(main.dispatcher) {
                 val vm = viewModel()

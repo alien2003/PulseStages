@@ -1,0 +1,4 @@
+# The separate environment tools/train/.venv-external of the ds006576 sleep staging (external_stage.py; pre-registration
+# naps-realistic, section 13.4), never the training environment. Every dependency, its hash and the install procedure
+# (including the OpenMP runtime of LightGBM): requirements-external.lock.
+yasa==0.7.0

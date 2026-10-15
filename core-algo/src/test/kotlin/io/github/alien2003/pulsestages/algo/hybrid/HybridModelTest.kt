@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.algo.hybrid
 
 import io.github.alien2003.pulsestages.algo.Fingerprints
+import io.github.alien2003.pulsestages.algo.PreviousBundle
 import io.github.alien2003.pulsestages.algo.testing.MinimalBundles
 import io.github.alien2003.pulsestages.algo.testing.NapModels
 import kotlinx.serialization.json.Json
@@ -13,9 +14,11 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 
 class HybridModelTest {
     private val model = MinimalBundles.logreg()
@@ -261,6 +264,151 @@ class HybridModelTest {
         assertThrows(
             HybridModelException::class.java,
         ) { model.copy(nap = NapModels.from(model, stageLogBias = listOf(0.0, Double.NaN, 0.0, 0.0))) }
+    }
+
+    @Test
+    fun `the previous bundle keeps the fingerprints the base build computed before any change`() {
+        // The pins come from the logged NOTE of the base build (PreviousBundle), never from this build.
+        val digest = MessageDigest.getInstance("SHA-256").digest(PreviousBundle.bytes).joinToString("") { "%02x".format(it) }
+        assertEquals(PreviousBundle.SHA256, digest, "the test resource is the previous shipped bundle, byte for byte")
+        val previous = PreviousBundle.model
+        assertEquals(PreviousBundle.FINGERPRINT, previous.fingerprint())
+        assertEquals(PreviousBundle.NIGHT_MODEL_FINGERPRINT, previous.nightModelFingerprint())
+        assertNull(checkNotNull(previous.nap).stageLogBiasByLength)
+        // Written again, it keeps both (an absent length table is not written and not fingerprinted).
+        val rewritten = HybridModel.parse(previous.toJson())
+        assertTrue("stageLogBiasByLength" !in checkNotNull(Json.parseToJsonElement(previous.toJson()).jsonObject["nap"]).jsonObject)
+        assertEquals(PreviousBundle.FINGERPRINT, rewritten.fingerprint())
+        assertEquals(PreviousBundle.NIGHT_MODEL_FINGERPRINT, rewritten.nightModelFingerprint())
+    }
+
+    @Test
+    fun `a length table interpolates linearly between its anchors and holds the end rows outside`() {
+        val r30 = listOf(0.5, -0.25, 0.0, -0.25)
+        val r60 = listOf(-0.5, 0.25, 0.5, -0.25)
+        val r90 = listOf(0.0, 0.0, 1.0, -1.0)
+        val table = LengthBiasTable(listOf(30.0, 60.0, 90.0), listOf(r30, r60, r90))
+        assertSame(r30, table.at(30.0), "an anchor gets exactly its row")
+        assertSame(r60, table.at(60.0))
+        assertSame(r90, table.at(90.0))
+        assertSame(r30, table.at(10.0), "below the first anchor: the first row")
+        assertSame(r30, table.at(0.0))
+        assertSame(r90, table.at(179.9), "above the last anchor: the last row")
+        assertEquals(listOf(0.0, 0.0, 0.25, -0.25), table.at(45.0))
+        assertEquals(listOf(-0.25, 0.125, 0.75, -0.625), table.at(75.0))
+        val third = table.at(40.0)
+        for (s in 0 until 4) assertEquals(r30[s] + (r60[s] - r30[s]) / 3.0, third[s], 1e-12)
+        val single = LengthBiasTable(listOf(90.0), listOf(r90))
+        for (minutes in listOf(1.0, 90.0, 170.0)) assertSame(r90, single.at(minutes))
+    }
+
+    @Test
+    fun `the nap length table parses, round-trips and enters the fingerprint only when present`() {
+        val scalarNap = NapModels.from(model, stageLogBias = listOf(0.1, 0.2, -0.1, -0.2))
+        val withScalar = model.copy(nap = scalarNap)
+        // A nap section without the table keeps the canonical JSON it had before the field existed (no key at all).
+        val canonical =
+            Json {
+                encodeDefaults = true
+                explicitNulls = true
+            }
+        val full = canonical.encodeToJsonElement(HybridModel.serializer(), withScalar).jsonObject
+        val napTree = checkNotNull(full["nap"]).jsonObject
+        assertTrue("stageLogBiasByLength" in napTree && "training" in napTree)
+        val before = JsonObject(full - "stageLogBias" - "stageLogBiasShort" + ("nap" to JsonObject(napTree - "stageLogBiasByLength")))
+        assertEquals(Fingerprints.of(before), withScalar.fingerprint())
+        assertTrue("stageLogBiasByLength" !in checkNotNull(Json.parseToJsonElement(withScalar.toJson()).jsonObject["nap"]).jsonObject)
+        // A null nap stageLogBias stays in the canonical JSON, as it always did.
+        val noBias = model.copy(nap = scalarNap.copy(stageLogBias = null))
+        val noBiasTree = canonical.encodeToJsonElement(HybridModel.serializer(), noBias).jsonObject
+        val noBiasNap = checkNotNull(noBiasTree["nap"]).jsonObject - "stageLogBiasByLength"
+        val noBiasBefore = JsonObject(noBiasTree - "stageLogBias" - "stageLogBiasShort" + ("nap" to JsonObject(noBiasNap)))
+        assertEquals(Fingerprints.of(noBiasBefore), noBias.fingerprint())
+
+        val rows = listOf(listOf(0.1, 0.2, -0.1, -0.2), List(4) { 0.0 }, listOf(-0.3, 0.1, 0.1, 0.1))
+        val table = LengthBiasTable(listOf(30.0, 90.0, 170.0), rows)
+        val withTable = model.copy(nap = scalarNap.copy(stageLogBias = null, stageLogBiasByLength = table))
+        val parsed = HybridModel.parse(withTable.toJson())
+        assertEquals(withTable, parsed)
+        assertEquals(table, parsed.nap?.stageLogBiasByLength)
+        assertEquals(withTable.fingerprint(), parsed.fingerprint())
+        val reordered = HybridModel.parse(reversedKeys(Json.parseToJsonElement(withTable.toJson())).toString())
+        assertEquals(withTable.fingerprint(), reordered.fingerprint())
+        assertNotEquals(withScalar.fingerprint(), withTable.fingerprint())
+        assertNotEquals(noBias.fingerprint(), withTable.fingerprint())
+        val changed = table.copy(bias = rows.toMutableList().also { it[1] = listOf(0.0, 0.0, 0.0, 0.01) })
+        val withChanged = model.copy(nap = checkNotNull(withTable.nap).copy(stageLogBiasByLength = changed))
+        assertNotEquals(withTable.fingerprint(), withChanged.fingerprint())
+        // Nights never read the nap section: the night-model fingerprint does not see the table.
+        assertEquals(model.nightModelFingerprint(), withTable.nightModelFingerprint())
+        assertEquals(withScalar.nightModelFingerprint(), withTable.nightModelFingerprint())
+        // The bias a nap gets: the table at its length, else the constant one.
+        assertEquals(table.at(60.0), checkNotNull(withTable.nap).stageLogBiasFor(60.0))
+        assertEquals(scalarNap.stageLogBias, scalarNap.stageLogBiasFor(60.0))
+        assertNull(scalarNap.copy(stageLogBias = null).stageLogBiasFor(60.0))
+    }
+
+    @Test
+    fun `the nap length table is validated with nap-prefixed reasons and excludes a constant nap bias`() {
+        val nap = NapModels.from(model, stageLogBias = null)
+        val rows = listOf(List(4) { 0.0 }, listOf(0.1, -0.1, 0.0, 0.0))
+
+        fun withTable(table: LengthBiasTable): HybridModel = model.copy(nap = nap.copy(stageLogBiasByLength = table))
+
+        fun assertRejected(
+            table: LengthBiasTable,
+            expectedMessagePart: String,
+        ) {
+            val error = assertThrows(HybridModelException::class.java) { withTable(table) }
+            val message = error.message.orEmpty()
+            assertTrue(message.contains(expectedMessagePart), "message '$message' should contain '$expectedMessagePart'")
+        }
+
+        assertEquals(rows, withTable(LengthBiasTable(listOf(30.0, 60.0), rows)).nap?.stageLogBiasByLength?.bias)
+        assertEquals(
+            1,
+            withTable(LengthBiasTable(listOf(0.5), rows.take(1)))
+                .nap
+                ?.stageLogBiasByLength
+                ?.lengthsMin
+                ?.size,
+        )
+        val both =
+            assertThrows(HybridModelException::class.java) {
+                model.copy(nap = nap.copy(stageLogBias = List(4) { 0.0 }, stageLogBiasByLength = LengthBiasTable(listOf(30.0, 60.0), rows)))
+            }
+        assertTrue(both.message.orEmpty().contains("nap.stageLogBias and nap.stageLogBiasByLength are mutually exclusive"), both.message)
+        assertRejected(LengthBiasTable(emptyList(), emptyList()), "nap.stageLogBiasByLength.lengthsMin needs at least one anchor")
+        assertRejected(LengthBiasTable(listOf(0.0, 60.0), rows), "nap.stageLogBiasByLength.lengthsMin entries must be positive and finite")
+        assertRejected(LengthBiasTable(listOf(-30.0, 60.0), rows), "positive and finite")
+        assertRejected(LengthBiasTable(listOf(30.0, Double.NaN), rows), "positive and finite")
+        assertRejected(LengthBiasTable(listOf(30.0, Double.POSITIVE_INFINITY), rows), "positive and finite")
+        assertRejected(LengthBiasTable(listOf(60.0, 30.0), rows), "nap.stageLogBiasByLength.lengthsMin must be strictly increasing")
+        assertRejected(LengthBiasTable(listOf(30.0, 30.0), rows), "strictly increasing")
+        val anchors = listOf(30.0, 60.0)
+        assertRejected(LengthBiasTable(anchors + 90.0, rows), "nap.stageLogBiasByLength.bias needs one row per anchor length (3), has 2")
+        assertRejected(LengthBiasTable(anchors, listOf(rows[0], listOf(0.1, 0.2, 0.3))), "nap.stageLogBiasByLength.bias[1] must have 4")
+        assertRejected(LengthBiasTable(anchors, listOf(rows[0], listOf(0.0, Double.NaN, 0.0, 0.0))), "bias[1] entries must be finite")
+        // Through JSON as well; a malformed table is a malformed bundle.
+        val bundleTree = Json.parseToJsonElement(model.copy(nap = nap).toJson()).jsonObject
+
+        fun withNapKey(value: JsonElement): String {
+            val napObject = checkNotNull(bundleTree["nap"]).jsonObject
+            return JsonObject(bundleTree + ("nap" to JsonObject(napObject + ("stageLogBiasByLength" to value)))).toString()
+        }
+
+        fun tableJson(row: List<Double>): JsonObject =
+            JsonObject(
+                mapOf(
+                    "lengthsMin" to JsonArray(listOf(JsonPrimitive(30.0))),
+                    "bias" to JsonArray(listOf(JsonArray(row.map { JsonPrimitive(it) }))),
+                ),
+            )
+
+        assertInvalid(withNapKey(tableJson(listOf(0.0, 0.0, 0.0))), "nap.stageLogBiasByLength.bias[0] must have 4")
+        assertInvalid(withNapKey(JsonPrimitive("high")), "malformed")
+        val parsed = HybridModel.parse(withNapKey(tableJson(rows[1])))
+        assertEquals(LengthBiasTable(listOf(30.0), listOf(rows[1])), parsed.nap?.stageLogBiasByLength)
     }
 
     @Test

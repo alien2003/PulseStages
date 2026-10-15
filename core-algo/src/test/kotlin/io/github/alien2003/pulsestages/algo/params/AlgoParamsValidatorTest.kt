@@ -126,6 +126,31 @@ class AlgoParamsValidatorTest {
     }
 
     @Test
+    fun `the nap context margin is empty or 0 up to the night's context margin`() {
+        val base = AlgoParams()
+
+        fun margin(
+            nap: Int?,
+            night: Int = base.preprocess.contextMarginMin,
+        ) = base.copy(preprocess = base.preprocess.copy(contextMarginMin = night), napMode = base.napMode.copy(contextMarginMin = nap))
+
+        assertEquals(30, base.preprocess.contextMarginMin)
+        for (accepted in listOf(margin(null), margin(0), margin(15), margin(30), margin(60, night = 60), margin(0, night = 0))) {
+            assertTrue(paths(accepted).isEmpty(), "${accepted.napMode.contextMarginMin} with ${accepted.preprocess.contextMarginMin}")
+        }
+        val negative = AlgoParamsValidator.problems(margin(-1)).single()
+        assertEquals("napMode.contextMarginMin", negative.path)
+        assertEquals("-1", negative.value)
+        assertEquals(">= 0", negative.constraint)
+        val wider = AlgoParamsValidator.problems(margin(31)).single()
+        assertEquals("napMode.contextMarginMin = 31 (expected <= preprocess.contextMarginMin (30))", wider.toString())
+        assertEquals(listOf("napMode.contextMarginMin"), paths(margin(30, night = 20)))
+        // An invalid night margin is reported at its own path; a nap override below it is not reported again.
+        assertEquals(listOf("preprocess.contextMarginMin"), paths(margin(null, night = 241)))
+        assertEquals(listOf("preprocess.contextMarginMin"), paths(margin(240, night = 241)))
+    }
+
+    @Test
     fun `the nap threshold compares whole milliseconds rounded up`() {
         val napMode = NapModeParams(maxSessionMin = 180.0)
         assertEquals(10_800_000L, napMode.maxSessionMs)

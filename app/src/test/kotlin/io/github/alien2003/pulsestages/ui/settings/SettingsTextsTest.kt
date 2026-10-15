@@ -138,6 +138,10 @@ class SettingsTextsTest(
                             listOf("${spec.path} placeholder" to UiText.of(R.string.settings_same_as_nights_value, "0.45"))
                         }
 
+                        is OptionalIntSpec -> {
+                            listOf("${spec.path} placeholder" to UiText.of(R.string.settings_same_as_nights_value, "30"))
+                        }
+
                         else -> {
                             emptyList()
                         }
@@ -230,6 +234,7 @@ class SettingsTextsTest(
             is IntSpec -> spec.unit
             is DoubleSpec -> spec.unit
             is OptionalDoubleSpec -> spec.unit
+            is OptionalIntSpec -> spec.unit
             else -> null
         }
 
@@ -238,6 +243,7 @@ class SettingsTextsTest(
             is IntSpec -> spec.range?.let { UiText.of(R.string.bounds_range, it.first.toString(), it.last.toString()) }
             is DoubleSpec -> spec.bounds
             is OptionalDoubleSpec -> spec.bounds
+            is OptionalIntSpec -> spec.range(defaults).let { UiText.of(R.string.bounds_range, it.first.toString(), it.last.toString()) }
             else -> null
         }
 
@@ -260,6 +266,10 @@ class SettingsTextsTest(
 
             is OptionalDoubleSpec -> {
                 listOf(-1e9, -1.0, 0.0, 1e9, Double.NaN, Double.POSITIVE_INFINITY).map { spec.write(s, it) }
+            }
+
+            is OptionalIntSpec -> {
+                listOf(-1, spec.range(s).last + 1, Int.MAX_VALUE).map { spec.write(s, it) }
             }
 
             is RangeSpec -> {

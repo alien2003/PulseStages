@@ -10,10 +10,9 @@ import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.night.NightPreparer
+import io.github.alien2003.pulsestages.algo.night.PreparationKey
 import io.github.alien2003.pulsestages.algo.night.PreparedNight
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
-import io.github.alien2003.pulsestages.algo.params.FeatureParams
-import io.github.alien2003.pulsestages.algo.params.PreprocessParams
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -67,8 +66,10 @@ internal sealed interface NightResult {
  * per mode (`byMode`: NIGHT / NAP, by `napMode.maxSessionMin` of the block's parameters). With --param-grid, every
  * grid entry (a partial AlgoParams patch merged over the base parameters) produces one metrics block; nights are
  * parsed once and their preparation (preprocessing, features, hybrid features and classifier outputs) is shared by all
- * entries with the same preprocessing and feature parameters (and mode). Nights are processed in parallel; the output
- * does not depend on the scheduling.
+ * entries with the same [PreparationKey]: the same mode, the same preprocessing parameters in effect for that mode (a
+ * nap's context margin is `napMode.contextMarginMin` when set), the same feature parameters and the same nap context
+ * margin, so a grid that changes `napMode.contextMarginMin` prepares the naps again and nothing else. Nights are
+ * processed in parallel; the output does not depend on the scheduling.
  */
 internal object EvaluateCommand {
     private const val CHUNK = 64
@@ -203,14 +204,16 @@ internal object EvaluateCommand {
         if (skipReason != null || stager == null) {
             return NightEvaluation(grid.map { NightResult.Skipped(record, it.modeOf(durationMs), skipReason.orEmpty()) }, "")
         }
-        val prepared = HashMap<Pair<PreprocessParams, FeatureParams>, PreparedNight>()
+        // One preparation per PreparationKey (mode, effective preprocessing of that mode, features, nap context margin):
+        // a grid that changes only napMode.contextMarginMin prepares the naps again and shares the nights' preparation.
+        val prepared = HashMap<PreparationKey, PreparedNight>()
         val rows = StringBuilder()
         val results =
             grid.mapIndexed { g, params ->
                 val night =
                     prepared
                         .getOrPut(
-                            params.preprocess to params.features,
+                            NightPreparer.preparationKey(params, durationMs),
                         ) { NightPreparer.prepare(record.input, params) }
                         .withParams(params)
                 when (val outcome = stager.run(night)) {

@@ -27,6 +27,9 @@ max over them of the mean per-night E; candidates with kappa >= kappa(BASE) - 0.
 subjects (both headline variants) at the final decoder parameters and writes the final bundle / trained defaults.
 :func:`rerender` recomputes the summary / report (with the reporting-only pairwise comparisons, the per-code sanity
 flags, the fallback split and the inner-CV kappa losses) from the stored per-night results without algo-cli.
+
+:func:`fit_stage_bias_table` runs the same fixed point per session length (the nap ``stageLogBiasByLength`` table of
+the realistic-nap pre-registration, docs/prereg/prereg-naps-realistic.md section 6.4) within one decode budget.
 """
 
 from __future__ import annotations
@@ -125,6 +128,68 @@ def fit_stage_bias(decode: Callable[[np.ndarray], np.ndarray], *, max_decodes: i
         n += 1
     return {"bias": b.tolist(), "D": d, "trueShares": t.tolist(), "predShares": p.tolist(), "decodes": n,
             "bestIndex": best, "trace": trace}
+
+
+def fit_stage_bias_table(decode: Callable[[Mapping[float, np.ndarray]], Mapping[float, np.ndarray]],
+                         anchors: Sequence[float], *, max_decodes: int = FP_MAX_DECODES, tol: float = FP_TOLERANCE,
+                         floor: float = SHARE_FLOOR) -> dict:
+    """The per-length stage log-bias table of the realistic-nap pre-registration (docs/prereg/prereg-naps-realistic.md
+    section 6.4): the fixed point of :func:`fit_stage_bias`, unchanged, run for every anchor length in lockstep.
+
+    ``decode(rows)`` decodes every session with the table ``rows`` (anchor -> 4 log-biases; a session of exactly an
+    anchor's length gets exactly that row) and returns, per anchor, the pooled 4x4 confusion matrix of its sessions
+    (with the session weights applied, e.g. the literature weights; the weighted true shares stay constant). Every
+    anchor starts at b = 0 with eta = 1; while its D > ``tol`` it proposes b' = b + eta * ln(T / max(P, floor)),
+    centred, accepted when D(b') < D(b), otherwise its eta is halved; an anchor at D <= ``tol`` keeps its row. One call
+    of ``decode`` serves every anchor; at most ``max_decodes`` calls in total (the start included). With one anchor and
+    unit weights this is :func:`fit_stage_bias` (same proposals, acceptances, trace and result).
+
+    Returns ``lengthsMin`` and ``bias`` (the accepted rows in anchor order), per anchor (keys = the anchor as a
+    string) ``D``, ``trueShares``, ``predShares``, ``bestIndex``, ``eta``; the number of ``decodes`` and the ``trace``
+    (one entry per decode with every anchor's proposal, D, acceptance and eta)."""
+    anchors = [float(a) for a in anchors]
+    if not anchors or len(set(anchors)) != len(anchors):
+        raise BiasError(f"the table needs distinct anchor lengths, got {anchors}")
+    key = {a: f"{a:g}" for a in anchors}
+    b = {a: np.zeros(N_STAGES) for a in anchors}
+    first = decode({a: b[a].copy() for a in anchors})
+    t, p, d = {}, {}, {}
+    for a in anchors:
+        t[a], p[a] = shares(first[a])
+        d[a] = float(np.abs(t[a] - p[a]).sum())
+    eta = {a: 1.0 for a in anchors}
+    best = {a: 0 for a in anchors}
+    trace = [{"index": 0, "anchors": {key[a]: {"bias": b[a].tolist(), "eta": None, "D": d[a],
+                                               "predShares": p[a].tolist(), "accepted": True} for a in anchors}}]
+    n = 1
+    while n < max_decodes and any(d[a] > tol for a in anchors):
+        active = [a for a in anchors if d[a] > tol]
+        prop = {a: b[a].copy() for a in anchors}
+        for a in active:
+            x = b[a] + eta[a] * np.log(np.maximum(t[a], floor) / np.maximum(p[a], floor))
+            prop[a] = x - x.mean()
+        mats = decode({a: prop[a].copy() for a in anchors})
+        entry: dict = {}
+        for a in anchors:
+            t2, p2 = shares(mats[a])
+            if not np.allclose(t2, t[a], rtol=0, atol=1e-12):
+                raise BiasError(f"true shares of anchor {key[a]} changed between decodes of the same fit set")
+            if a not in active:
+                continue
+            d2 = float(np.abs(t2 - p2).sum())
+            accepted = d2 < d[a]
+            entry[key[a]] = {"bias": prop[a].tolist(), "eta": eta[a], "D": d2, "predShares": p2.tolist(),
+                             "accepted": accepted}
+            if accepted:
+                b[a], p[a], d[a], best[a] = prop[a], p2, d2, n
+            else:
+                eta[a] /= 2.0
+        trace.append({"index": n, "anchors": entry})
+        n += 1
+    per = {key[a]: {"bias": b[a].tolist(), "D": d[a], "trueShares": t[a].tolist(), "predShares": p[a].tolist(),
+                    "bestIndex": best[a], "eta": eta[a]} for a in anchors}
+    return {"lengthsMin": anchors, "bias": [b[a].tolist() for a in anchors], "anchors": per, "decodes": n,
+            "maxD": max(d.values()), "trace": trace}
 
 
 def choose_beta(points: Sequence[Mapping], ref_kappa: float, margin: float = KAPPA_MARGIN,

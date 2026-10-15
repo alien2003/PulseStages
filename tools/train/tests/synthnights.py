@@ -57,8 +57,10 @@ def make_night(night_id: str, subject: str, variant: str, rng: np.random.Generat
 
 
 def write_dataset(root: Path, n_walch: int = 6, n_bid: int = 3, bid_nights: int = 2, seed: int = 1,
-                  low_coverage_night: bool = True, long_wakes: bool = False, shared_labels: bool = False) -> Path:
-    """Writes <root>/<variant>/*.night.json for two variants, summary.csv and manifest.json; returns root."""
+                  low_coverage_night: bool = True, long_wakes: bool = False, shared_labels: bool = False,
+                  minutes: int = 200) -> Path:
+    """Writes <root>/<variant>/*.night.json for two variants (sessions of ``minutes``), summary.csv and manifest.json;
+    returns root."""
     rng = np.random.default_rng(seed)
     rows = []
     specs = []
@@ -77,8 +79,8 @@ def write_dataset(root: Path, n_walch: int = 6, n_bid: int = 3, bid_nights: int 
         for v in VARIANTS:
             nid = f"{key}-{'inst' if v == 'instantaneous' else 'mean2min'}"
             n = make_night(nid, subj, v, np.random.default_rng(night_seed + (0 if v == "instantaneous" else 7)),
-                           start_ms=start, with_steps=steps, offset=offset, coverage=cov, long_wakes=long_wakes,
-                           stages_seed=night_seed if shared_labels else None)
+                           minutes=minutes, start_ms=start, with_steps=steps, offset=offset, coverage=cov,
+                           long_wakes=long_wakes, stages_seed=night_seed if shared_labels else None)
             (root / v / f"{stem}.night.json").write_text(json.dumps(n))
             rows.append({"dataset": ds, "subject": subj, "night_id": nid, "variant": v,
                          "steps_file": str(sum(c for _, _, c in n["steps"])) if steps else ""})
@@ -113,3 +115,24 @@ def write_psg_twins(root: Path, margin_min: int = 20, seed: int = 5) -> Path:
                         steps=n["steps"] + ([[s1 + 60_000, s1 + 120_000, 12]] if n["steps"] else []))
             (root / f"{v}-psg" / f.name).write_text(json.dumps(twin))
     return root
+
+
+def labels_from_spec(spec, start_ms: int) -> list[list]:
+    """[(stage, minutes), ...] -> consecutive 30-s label epochs from ``start_ms``."""
+    out, t = [], start_ms
+    for st, m in spec:
+        for _ in range(int(round(m * 2))):
+            out.append([t, t + 30_000, st])
+            t += 30_000
+    return out
+
+
+def night_from_spec(spec, night_id: str = "walch-7-inst", subject: str = "7", start_ms: int = 3_600_000,
+                    hr_every_ms: int = 120_000, variant: str = "instantaneous", steps: list | None = None) -> dict:
+    """A night file whose OHealth-like session is exactly the labelled ``spec`` ([(stage, minutes), ...]), with a flat
+    60-bpm heart rate every ``hr_every_ms`` over [start - 30 min, end + 30 min) and the given step records."""
+    labels = labels_from_spec(spec, start_ms)
+    s1 = labels[-1][1]
+    return {"id": night_id, "subject": subject, "variant": variant, "sessionStartMs": start_ms, "sessionEndMs": s1,
+            "hr": [[t, 60.0] for t in range(start_ms - 30 * 60_000, s1 + 30 * 60_000, hr_every_ms)],
+            "steps": list(steps or []), "labels": labels}

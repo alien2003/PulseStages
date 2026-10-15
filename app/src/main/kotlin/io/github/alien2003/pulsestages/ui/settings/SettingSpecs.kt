@@ -141,6 +141,28 @@ class OptionalDoubleSpec(
 ) : SettingSpec
 
 /**
+ * A whole number that may be left empty, edited with a number field: an empty field stores null, which for the nap
+ * overrides means "the night's value"; the field then shows that value ([inherited]) as its placeholder. The accepted
+ * values may depend on other settings ([range], e.g. at most the night's value).
+ *
+ * @property read current value, or null.
+ * @property write settings with the new value (null = empty field).
+ * @property inherited the value that applies while the field is empty (the night's value).
+ * @property range the inclusive range the validators accept for the given settings (shown as the accepted values).
+ * @property unit unit shown with the value, if any.
+ */
+class OptionalIntSpec(
+    override val path: String,
+    override val title: UiText,
+    override val hint: UiText,
+    val read: (AppSettings) -> Int?,
+    val write: (AppSettings, Int?) -> AppSettings,
+    val inherited: (AppSettings) -> Int,
+    val range: (AppSettings) -> IntRange,
+    val unit: UiText? = null,
+) : SettingSpec
+
+/**
  * A local time of day in minutes after midnight, edited with a time picker.
  *
  * @property read current value.
