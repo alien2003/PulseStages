@@ -20,6 +20,7 @@ on:
       - docs/SCREENSHOTS.md
       - docs/architecture.md
       - docs/development.md
+      - docs/get-it-on-obtainium.svg
       - docs/health-connect.md
       - docs/icon.svg
       - docs/privacy.md
@@ -69,6 +70,7 @@ jobs:
               core-algo/SYNTHETIC_RESULTS.md | tools/train/DATASETS.md | tools/train/README.md) return 0 ;;
               docs/README.md | docs/SCREENSHOTS.md | docs/architecture.md | docs/development.md) return 0 ;;
               docs/health-connect.md | docs/icon.svg | docs/privacy.md | docs/screenshots/* | docs/user-guide.md) return 0 ;;
+              docs/get-it-on-obtainium.svg) return 0 ;;
               *) return 1 ;;
             esac
           }

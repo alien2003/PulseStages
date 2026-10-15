@@ -14,6 +14,7 @@ and [ALGORITHM.md §13](../ALGORITHM.md#13-results).
 - [Terms](#terms)
 - [Before you start](#before-you-start)
 - [Install](#install)
+  - [Install and update with Obtainium](#install-and-update-with-obtainium)
 - [First run](#first-run)
 - [Permissions](#permissions)
 - [Health Connect settings that matter](#health-connect-settings-that-matter)
@@ -75,6 +76,63 @@ PulseStages has no `INTERNET` permission. It cannot download anything, check for
 [privacy.md](privacy.md).
 
 ## Install
+
+PulseStages is published on the [Releases page](https://github.com/alien2003/PulseStages/releases) of its GitHub
+repository. Install it through Obtainium, which also installs every later release as an update, or download the APK
+yourself ([Release or debug APK](#release-or-debug-apk) and the sections after it).
+
+### Install and update with Obtainium
+
+[Obtainium](https://github.com/ImranR98/Obtainium) is a free, open-source Android app that installs apps from their
+release pages and installs their new releases as updates. It is a separate project: PulseStages itself has no update
+check and no internet access ([Updates](#updates)). Obtainium installs the same `PulseStages-<version>.apk` from the
+Releases page that you would download by hand.
+
+1. **Install Obtainium** from one of the sources its README lists under
+   [Installation](https://github.com/ImranR98/Obtainium#installation) (GitHub, IzzyOnDroid or F-Droid).
+2. **Add PulseStages.** Open this page on the phone and tap the button:
+
+   [![Get it on Obtainium](get-it-on-obtainium.svg)][obtainium-import]
+
+   The button opens a redirect page of Obtainium's app directory (apps.obtainium.imranr.dev), which hands the
+   settings below to Obtainium; that page loads the directory's analytics and ad scripts. Without Obtainium on the
+   phone, the page offers a link to get it. Obtainium asks "Import app" and shows the settings under "Raw JSON"; tap
+   "Continue".
+3. **Install PulseStages** from Obtainium. The first time, Android asks you to allow Obtainium to install apps. If
+   the release build of PulseStages is already installed, Obtainium recognises it and shows its version, and there is
+   nothing to install until a newer release comes out.
+
+The button gives Obtainium these settings:
+
+| Obtainium setting | Value | Why |
+|---|---|---|
+| "App source URL" | `https://github.com/alien2003/PulseStages` | The releases of this repository. |
+| "Include prereleases" | Off | Final releases only; a tag such as `v0.2.0-beta.1` is a pre-release. |
+| "Filter APKs by regular expression" | `^PulseStages-[0-9.]+\.apk$` | Each release has two APKs. This keeps `PulseStages-<version>.apk` and drops `PulseStages-<version>-debug.apk` and any `-alpha`, `-beta` or `-rc` APK. |
+| "Expected signing certificate hashes" | `ce5546e83c03eac9837b93fc2c04d2e37abd1b778c3ef9e01b67cd1602e35be5` | The "Release signing certificate SHA-256" of the release notes: Obtainium refuses an APK signed with another key. Obtainium 1.6.16 and later check it; older versions ignore it. |
+
+Obtainium's app id in the import is PulseStages' application id, `io.github.alien2003.pulsestages`, which is how
+it recognises an installed copy.
+
+**Updates.** Obtainium checks for new releases in the background (how often is set in its settings) and then notifies
+you or installs the update. An update of a copy that Obtainium did not install itself needs your confirmation; after
+that, on Android 12 and later, updates can be installed in the background
+([Obtainium's conditions](https://wiki.obtainium.imranr.dev/app_tracking/#silent-installation)). Android checks the
+signing certificate on every update and installs it only if it is signed with the same key as the installed app,
+whoever installs it. As with a manual update, your data and the Health Connect permissions are kept, and nights
+estimated before an update that changes the model or the defaults are marked stale
+([Stale nights and recomputing](#stale-nights-and-recomputing)).
+
+**Release, not debug.** Obtainium must pick `PulseStages-<version>.apk`. If it asks you to choose ("Pick an APK") or
+offers the `-debug` APK, the filter is missing: set it as in the table. A debug build installed on the phone cannot
+be updated with the release build; uninstall it first ([Release or debug APK](#release-or-debug-apk)).
+
+**Adding it by hand.** If the button does not work (for example on a computer, or in a browser that does not pass the
+link on to Obtainium), open Obtainium's "Add app" screen and enter `https://github.com/alien2003/PulseStages` as "App
+source URL". Under "Additional options for GitHub", set "Filter APKs by regular expression" to
+`^PulseStages-[0-9.]+\.apk$`, leave "Include prereleases" off, optionally paste the certificate SHA-256 from the
+table into "Expected signing certificate hashes", and tap "Add". The labels are those of Obtainium 1.6.17 and may
+differ in other versions.
 
 ### Release or debug APK
 
@@ -142,9 +200,10 @@ update an installed release or published debug build either.
 ### Updates
 
 There is no update check inside the app. Install a newer `PulseStages-<version>.apk` over the installed release
-build; Android keeps the app's data and permissions on an update signed with the same key. An update can change the
-bundled model or the defaults. Nights estimated before are then "stale": they are marked and offered for
-recomputation, never recomputed silently ([Stale nights and recomputing](#stale-nights-and-recomputing)).
+build, or let Obtainium do it ([Install and update with Obtainium](#install-and-update-with-obtainium)); Android keeps
+the app's data and permissions on an update signed with the same key. An update can change the bundled model or the
+defaults. Nights estimated before are then "stale": they are marked and offered for recomputation, never recomputed
+silently ([Stale nights and recomputing](#stale-nights-and-recomputing)).
 
 ## First run
 
@@ -895,6 +954,7 @@ the app is open.
 | Settings import: "Settings file rejected" | A value has the wrong type or is out of range | Fix the listed values in the file; nothing was changed. |
 | Sleep as Android shows two sessions for a night | OHealth's session and PulseStages' session are both in Health Connect | See [Sleep as Android](#sleep-as-android). |
 | The release APK does not install over an installed version | The installed build is a debug build (or a self-built one) with another signing key | Uninstall first ([Release or debug APK](#release-or-debug-apk)). |
+| Obtainium asks to pick an APK, offers the `-debug` APK, or refuses an update because of the signing certificate | PulseStages was added to Obtainium without the APK filter, or the installed build is a debug build | Set the filter, or uninstall the debug build first ([Install and update with Obtainium](#install-and-update-with-obtainium)). |
 | "No app on this device can open this." | No app handles the requested screen (Play Store, Health Connect settings, file picker) | Open Health Connect or the Play Store manually. |
 
 If nothing here helps, set "Log level" to "Debug", reproduce the problem, and share the log with a bug report
@@ -953,3 +1013,7 @@ Health Connect" ([Deleting your data](#deleting-your-data)).
 
 **Where are the validation numbers and the method?** In [ALGORITHM.md](../ALGORITHM.md); the training code is in
 [tools/train/README.md](../tools/train/README.md).
+
+<!-- The "Get it on Obtainium" button: Obtainium's web redirect to an obtainium://app/ import link with the settings of
+     "Install and update with Obtainium" (GitHub drops obtainium:// links). README.md has the same link. -->
+[obtainium-import]: https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22io.github.alien2003.pulsestages%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Falien2003%2FPulseStages%22%2C%22author%22%3A%22alien2003%22%2C%22name%22%3A%22PulseStages%22%2C%22additionalSettings%22%3A%22%7B%5C%22includePrereleases%5C%22%3Afalse%2C%5C%22apkFilterRegEx%5C%22%3A%5C%22%5EPulseStages-%5B0-9.%5D%2B%5C%5C%5C%5C.apk%24%5C%22%2C%5C%22allowedSigningCertHashes%5C%22%3A%5C%22ce5546e83c03eac9837b93fc2c04d2e37abd1b778c3ef9e01b67cd1602e35be5%5C%22%7D%22%7D

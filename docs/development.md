@@ -325,11 +325,11 @@ Files that no build and no test reads skip CI. The list is kept twice in `ci.yml
 the `is_doc` function of the `changes` job; the two must stay in sync. It names every file explicitly: `README.md`,
 `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `PLAN.md`, `LICENSE`, `core-algo/SYNTHETIC_RESULTS.md`,
 `docs/README.md`, `docs/SCREENSHOTS.md`, `docs/architecture.md`, `docs/development.md`, `docs/health-connect.md`,
-`docs/privacy.md`, `docs/user-guide.md`, `docs/icon.svg`, `docs/screenshots/**`, `tools/train/DATASETS.md` and
-`tools/train/README.md`. A file that a test reads must never be on it: `ALGORITHM.md` and `docs/settings-reference.md`
-(`SettingsReferenceTest` checks the reference against the code and its links into ALGORITHM.md's headings), and
-`docs/INTERCHANGE.md` and `docs/prereg/` (the Python tests). A new document is not on the list until it is added in
-both places, so it runs CI.
+`docs/privacy.md`, `docs/user-guide.md`, `docs/icon.svg`, `docs/get-it-on-obtainium.svg`, `docs/screenshots/**`,
+`tools/train/DATASETS.md` and `tools/train/README.md`. A file that a test reads must never be on it: `ALGORITHM.md`
+and `docs/settings-reference.md` (`SettingsReferenceTest` checks the reference against the code and its links into
+ALGORITHM.md's headings), and `docs/INTERCHANGE.md` and `docs/prereg/` (the Python tests). A new document is not on
+the list until it is added in both places, so it runs CI.
 
 - A push that changes only these files starts no run.
 - A pull request always starts a run; if it changes only these files, `changes` lets `build` and `python` skip.
@@ -405,6 +405,38 @@ Pre-releases are marked "Pre-release" on GitHub and never become "Latest".
 
 Only the publishing job gets `contents: write`. Release-signed APKs are never uploaded as Actions artifacts. Runs for
 one tag queue instead of running in parallel, and a run stops after 45 minutes.
+
+### Obtainium link
+
+The "Get it on Obtainium" buttons of README.md and the user guide
+([Install and update with Obtainium](user-guide.md#install-and-update-with-obtainium)) link to Obtainium's web
+redirect with an `obtainium://app/` import ([Obtainium's deep links](https://wiki.obtainium.imranr.dev/deep_links/)).
+The import relies on the asset names of step 5 and on the release key: if either changes, or the repository moves,
+rebuild the link and replace the `[obtainium-import]` definition at the end of both files. The filter must keep
+matching `PulseStages-<version>.apk` and nothing else. This prints the link:
+
+```sh
+python3 - <<'EOF'
+import json, urllib.parse
+settings = {  # additionalSettings is itself a JSON string
+    "includePrereleases": False,
+    "apkFilterRegEx": r"^PulseStages-[0-9.]+\.apk$",
+    "allowedSigningCertHashes": "ce5546e83c03eac9837b93fc2c04d2e37abd1b778c3ef9e01b67cd1602e35be5",
+}
+config = {
+    "id": "io.github.alien2003.pulsestages",
+    "url": "https://github.com/alien2003/PulseStages",
+    "author": "alien2003",
+    "name": "PulseStages",
+    "additionalSettings": json.dumps(settings, separators=(",", ":")),
+}
+encoded = urllib.parse.quote(json.dumps(config, separators=(",", ":")), safe="-_.!~*'()")
+print("https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/" + encoded)
+EOF
+```
+
+`quote` with these safe characters encodes like JavaScript's `encodeURIComponent`. After a change, check that the
+redirect page opens with the link and that Obtainium shows the new settings under "Raw JSON" before it imports them.
 
 ### Release checklist
 

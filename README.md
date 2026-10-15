@@ -15,9 +15,14 @@ heart rate (estimate)". Everything happens on the phone: the app has no internet
 apps' data. It is an estimate, not a medical device. You need Android 9 or later and a watch app that writes sleep and
 heart rate to Health Connect; the default source is OHealth, the app of OPPO watches.
 
-1. **Install.** On the phone, download `PulseStages-<version>.apk` (not the `-debug` one) from the
-   [latest release](https://github.com/alien2003/PulseStages/releases/latest) and open it. When Android asks, allow
+1. **Install.** The easiest way is [Obtainium](https://github.com/ImranR98/Obtainium), a free app that installs
+   apps from their release pages and keeps them up to date: install Obtainium, tap the button below on the phone,
+   confirm the import in Obtainium, then install PulseStages from there. Without Obtainium, download
+   `PulseStages-<version>.apk` (not the `-debug` one) from the latest release and open it; when Android asks, allow
    the browser or file manager you opened it with to install apps.
+
+   [![Get it on Obtainium](docs/get-it-on-obtainium.svg)][obtainium-import] ·
+   [Latest release](https://github.com/alien2003/PulseStages/releases/latest)
 2. **Permissions.** Open PulseStages. On the Home tab tap "Grant permissions" and allow everything. If Home still shows
    "Allow history" (for older nights) or "Allow background", tap them too: without background access, new nights are
    only processed while the app is open. On Android 9–13, if Home offers "Install or update Health Connect", do that
@@ -35,9 +40,10 @@ heart rate to Health Connect; the default source is OHealth, the app of OPPO wat
 in Health Connect, next to the watch app's own session; "Estimate new" on Home runs it right away. Naps are written to
 Health Connect as asleep / awake only by default. **Accuracy:** for nights, fair agreement with a sleep lab (Cohen's κ
 about 0.32–0.34), varying strongly between people; nap stages are not validated
-([How accurate it is](#how-accurate-it-is)). **Updates:** the app has no update check; install a newer
-`PulseStages-<version>.apk` over the installed release, and your data and permissions are kept. Everything else is in
-the [Quick start](#quick-start) below and the [user guide](docs/user-guide.md).
+([How accurate it is](#how-accurate-it-is)). **Updates:** the app has no update check; Obtainium installs new
+releases for you, or install a newer `PulseStages-<version>.apk` over the installed release yourself. Your data and
+permissions are kept. Everything else is in the [Quick start](#quick-start) below and the
+[user guide](docs/user-guide.md).
 
 ---
 
@@ -136,11 +142,20 @@ differently.
 ## Quick start
 
 1. **Download** `PulseStages-<version>.apk` (the signed release build) from the
-   [latest release](https://github.com/alien2003/PulseStages/releases/latest). Optionally check it against
-   `SHA256SUMS.txt` with `sha256sum -c --ignore-missing SHA256SUMS.txt` (GNU coreutils; without `--ignore-missing`
-   the debug APK you did not download is reported as missing).
-2. **Install** it on the phone (Android 9 or later). Android asks you to allow installing apps from the browser or file
-   manager you opened it with.
+   [latest release](https://github.com/alien2003/PulseStages/releases/latest), or let
+   [Obtainium](https://github.com/ImranR98/Obtainium) fetch it and install every later release as an update: install
+   Obtainium, tap the button on the phone, confirm the import, then install PulseStages from Obtainium. The button
+   opens a redirect page of Obtainium's app directory, which loads an ad and an analytics script; the
+   [user guide](docs/user-guide.md#install-and-update-with-obtainium) explains what it sets and how to add the app by
+   hand instead.
+
+   [![Get it on Obtainium](docs/get-it-on-obtainium.svg)][obtainium-import] ·
+   [Latest release](https://github.com/alien2003/PulseStages/releases/latest)
+
+   Optionally check a downloaded APK against `SHA256SUMS.txt` with `sha256sum -c --ignore-missing SHA256SUMS.txt`
+   (GNU coreutils; without `--ignore-missing` the debug APK you did not download is reported as missing).
+2. **Install** it on the phone (Android 9 or later). Android asks you once to allow the app you install it from (the
+   browser, the file manager or Obtainium) to install apps.
 3. **Health Connect.** On Android 14 and later it is part of the system. On Android 9–13, open PulseStages and tap
    "Install or update Health Connect" on the Home tab; this path is supported but has not been tested on a device, and
    reports are welcome. Make sure your watch app (OHealth by default) writes sleep and heart rate to Health Connect.
@@ -275,5 +290,10 @@ The model holds parameters derived from these datasets, not the recordings. Cita
 Dataset details, licences and the reasons another dataset (DREAMT) is not used are in
 [tools/train/DATASETS.md](tools/train/DATASETS.md).
 
-OHealth, OPPO, Health Connect and Sleep as Android are names of their respective owners. PulseStages is an independent
-open-source project.
+OHealth, OPPO, Health Connect, Sleep as Android and Obtainium are names of their respective owners. PulseStages is an
+independent open-source project.
+
+<!-- The "Get it on Obtainium" buttons: Obtainium's web redirect to an obtainium://app/ import link (GitHub drops
+     obtainium:// links). The settings it carries are listed in docs/user-guide.md, "Install and update with
+     Obtainium"; that section has the same link. -->
+[obtainium-import]: https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22io.github.alien2003.pulsestages%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Falien2003%2FPulseStages%22%2C%22author%22%3A%22alien2003%22%2C%22name%22%3A%22PulseStages%22%2C%22additionalSettings%22%3A%22%7B%5C%22includePrereleases%5C%22%3Afalse%2C%5C%22apkFilterRegEx%5C%22%3A%5C%22%5EPulseStages-%5B0-9.%5D%2B%5C%5C%5C%5C.apk%24%5C%22%2C%5C%22allowedSigningCertHashes%5C%22%3A%5C%22ce5546e83c03eac9837b93fc2c04d2e37abd1b778c3ef9e01b67cd1602e35be5%5C%22%7D%22%7D

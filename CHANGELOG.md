@@ -10,6 +10,15 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+### Added
+
+- **Install and update with Obtainium**: a "Get it on Obtainium" button in the README and the user guide adds
+  PulseStages to [Obtainium](https://github.com/ImranR98/Obtainium) with one tap and a confirmation; Obtainium then
+  installs it and every later release as an update. The import takes final releases only, selects
+  `PulseStages-<version>.apk` with the APK filter `^PulseStages-[0-9.]+\.apk$` (never the `-debug` APK) and expects
+  the release signing certificate. The app itself still has no update check and no internet access
+  ([user guide](https://github.com/alien2003/PulseStages/blob/main/docs/user-guide.md#install-and-update-with-obtainium)).
+
 ## [0.1.1] - 2026-10-15
 
 Naps are written to Health Connect as asleep / awake by default. A pre-registered experiment tried to make the
