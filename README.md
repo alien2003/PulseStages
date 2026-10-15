@@ -7,6 +7,40 @@
 [Latest release](https://github.com/alien2003/PulseStages/releases/latest) ·
 [Licence: WTFPL](LICENSE) · [User guide](docs/user-guide.md) · [Documentation index](docs/README.md)
 
+## TL;DR
+
+**What it does.** PulseStages estimates your sleep stages (awake, light, deep, REM) from the heart rate that your watch
+app writes to Health Connect, and adds them to Health Connect as a separate sleep session titled "Sleep stages from
+heart rate (estimate)". Everything happens on the phone: the app has no internet permission and never changes other
+apps' data. It is an estimate, not a medical device. You need Android 9 or later and a watch app that writes sleep and
+heart rate to Health Connect; the default source is OHealth, the app of OPPO watches.
+
+1. **Install.** On the phone, download `PulseStages-<version>.apk` (not the `-debug` one) from the
+   [latest release](https://github.com/alien2003/PulseStages/releases/latest) and open it. When Android asks, allow
+   the browser or file manager you opened it with to install apps.
+2. **Permissions.** Open PulseStages. On the Home tab tap "Grant permissions" and allow everything. If Home still shows
+   "Allow history" (for older nights) or "Allow background", tap them too: without background access, new nights are
+   only processed while the app is open. On Android 9–13, if Home offers "Install or update Health Connect", do that
+   first.
+3. **Watch app.** Make sure it syncs sleep and heart rate to Health Connect (in Health Connect, under "Permissions and
+   data" → "App permissions", it must be allowed to write them).
+4. **Battery.** Let PulseStages and the watch app run in the background without battery restrictions (Android's
+   "Unrestricted" battery setting for each app; phone makers name and place this setting differently).
+5. **Optional.** "Backfill history" on Home estimates your past nights. To also estimate daytime naps, lower Settings →
+   "Sources" → "Minimum session length" (90 min by default) to e.g. 30 min. In Health Connect → "Permissions and data"
+   → "Manage data" → "Data sources and priority", put PulseStages above the watch app for sleep, so that apps using
+   Health Connect's sleep totals get the stages (if it is not listed yet, check again after the first estimate).
+
+**Using it.** It runs by itself: an hourly check for new nights and a daily run. Results appear in the Nights tab and
+in Health Connect, next to the watch app's own session; "Estimate new" on Home runs it right away. Naps are written to
+Health Connect as asleep / awake only by default. **Accuracy:** for nights, fair agreement with a sleep lab (Cohen's κ
+about 0.32–0.34), varying strongly between people; nap stages are not validated
+([How accurate it is](#how-accurate-it-is)). **Updates:** the app has no update check; install a newer
+`PulseStages-<version>.apk` over the installed release, and your data and permissions are kept. Everything else is in
+the [Quick start](#quick-start) below and the [user guide](docs/user-guide.md).
+
+---
+
 PulseStages is an Android app that estimates sleep stages (awake, light, deep, REM) from the heart rate that a watch
 app writes to [Health Connect](https://developer.android.com/health-and-fitness/health-connect), and writes the result
 back to Health Connect as its own sleep session, clearly labelled as an estimate. It was built for an OPPO Watch paired
@@ -17,6 +51,7 @@ processed in two separate modes; naps are written to Health Connect as asleep / 
 breakdown is not validated. The output is a statistical estimate, not a measurement, and it is not meant for medical
 decisions.
 
+- [TL;DR](#tldr)
 - [Screenshots](#screenshots)
 - [How accurate it is](#how-accurate-it-is)
 - [Quick start](#quick-start)
