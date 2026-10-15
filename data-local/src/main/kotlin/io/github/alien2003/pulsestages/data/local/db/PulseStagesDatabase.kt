@@ -7,7 +7,8 @@ import androidx.room.TypeConverters
 /**
  * The local ledger. Every schema version is exported to `data-local/schemas/`; every later version ships a migration
  * ([LedgerMigrations]; there is deliberately no destructive fallback: the ledger is what keeps Health Connect writes
- * idempotent). Version 2 added `estimated_nights.mode` and `estimated_nights.sleepWakeOnly` (night / nap modes).
+ * idempotent). Version 2 added `estimated_nights.mode` and `estimated_nights.sleepWakeOnly` (night / nap modes), version 3
+ * `estimated_nights.inputFingerprint` and `estimated_nights.inputCheckedAt` (refresh of written nights).
  */
 @Database(
     entities = [
@@ -19,7 +20,7 @@ import androidx.room.TypeConverters
         BackfillStateEntity::class,
         PersonalModelEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(LedgerConverters::class)

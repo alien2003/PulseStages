@@ -197,6 +197,21 @@ abstract class EstimatedNightDao {
         now: Long,
     ): Int = updateStatus(clientRecordIds, NightStatus.DELETED, reason, clearOutput = true, now = now)
 
+    /**
+     * Records that the input of the WRITTEN night [clientRecordId] was read again at [checkedAtMs] and now has
+     * [fingerprint]. Nothing else changes, not even `updatedAt`: the output was not rewritten. Returns the number of
+     * rows changed (0 when the night is not WRITTEN).
+     */
+    @Query(
+        "UPDATE estimated_nights SET inputFingerprint = :fingerprint, inputCheckedAt = :checkedAtMs " +
+            "WHERE clientRecordId = :clientRecordId AND status = 'WRITTEN'",
+    )
+    abstract suspend fun markInputChecked(
+        clientRecordId: String,
+        fingerprint: String?,
+        checkedAtMs: Long,
+    ): Int
+
     /** One chunk of [findBySourceUuids]; prefer that function. */
     @Query(
         "SELECT DISTINCT n.* FROM estimated_nights n INNER JOIN night_sources s ON s.clientRecordId = n.clientRecordId " +

@@ -111,11 +111,75 @@ class EstimatedNightDaoTest : DatabaseTest() {
     @Test
     fun entityRoundTripsEveryColumn() =
         runTest {
-            val original = night("ps:a", startMs = 1_700_000_000_000L).copy(modelId = "walch", statusReason = "x", lowConfidence = true)
+            val original =
+                night("ps:a", startMs = 1_700_000_000_000L).copy(
+                    modelId = "walch",
+                    statusReason = "x",
+                    lowConfidence = true,
+                    inputFingerprint = "1|hr:2:ab|steps:0:cd|spo2:-|rr:-|hrv:-",
+                    inputCheckedAt = 1_700_000_100_000L,
+                )
 
             val id = dao.upsert(original)
 
             assertEquals(original.copy(id = id), dao.findById(id))
+        }
+
+    @Test
+    fun inputColumnsAreNullForRowsWithoutThemAndAreReplacedByAnUpsert() =
+        runTest {
+            dao.upsert(night("ps:a", startMs = 0))
+            assertNull(checkNotNull(dao.findByClientRecordId("ps:a")).inputFingerprint)
+            assertNull(checkNotNull(dao.findByClientRecordId("ps:a")).inputCheckedAt)
+
+            dao.upsert(night("ps:a", startMs = 0).copy(inputFingerprint = "fp-1", inputCheckedAt = 2_000L))
+            dao.upsert(night("ps:a", startMs = 0).copy(inputFingerprint = "fp-2", inputCheckedAt = 3_000L))
+
+            val stored = checkNotNull(dao.findByClientRecordId("ps:a"))
+            assertEquals("fp-2", stored.inputFingerprint)
+            assertEquals(3_000L, stored.inputCheckedAt)
+        }
+
+    @Test
+    fun markInputCheckedSetsOnlyTheInputColumnsOfAWrittenNight() =
+        runTest {
+            dao.recordNight(night("ps:a", startMs = 0).copy(inputFingerprint = "fp-old", inputCheckedAt = 1_000L), emptyList())
+            dao.upsert(night("ps:none", startMs = 24 * HOUR_MS, status = NightStatus.NOT_ESTIMATED))
+            dao.upsert(night("ps:gone", startMs = 48 * HOUR_MS, status = NightStatus.SUPERSEDED))
+            val written = checkNotNull(dao.findByClientRecordId("ps:a"))
+            val withoutOutput = listOf("ps:none", "ps:gone").map { checkNotNull(dao.findByClientRecordId(it)) }
+
+            assertEquals(1, dao.markInputChecked("ps:a", "fp-new", 5_000L))
+
+            val checked = checkNotNull(dao.findByClientRecordId("ps:a"))
+            assertEquals(written.copy(inputFingerprint = "fp-new", inputCheckedAt = 5_000L), checked)
+            assertEquals("updatedAt is untouched: nothing was rewritten", 1_000L, checked.updatedAt)
+            assertEquals(listOf("ps:a-src"), dao.sourceUuidsOf("ps:a"))
+            assertEquals(NightBaselineEntity("ps:a", written.sessionEndMs, 50.0), baselines.find("ps:a"))
+
+            assertEquals(0, dao.markInputChecked("ps:none", "fp", 6_000L))
+            assertEquals(0, dao.markInputChecked("ps:gone", "fp", 6_000L))
+            assertEquals(0, dao.markInputChecked("ps:missing", "fp", 6_000L))
+            assertEquals(withoutOutput, listOf("ps:none", "ps:gone").map { checkNotNull(dao.findByClientRecordId(it)) })
+
+            assertEquals(1, dao.markInputChecked("ps:a", null, 7_000L))
+            val cleared = checkNotNull(dao.findByClientRecordId("ps:a"))
+            assertNull(cleared.inputFingerprint)
+            assertEquals(7_000L, cleared.inputCheckedAt)
+        }
+
+    @Test
+    fun markInputCheckedNotifiesObservers() =
+        runTest {
+            dao.upsert(night("ps:a", startMs = 0))
+            val id = checkNotNull(dao.findByClientRecordId("ps:a")).id
+            val recorder = FlowRecorder(this, dao.observeById(id))
+            assertNull(recorder.next()?.inputCheckedAt)
+
+            dao.markInputChecked("ps:a", "fp", 9_000L)
+
+            assertEquals(9_000L, recorder.awaitMatching { it?.inputCheckedAt != null }?.inputCheckedAt)
+            recorder.cancel()
         }
 
     @Test

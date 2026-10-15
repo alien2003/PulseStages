@@ -1,0 +1,682 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "cb17a66e1bdc7e536b31eb0fc073c3b8",
+    "entities": [
+      {
+        "tableName": "estimated_nights",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `clientRecordId` TEXT NOT NULL, `sourceUuids` TEXT NOT NULL, `sourcePackage` TEXT NOT NULL, `sessionStartMs` INTEGER NOT NULL, `sessionEndMs` INTEGER NOT NULL, `startZoneOffsetSec` INTEGER NOT NULL, `endZoneOffsetSec` INTEGER NOT NULL, `hcRecordId` TEXT, `algoVersion` INTEGER NOT NULL, `paramsHash` TEXT NOT NULL, `estimator` TEXT NOT NULL, `modelId` TEXT, `coverage` REAL NOT NULL, `confidence` REAL NOT NULL, `recomputeCount` INTEGER NOT NULL, `clientRecordVersion` INTEGER NOT NULL, `status` TEXT NOT NULL, `statusReason` TEXT, `awakeMin` REAL NOT NULL, `lightMin` REAL NOT NULL, `deepMin` REAL NOT NULL, `remMin` REAL NOT NULL, `unknownMin` REAL NOT NULL, `elevatedHr` INTEGER NOT NULL, `lowConfidence` INTEGER NOT NULL, `calibrated` INTEGER NOT NULL, `rulesFallback` INTEGER NOT NULL, `warnings` TEXT NOT NULL, `nadirBpm` REAL, `hrSamples` INTEGER NOT NULL, `stagesJson` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `mode` TEXT NOT NULL DEFAULT 'NIGHT', `sleepWakeOnly` INTEGER NOT NULL DEFAULT 0, `inputFingerprint` TEXT, `inputCheckedAt` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientRecordId",
+            "columnName": "clientRecordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceUuids",
+            "columnName": "sourceUuids",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourcePackage",
+            "columnName": "sourcePackage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionStartMs",
+            "columnName": "sessionStartMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionEndMs",
+            "columnName": "sessionEndMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startZoneOffsetSec",
+            "columnName": "startZoneOffsetSec",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endZoneOffsetSec",
+            "columnName": "endZoneOffsetSec",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hcRecordId",
+            "columnName": "hcRecordId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "algoVersion",
+            "columnName": "algoVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paramsHash",
+            "columnName": "paramsHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "estimator",
+            "columnName": "estimator",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "modelId",
+            "columnName": "modelId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "coverage",
+            "columnName": "coverage",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recomputeCount",
+            "columnName": "recomputeCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientRecordVersion",
+            "columnName": "clientRecordVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "statusReason",
+            "columnName": "statusReason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "awakeMin",
+            "columnName": "awakeMin",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lightMin",
+            "columnName": "lightMin",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deepMin",
+            "columnName": "deepMin",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remMin",
+            "columnName": "remMin",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unknownMin",
+            "columnName": "unknownMin",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elevatedHr",
+            "columnName": "elevatedHr",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lowConfidence",
+            "columnName": "lowConfidence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calibrated",
+            "columnName": "calibrated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rulesFallback",
+            "columnName": "rulesFallback",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "warnings",
+            "columnName": "warnings",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nadirBpm",
+            "columnName": "nadirBpm",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "hrSamples",
+            "columnName": "hrSamples",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stages",
+            "columnName": "stagesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mode",
+            "columnName": "mode",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'NIGHT'"
+          },
+          {
+            "fieldPath": "sleepWakeOnly",
+            "columnName": "sleepWakeOnly",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "inputFingerprint",
+            "columnName": "inputFingerprint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "inputCheckedAt",
+            "columnName": "inputCheckedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_estimated_nights_clientRecordId",
+            "unique": true,
+            "columnNames": [
+              "clientRecordId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_estimated_nights_clientRecordId` ON `${TABLE_NAME}` (`clientRecordId`)"
+          },
+          {
+            "name": "index_estimated_nights_sessionStartMs",
+            "unique": false,
+            "columnNames": [
+              "sessionStartMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_estimated_nights_sessionStartMs` ON `${TABLE_NAME}` (`sessionStartMs`)"
+          },
+          {
+            "name": "index_estimated_nights_sessionEndMs",
+            "unique": false,
+            "columnNames": [
+              "sessionEndMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_estimated_nights_sessionEndMs` ON `${TABLE_NAME}` (`sessionEndMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "night_sources",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`clientRecordId` TEXT NOT NULL, `sourceUuid` TEXT NOT NULL, PRIMARY KEY(`clientRecordId`, `sourceUuid`))",
+        "fields": [
+          {
+            "fieldPath": "clientRecordId",
+            "columnName": "clientRecordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceUuid",
+            "columnName": "sourceUuid",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "clientRecordId",
+            "sourceUuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_night_sources_sourceUuid",
+            "unique": false,
+            "columnNames": [
+              "sourceUuid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_night_sources_sourceUuid` ON `${TABLE_NAME}` (`sourceUuid`)"
+          }
+        ]
+      },
+      {
+        "tableName": "source_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uuid` TEXT NOT NULL, `packageName` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `outcome` TEXT NOT NULL, `reason` TEXT, `nightClientRecordId` TEXT, `lastSeenAt` INTEGER NOT NULL, PRIMARY KEY(`uuid`))",
+        "fields": [
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "startMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMs",
+            "columnName": "endMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outcome",
+            "columnName": "outcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nightClientRecordId",
+            "columnName": "nightClientRecordId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "lastSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "uuid"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_source_sessions_startMs",
+            "unique": false,
+            "columnNames": [
+              "startMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_source_sessions_startMs` ON `${TABLE_NAME}` (`startMs`)"
+          },
+          {
+            "name": "index_source_sessions_nightClientRecordId",
+            "unique": false,
+            "columnNames": [
+              "nightClientRecordId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_source_sessions_nightClientRecordId` ON `${TABLE_NAME}` (`nightClientRecordId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "night_baselines",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`clientRecordId` TEXT NOT NULL, `sessionEndMs` INTEGER NOT NULL, `nadirBpm` REAL NOT NULL, PRIMARY KEY(`clientRecordId`))",
+        "fields": [
+          {
+            "fieldPath": "clientRecordId",
+            "columnName": "clientRecordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionEndMs",
+            "columnName": "sessionEndMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nadirBpm",
+            "columnName": "nadirBpm",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "clientRecordId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_night_baselines_sessionEndMs",
+            "unique": false,
+            "columnNames": [
+              "sessionEndMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_night_baselines_sessionEndMs` ON `${TABLE_NAME}` (`sessionEndMs`)"
+          }
+        ]
+      },
+      {
+        "tableName": "log_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestampMs` INTEGER NOT NULL, `level` TEXT NOT NULL, `tag` TEXT NOT NULL, `message` TEXT NOT NULL, `nightKey` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "level",
+            "columnName": "level",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tag",
+            "columnName": "tag",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "message",
+            "columnName": "message",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nightKey",
+            "columnName": "nightKey",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_log_entries_timestampMs",
+            "unique": false,
+            "columnNames": [
+              "timestampMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_log_entries_timestampMs` ON `${TABLE_NAME}` (`timestampMs`)"
+          },
+          {
+            "name": "index_log_entries_nightKey",
+            "unique": false,
+            "columnNames": [
+              "nightKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_log_entries_nightKey` ON `${TABLE_NAME}` (`nightKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "backfill_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `status` TEXT NOT NULL, `rangeStartMs` INTEGER NOT NULL, `rangeEndMs` INTEGER NOT NULL, `cursorMs` INTEGER NOT NULL, `windowDays` INTEGER NOT NULL, `windowsTotal` INTEGER NOT NULL, `windowsDone` INTEGER NOT NULL, `nightsFound` INTEGER NOT NULL, `nightsEstimated` INTEGER NOT NULL, `nightsSkipped` INTEGER NOT NULL, `nightsFailed` INTEGER NOT NULL, `historyLimited` INTEGER NOT NULL, `startedAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `lastError` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rangeStartMs",
+            "columnName": "rangeStartMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rangeEndMs",
+            "columnName": "rangeEndMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cursorMs",
+            "columnName": "cursorMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "windowDays",
+            "columnName": "windowDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "windowsTotal",
+            "columnName": "windowsTotal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "windowsDone",
+            "columnName": "windowsDone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nightsFound",
+            "columnName": "nightsFound",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nightsEstimated",
+            "columnName": "nightsEstimated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nightsSkipped",
+            "columnName": "nightsSkipped",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nightsFailed",
+            "columnName": "nightsFailed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "historyLimited",
+            "columnName": "historyLimited",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "personal_models",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `createdAt` INTEGER NOT NULL, `kind` TEXT NOT NULL, `json` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `active` INTEGER NOT NULL, `nightsUsed` INTEGER NOT NULL, `kappaBefore` REAL, `kappaAfter` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprint",
+            "columnName": "fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nightsUsed",
+            "columnName": "nightsUsed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kappaBefore",
+            "columnName": "kappaBefore",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "kappaAfter",
+            "columnName": "kappaAfter",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_personal_models_active",
+            "unique": false,
+            "columnNames": [
+              "active"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_personal_models_active` ON `${TABLE_NAME}` (`active`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cb17a66e1bdc7e536b31eb0fc073c3b8')"
+    ]
+  }
+}

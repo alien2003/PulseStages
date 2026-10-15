@@ -78,6 +78,14 @@ enum class NightStatus {
  *   was processed with; schema version 2, NIGHT for the rows of version 1).
  * @property sleepWakeOnly the nap's record holds only AWAKE and SLEEPING stages (`napMode.outputPolicy` SLEEP_WAKE);
  *   [stages] and the minute columns keep the estimated stages (schema version 2).
+ * @property inputFingerprint fingerprint of the estimation input that the output was last compared with (schema version
+ *   3): for heart rate, steps and each optional channel that was read, the number of samples and a SHA-256 of the
+ *   samples sorted canonically (never the samples themselves). Set by every write and by every refresh check of a
+ *   written night; null for nights that never had an output and for outputs written before version 3 and not checked
+ *   since. A night retired by a status change (deleted, superseded, source deleted) keeps the value of its last output;
+ *   one recorded again without an output (not estimated, failed, a skipped nap) has none.
+ * @property inputCheckedAt when the input of the output was last read and compared: the write, or a later refresh check
+ *   (schema version 3). Unlike [updatedAt] it changes without a rewrite. Null when unknown.
  */
 @Suppress("LongParameterList") // Mirrors the table: one constructor parameter per column.
 @Entity(
@@ -125,6 +133,8 @@ data class EstimatedNightEntity(
     val updatedAt: Long,
     @ColumnInfo(defaultValue = "NIGHT") val mode: SessionMode = SessionMode.NIGHT,
     @ColumnInfo(defaultValue = "0") val sleepWakeOnly: Boolean = false,
+    val inputFingerprint: String? = null,
+    val inputCheckedAt: Long? = null,
 ) {
     /** A nap that the nap policy skipped ([isSkippedNap]): its outcome depends on the settings only, not on data. */
     val skippedNap: Boolean get() = isSkippedNap(status, statusReason)
@@ -137,6 +147,9 @@ data class EstimatedNightEntity(
         currentAlgoVersion: Int,
         currentParamsHash: String,
     ): Boolean = isStale(status, statusReason, sameVersion = algoVersion == currentAlgoVersion && paramsHash == currentParamsHash)
+
+    /** Why the automatic refresh rewrote this night, when that was its last write ([InputUpdate.of]). */
+    val inputUpdate: InputUpdate? get() = InputUpdate.of(status, statusReason)
 }
 
 /**
@@ -224,6 +237,75 @@ fun isSkippedNap(
     status: NightStatus,
     statusReason: String?,
 ): Boolean = status == NightStatus.NOT_ESTIMATED && statusReason?.startsWith(SKIPPED_NAP_REASON_PREFIX) == true
+
+/** What changed in the input of a written night that the automatic refresh rewrote ([InputUpdate]). */
+enum class InputChange {
+    /**
+     * More heart-rate samples than at the previous write (the estimate's sample count, `hrSamples`: the session and its
+     * context margin).
+     */
+    MORE_HEART_RATE,
+
+    /**
+     * The heart rate in the read window changed otherwise: samples replaced at the same count, or changes outside the
+     * part the estimate counts (fewer samples than at the previous write never rewrite a night).
+     */
+    HEART_RATE,
+
+    /** The heart rate is unchanged; steps or an optional channel (SpO2, respiratory rate, HRV) changed. */
+    OTHER_DATA,
+}
+
+/**
+ * Why the automatic refresh rewrote a WRITTEN night: its estimation input changed after the previous write
+ * ([change]) and the new estimate changed the record. Stored as the night's `statusReason`, which a regular write
+ * clears: `"INPUT_UPDATED: MORE_HEART_RATE 46 57 - …"` ([reason], parsed back by [of]).
+ *
+ * @property change what changed in the input.
+ * @property hrSamplesBefore heart-rate samples of the estimate at the previous write (`hrSamples`: the session and its
+ *   context margin).
+ * @property hrSamplesAfter heart-rate samples of the new estimate.
+ */
+data class InputUpdate(
+    val change: InputChange,
+    val hrSamplesBefore: Int,
+    val hrSamplesAfter: Int,
+) {
+    /** The `statusReason` of the rewritten night: the code, the kind, both counts and an English explanation. */
+    fun reason(): String = "$INPUT_UPDATED_REASON_PREFIX ${change.name} $hrSamplesBefore $hrSamplesAfter - ${describe()}"
+
+    /** English description for the log, e.g. "more heart rate arrived (46 -> 57 heart-rate samples)". */
+    fun describe(): String =
+        when (change) {
+            InputChange.MORE_HEART_RATE -> "more heart rate arrived ($hrSamplesBefore -> $hrSamplesAfter heart-rate samples)"
+            InputChange.HEART_RATE -> "the heart rate changed ($hrSamplesBefore -> $hrSamplesAfter heart-rate samples)"
+            InputChange.OTHER_DATA -> "steps or other input data changed"
+        }
+
+    /** Parsing. */
+    companion object {
+        /** The [InputUpdate] of a WRITTEN night whose [statusReason] was written by [reason], or null. */
+        fun of(
+            status: NightStatus,
+            statusReason: String?,
+        ): InputUpdate? {
+            val parts =
+                statusReason
+                    ?.takeIf { status == NightStatus.WRITTEN && it.startsWith(INPUT_UPDATED_REASON_PREFIX) }
+                    ?.removePrefix(INPUT_UPDATED_REASON_PREFIX)
+                    ?.trim()
+                    ?.split(' ')
+                    .orEmpty()
+            val change = InputChange.entries.firstOrNull { it.name == parts.getOrNull(0) }
+            val before = parts.getOrNull(1)?.toIntOrNull()
+            val after = parts.getOrNull(2)?.toIntOrNull()
+            return if (change != null && before != null && after != null) InputUpdate(change, before, after) else null
+        }
+    }
+}
+
+/** The start of the `statusReason` of a night that the automatic refresh rewrote ([InputUpdate.reason]). */
+const val INPUT_UPDATED_REASON_PREFIX: String = "INPUT_UPDATED:"
 
 /** A night with [status] and [statusReason] made with another algorithm version or params hash (not [sameVersion]). */
 private fun isStale(

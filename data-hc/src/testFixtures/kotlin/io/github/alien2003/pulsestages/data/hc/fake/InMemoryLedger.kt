@@ -235,6 +235,18 @@ class InMemoryLedger {
             write { clientRecordIds.forEach { baselines.remove(it) } }
         }
 
+        override suspend fun markInputChecked(
+            clientRecordId: String,
+            fingerprint: String?,
+            checkedAtMs: Long,
+        ): Int =
+            write {
+                val entry =
+                    nights.entries.firstOrNull { it.value.clientRecordId == clientRecordId && it.value.status == NightStatus.WRITTEN }
+                entry?.setValue(entry.value.copy(inputFingerprint = fingerprint, inputCheckedAt = checkedAtMs))
+                if (entry == null) 0 else 1
+            }
+
         override suspend fun setStatusChunk(
             clientRecordIds: List<String>,
             status: NightStatus,

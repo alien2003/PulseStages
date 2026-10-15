@@ -32,6 +32,21 @@ object LedgerMigrations {
             }
         }
 
+    /**
+     * 2 → 3 (refresh of written nights): `estimated_nights` gains `inputFingerprint` (TEXT, nullable) and
+     * `inputCheckedAt` (INTEGER, nullable). Existing rows keep null in both: their input fingerprint is unknown, so the
+     * refresh compares their heart-rate sample count and coverage instead, and stores a fingerprint from then on.
+     * Nothing else changes.
+     */
+    @Suppress("MagicNumber") // The schema versions of the step.
+    val MIGRATION_2_3: Migration =
+        object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `estimated_nights` ADD COLUMN `inputFingerprint` TEXT")
+                db.execSQL("ALTER TABLE `estimated_nights` ADD COLUMN `inputCheckedAt` INTEGER")
+            }
+        }
+
     /** Every migration, oldest first. */
-    val ALL: List<Migration> = listOf(MIGRATION_1_2)
+    val ALL: List<Migration> = listOf(MIGRATION_1_2, MIGRATION_2_3)
 }
