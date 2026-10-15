@@ -88,7 +88,7 @@ Sessions shorter than the nap threshold: how they are estimated and written. Sho
 | Setting | Key in the JSON export | Default | Allowed values | Effect | In params hash |
 |---|---|---|---|---|---|
 | Nap threshold | `algo.napMode.maxSessionMin` | `180.0` min | 0–720 | Sessions shorter than this are naps, longer ones nights. Naps are never compared with the heart-rate baseline nor counted for it, and the stage-share check skips them. 0 = no naps: every session is a night. Sessions shorter than the minimum session length of the sources are ignored altogether. | yes |
-| Written for a nap | `algo.napMode.outputPolicy` | `"SLEEP_WAKE"` (Asleep / awake) | `"STAGES"` (Stages), `"SLEEP_WAKE"` (Asleep / awake), `"SKIP"` (Nothing) | Stages: like a night. Asleep / awake: only sleep and awakenings (nap stage estimates are rough). Nothing: naps are not estimated and nothing is written; a session written for a nap earlier is removed when it is recomputed. | yes |
+| Written for a nap | `algo.napMode.outputPolicy` | `"SLEEP_WAKE"` (Asleep / awake) | `"STAGES"` (Stages), `"SLEEP_WAKE"` (Asleep / awake), `"SKIP"` (Nothing) | Stages: like a night (nap stages are not validated). Asleep / awake: only sleep and awakenings; the app still shows its stage estimate. Nothing: naps are not estimated and nothing is written; a session written for a nap earlier is removed when it is recomputed. | yes |
 | Estimator for naps | `algo.napMode.estimator` | `null` (Same as nights) | `null` (Same as nights), `"RULES"` (Rules), `"HMM"` (HMM), `"HYBRID"` (Hybrid) | The estimator of naps. Same as nights (the default): the estimator set under Algorithm. | yes |
 
 ## Preprocessing

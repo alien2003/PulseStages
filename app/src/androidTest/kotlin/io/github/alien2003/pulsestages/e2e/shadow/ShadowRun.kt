@@ -277,6 +277,10 @@ class ShadowRun(
         val napMode = base.algo.napMode
         val skip = base.copy(algo = base.algo.copy(napMode = napMode.copy(outputPolicy = NapOutputPolicy.SKIP)))
         policy("policy-nap-skip", "naps are not written (napMode.outputPolicy SKIP)", skip, ::expectSkippedNaps)
+        // SLEEP_WAKE is the default since the realistic-nap experiment: STAGES needs its own scenario, and the
+        // SLEEP_WAKE one below still covers a user whose settings say STAGES.
+        val stages = base.copy(algo = base.algo.copy(napMode = napMode.copy(outputPolicy = NapOutputPolicy.STAGES)))
+        policy("policy-nap-stages", "naps written with stages (napMode.outputPolicy STAGES)", stages, ::expectStagedNaps)
         val sleepWake = base.copy(algo = base.algo.copy(napMode = napMode.copy(outputPolicy = NapOutputPolicy.SLEEP_WAKE)))
         policy(
             "policy-nap-sleep-wake",
@@ -332,6 +336,28 @@ class ShadowRun(
             val night = env.database.estimatedNightDao().findByClientRecordId(captured.write.clientRecordId)
             val id = captured.write.clientRecordId.take(ID_PREFIX)
             if (night?.sleepWakeOnly != true) problems += "nap $id… is not sleep/wake only in the ledger"
+        }
+    }
+
+    /**
+     * Under STAGES no written nap is marked sleep/wake only (that only the stage types of a night are written, never
+     * the generic SLEEPING, is checked by [WriteInvariants]).
+     */
+    private suspend fun expectStagedNaps(
+        env: ShadowEnvironment,
+        writes: List<CapturedWrite>,
+        problems: MutableList<String>,
+        notes: MutableList<String>,
+    ) {
+        val naps = writes.filter { modeOf(it) == SessionMode.NAP }
+        if (naps.isEmpty()) notes += "no nap was written in the covered weeks: the stages check is vacuous"
+        naps.forEach { captured ->
+            val night = env.database.estimatedNightDao().findByClientRecordId(captured.write.clientRecordId)
+            val id = captured.write.clientRecordId.take(ID_PREFIX)
+            when {
+                night == null -> problems += "nap $id… is not in the ledger"
+                night.sleepWakeOnly -> problems += "nap $id… is marked sleep/wake only although naps are written with stages"
+            }
         }
     }
 

@@ -6,7 +6,7 @@
     <string name="set_nap_max_session_title">Nap threshold</string>
     <string name="set_nap_max_session_hint">Sessions shorter than this are naps, longer ones nights. Naps are never compared with the heart-rate baseline nor counted for it, and the stage-share check skips them. 0 = no naps: every session is a night. Sessions shorter than the minimum session length of the sources are ignored altogether.</string>
     <string name="set_nap_output_title">Written for a nap</string>
-    <string name="set_nap_output_hint">Stages: like a night. Asleep / awake: only sleep and awakenings (nap stage estimates are rough). Nothing: naps are not estimated and nothing is written; a session written for a nap earlier is removed when it is recomputed.</string>
+    <string name="set_nap_output_hint">Stages: like a night (nap stages are not validated). Asleep / awake: only sleep and awakenings; the app still shows its stage estimate. Nothing: naps are not estimated and nothing is written; a session written for a nap earlier is removed when it is recomputed.</string>
     <string name="option_nap_output_stages">Stages</string>
     <string name="option_nap_output_sleep_wake">Asleep / awake</string>
     <string name="option_nap_output_skip">Nothing</string>
@@ -54,8 +54,8 @@
     <string name="night_detail_mode">Processed as</string>
     <string name="session_mode_night">Night</string>
     <string name="session_mode_nap">Nap</string>
-    <string name="night_detail_nap_rough">Nap estimates are rough: with the hybrid estimator, about 6 in 10 of the 30-second epochs of a test nap matched the sleep lab, against about 5 in 10 for calling everything light sleep. Take the stages as a rough guide.</string>
-    <string name="night_detail_nap_rough_generic">Nap estimates are rough. Take the stages as a rough guide.</string>
+    <string name="night_detail_nap_not_validated">Nap stages are not validated: the nap model failed pre-registered checks, and on test sessions with the stage mix of published naps it was less accurate than calling everything light sleep.</string>
+    <string name="night_detail_nap_not_validated_generic">Nap stages are not validated; take them as the app\'s estimate only.</string>
     <string name="night_detail_nap_sleep_wake">Written to Health Connect as asleep / awake only; the stages shown here are the app\'s estimate.</string>
     <string name="not_estimated_nap_skipped">Naps are not estimated (Settings, Naps).</string>
     <!-- Home and Compare -->

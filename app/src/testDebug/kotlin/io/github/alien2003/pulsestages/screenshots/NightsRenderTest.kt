@@ -250,23 +250,23 @@ class NightsRenderTest(
     ) {
         val night = state.night ?: return
         val resources = host.resources
-        val rough = hasText(resources.getString(R.string.night_detail_nap_rough))
-        val roughGeneric = hasText(resources.getString(R.string.night_detail_nap_rough_generic))
+        val caution = hasText(resources.getString(R.string.night_detail_nap_not_validated))
+        val cautionGeneric = hasText(resources.getString(R.string.night_detail_nap_not_validated_generic))
         val writtenNap = night.mode == SessionMode.NAP && night.status == NightStatus.WRITTEN
         when {
             !writtenNap -> {
-                // A nap without output (e.g. skipped by the nap policy) has no stages to take as rough.
-                compose.onNode(rough).assertDoesNotExist()
-                compose.onNode(roughGeneric).assertDoesNotExist()
+                // A nap without output (e.g. skipped by the nap policy) has no stages to caution about.
+                compose.onNode(caution).assertDoesNotExist()
+                compose.onNode(cautionGeneric).assertDoesNotExist()
             }
 
             night.estimator == EstimatorType.HYBRID -> {
-                compose.onNode(rough).assertExists("$name: nap explanation with the nap model's figures")
+                compose.onNode(caution).assertExists("$name: nap caution with the nap model's failed checks")
             }
 
             else -> {
-                compose.onNode(roughGeneric).assertExists("$name: nap explanation without the hybrid figures")
-                compose.onNode(rough).assertDoesNotExist()
+                compose.onNode(cautionGeneric).assertExists("$name: short nap caution for other estimators")
+                compose.onNode(caution).assertDoesNotExist()
             }
         }
         if (writtenNap && night.sleepWakeOnly) {

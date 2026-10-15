@@ -3,15 +3,23 @@
 PulseStages trains and validates its estimators only on **open-access** data with a wearable heart-rate signal and
 reference sleep stages. Raw data and derived night files are **never committed**; this repository contains only the
 scripts (`download.py`, `prepare.py`) and the links below. Licences and access were checked on 2026-10-13 on the
-PhysioNet project pages.
+PhysioNet project pages. Two more kinds of open data serve the realistic-nap experiment (ALGORITHM.md section 13.13) and
+train nothing: real afternoon naps from OpenNeuro, used only as a test set (section 6), and individual nap hypnograms
+without heart rate, used only for aggregate checks of nap compositions (section 7); their licences are those stated in
+the experiment's pre-registration (`docs/prereg/prereg-naps-realistic.md`, 2026-10-15).
 
 | Dataset | Version | Access | Licence | Used |
 |---|---|---|---|---|
 | PhysioNet sleep-accel (Walch et al.) | 1.0.0 (only version) | Open Access | ODC-By 1.0 | **yes, primary** (31 subjects) |
 | PhysioNet BIDSleep (Song et al.) | 1.0.1 (latest) | Open Access | ODC-By 1.0 | yes, second dataset (47 subjects / 253 nights) |
 | PhysioNet DREAMT | 2.2.0 (latest) | **Restricted Access** (DUA) | PhysioNet Restricted Health Data License 1.5.0 | **no** |
+| OpenNeuro ds006576 (McDevitt et al.) | 1.0.5 | Open | CC0 | **test only** (afternoon naps; section 6) |
+| Zenodo 6642860 (Nicolas et al.) | record 6642860 | Open | CC BY 4.0 | aggregate counts only (nap hypnograms; section 7) |
+| OSF chav7 (Mei et al.) | project chav7 | Open | BSD-3-Clause | aggregate counts only (nap hypnograms; section 7) |
+| PhysioNet Sleep-EDF Expanded, daytime sleep bouts of the SC recordings | — | Open Access | ODC-By 1.0 | aggregate counts only (nap hypnograms; section 7) |
+| OSF deposit of Bergamo et al. 2026 (osf.io/z5r2j) | — | — | **none stated** | **no** (section 7) |
 
-Both used datasets are under the Open Data Commons Attribution License v1.0: use, sharing and derived databases are
+Both training datasets are under the Open Data Commons Attribution License v1.0: use, sharing and derived databases are
 allowed with attribution (section 4 of the licence). Anything derived from them (night files, model weights, reports)
 must cite them as below.
 
@@ -196,3 +204,66 @@ Nights to keep an eye on (details in `summary.csv` notes):
   HR gaps 154 / 122 / 248 min), 23 below 0.9, 39 with an HR gap > 10 min; 57 nights contain "Unknown" epochs inside
   the session (omitted from the labels); 5 nights without N3 (bid-15 nights 1 and 3, bid-34 nights 1 and 2, bid-35
   night 5). No `recStart` fell into the ambiguous DST hour.
+
+## 6. OpenNeuro ds006576 — real afternoon naps (test only)
+
+- Dataset: *The role of REM sleep in neural differentiation of memories in the hippocampus*, OpenNeuro ds006576,
+  version 1.0.5 (DOI [10.18112/openneuro.ds006576.v1.0.5](https://doi.org/10.18112/openneuro.ds006576.v1.0.5)),
+  fetched from the public bucket `https://s3.amazonaws.com/openneuro.org/ds006576/`.
+- Licence: **CC0** (the `License` field of the dataset's `dataset_description.json`).
+- Content: BIDS EEG of afternoon naps of healthy young adults (18–35 years, nap opportunity from about 13:30, at least
+  8 h in bed the night before): 73 channels at 512 Hz in BrainVision format, ECG1 / ECG2 among them; three groups
+  (`participants.tsv` / `participants.json`): NREM ("a nap containing non-rapid eye movement sleep only"), REM ("a nap
+  containing rapid eye movement sleep") and WAKE ("remained awake and rested quietly"). The snapshot has 65 recordings
+  (21 NREM, 21 REM, 23 WAKE, of which 2 WAKE files are truncated). The expert hypnograms are not deposited.
+- **Role: test only.** It is never used for training, for any parameter, prior, bias, band, guard or threshold, or for
+  choosing between models. It was decoded only after the experiment's rules (i) and (ii) were written, and it can only
+  block the installation of a new nap model or demote a STAGES output (rule (iii)); in the shipped run it changed
+  nothing.
+- What is used: `participants.tsv` / `.json` (the group of each recording), `dataset_description.json` and `CHANGES`
+  (the snapshot pin: DatasetDOI, the 1.0.5 entry and the 65 `.eeg` objects of the committed key list
+  `external-ds006576-v1.0.5.keys.tsv`), and per recording the BrainVision header, the `_eeg.json` and `_channels.tsv`
+  sidecars and, of the `.eeg` data, only the channels `ECG1`, `ECG2`, `A13_C3`, `B18_C4`, `A1`, `A2`, `LOC`, `EMG1` and
+  `EMG2`. ECG1 − ECG2 gives the heart rate (an R-peak detector frozen before the test, resampled exactly like the
+  training nights); C3 − A2 or C4 − A1, LOC − A2 and EMG1 − EMG2 go to YASA (below), whose sleep / wake transitions only
+  place the test windows. The weak labels are the group of each recording and Table 1 of the paper (group means of
+  sleep time and of N3 and REM). No PulseStages model was run on these data before the test.
+- Storage: `tools/train/data/external/ds006576/` (reduced signals, YASA stages, night files, a manifest), never
+  committed; the raw `.eeg` bytes are streamed and never stored. A unit test asserts that no ds006576 subject can enter
+  the training night index. Only aggregate numbers appear in reports.
+- Staging tool: YASA 0.7.0 (Vallat R, Walker MP. eLife 10:e70092 (2021), https://doi.org/10.7554/eLife.70092;
+  BSD-3-Clause), in its own pinned environment ([README.md](README.md), "Realistic nap estimates").
+
+**Citation** (as the dataset asks):
+
+> E.A. McDevitt, G. Kim, N.B. Turk-Browne, K.A. Norman (2026). The role of rapid eye movement sleep in neural
+> differentiation of memories in the hippocampus. Journal of Cognitive Neuroscience 38(1):126–143.
+> https://doi.org/10.1162/jocn.a.82
+
+**Dataset:**
+
+> McDevitt EA, Kim G, Turk-Browne NB, Norman KA. The role of REM sleep in neural differentiation of memories in the
+> hippocampus. OpenNeuro ds006576, version 1.0.5 (2026). https://doi.org/10.18112/openneuro.ds006576.v1.0.5
+
+## 7. Open nap hypnograms (aggregate counts only) and a deposit that is not used
+
+Individual hypnograms (a stage per epoch, no heart rate) of 93 genuine daytime naps of three open sets were used to
+check the per-nap guards of the realistic-nap experiment and to give reference rates of real naps. Only aggregate
+counts enter the project (`GENUINE` in `pulsetrain/litprior.py`, recomputed before the experiment's pre-registration);
+no file of these sets is downloaded by the committed scripts or committed, and nothing is fitted to them.
+
+| Set | Source | Licence | Naps | Role |
+|---|---|---|---:|---|
+| Zenodo 6642860 (<https://zenodo.org/records/6642860>) | Nicolas et al. 2022, eLife 11:e73930, https://doi.org/10.7554/eLife.73930 | CC BY 4.0 | 23 | guard false-flag rates; reference rates (DEEP ≥ 50 % of the window, zero DEEP, REM latency); its published arm is excluded from the literature targets (auditory cueing during NREM) and it does not enter the decisive guard |
+| OSF chav7 (<https://osf.io/chav7/>) | Mei et al. 2018, Data in Brief 18:1513, https://doi.org/10.1016/j.dib.2018.04.073 | BSD-3-Clause | 35 | guard false-flag rates; reference rate of DEEP ≥ 50 % of the window |
+| Sleep-EDF Expanded, SC daytime sleep bouts (PhysioNet, <https://physionet.org/content/sleep-edfx/>) | PhysioNet | ODC-By 1.0 | 35 | guard false-flag rates; REM latency |
+
+The decisive guard GL is built from published study results only, without any individual hypnogram; on these naps it
+flags 4 of 93 and 2 of the 70 outside the Zenodo set, and the upper end of the 95 % interval of the latter (9.8 %) is
+the threshold of rule (iii)(c). The guard G of the corridor cross-check, set partly on the Zenodo naps, is reported
+only. OpenNeuro ds003768 (sleep in an MRI scanner) was left out as out of distribution.
+
+**Not used: the OSF deposit of Bergamo et al. 2026** (`osf.io/z5r2j`, individual naps). It states no licence, so no
+number derived from it is used, neither its per-nap percentiles nor anything computed from them. Only the published
+paper's group means and its count of naps without REM (Bergamo et al. 2026, J Sleep Res,
+https://doi.org/10.1111/jsr.70253) are used, like the numbers of every other cited study.

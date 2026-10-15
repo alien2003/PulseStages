@@ -23,7 +23,88 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   own background work out of the test processes, the read budget keeps the suite within Health Connect's background
   quota across runs, and a cleanup step that always runs removes every test record (first by the ids recorded before
   the write, without a read) and puts back the demo-mode flag
-  ([tools/device-test/README.md](tools/device-test/README.md)).
+  ([tools/device-test/README.md](https://github.com/alien2003/PulseStages/blob/v0.1.1/tools/device-test/README.md)).
+- **Context margin of naps** (Settings → "Naps: algorithm" → "Heart rate around naps" → "Context margin of naps",
+  `algo.napMode.contextMarginMin`): how many minutes of heart rate and steps (and of the optional channels) before and
+  after a nap its estimate uses. Empty, the default, is the night's "Context margin" (30 min), as before; 0 is the nap
+  itself only; at most the night's value, which sets how much is read from Health Connect. Nap-only: nights never read
+  it. Checked by the core-algo and settings validators and by the import; English and Russian texts
+  ([settings reference](https://github.com/alien2003/PulseStages/blob/v0.1.1/docs/settings-reference.md#naps-algorithm)).
+- **Nap stage bias per session length in the model bundle**: an optional `nap.stageLogBiasByLength` table (lengths
+  and one log-bias row per length, linear interpolation in the session length, the first or last row outside;
+  exclusive with the nap section's `stageLogBias`). It is left out of the canonical JSON when absent, so existing
+  bundles keep their fingerprints and personal models keyed to them stay valid. The shipped bundle does not use it
+  ([docs/INTERCHANGE.md](https://github.com/alien2003/PulseStages/blob/v0.1.1/docs/INTERCHANGE.md)).
+- **Realistic-nap experiment** (pre-registered:
+  [docs/prereg/prereg-naps-realistic.md](https://github.com/alien2003/PulseStages/blob/v0.1.1/docs/prereg/prereg-naps-realistic.md)
+  with its Amendment 1, digest and command log;
+  [ALGORITHM.md §13.13](https://github.com/alien2003/PulseStages/blob/v0.1.1/ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)):
+  `train.py naps-realistic-gates`, `naps-realistic-timing`, `naps-realistic`, `naps-realistic-report`,
+  `naps-realistic-final`, `naps-realistic-external`, `naps-realistic-install` and `naps-realistic-verify`, with
+  `pulsetrain/napsrealistic.py`, `pools.py` (training tiles, evaluation pools, featureless sessions), `litprior.py` (the
+  published nap compositions: arm table, inclusion rule, targets, bands and guards), `realism.py` (per-epoch AUC, regime
+  contrasts, realism metrics, the decision rules) and `perturb.py`; sample weights in `models.fit_classifier`, a
+  per-length bias fit (`bias.fit_stage_bias_table`); `algo-cli evaluate` shares a preparation only between grid points
+  with the same mode and effective preprocessing, so a grid over the nap context margin prepares only the naps again
+  ([tools/train/README.md](https://github.com/alien2003/PulseStages/blob/v0.1.1/tools/train/README.md)).
+- **Test-only pipeline for OpenNeuro ds006576** (real afternoon naps with ECG and EEG, CC0): `tools/train/external.py`
+  (snapshot pin against the committed key list `external-ds006576-v1.0.5.keys.tsv`, a streamed fetch that keeps only
+  reduced signals, ECG → heart rate, test windows, night files, the digests that freeze the test set) and
+  `tools/train/external_stage.py` (YASA 0.7.0 sleep staging, which only places the test windows, in its own environment
+  `tools/train/.venv-external` pinned with hashes by `requirements-external.lock`, OpenMP runtime included). The data
+  are never used for training, for any parameter or for choosing between models, and are never committed
+  ([tools/train/DATASETS.md](https://github.com/alien2003/PulseStages/blob/v0.1.1/tools/train/DATASETS.md)).
+- Tests: the nap input restriction and preparation key, the length-bias table and its validation, the shipped bundle's
+  fingerprints pinned, and a personalized-nights test showing that personal bias deltas still apply after a bundle
+  update that keeps the night model; the training tests run on synthetic data only.
+
+### Changed
+
+- **Naps are written to Health Connect as asleep / awake by default.** "Written for a nap" (`algo.napMode.outputPolicy`)
+  now defaults to "Asleep / awake" (`SLEEP_WAKE`) instead of "Stages", because no nap stage model passed the
+  pre-registered realistic-nap experiment
+  ([ALGORITHM.md §13.13](https://github.com/alien2003/PulseStages/blob/v0.1.1/ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)).
+  Rule (i) adopted no candidate in either tier, so the shipped nap model (N1) and the bundle stay unchanged. Rule (ii)
+  gives N1 the asleep / awake output: it fails the evidence check F and the realism check R, and on the
+  literature-reweighted pool its accuracy is 0.055 below calling every epoch light sleep (at least +0.03 was required
+  for stages; 4-class κ 0.246), while its sleep / wake κ is 0.269 (at least 0.20 required). Failing criteria (Walch,
+  held-out subjects, worse sampling variant):
+  - N1: F, REM contrast r = 0.012 (the predicted late-night minus sleep-onset difference of the REM share of sleep, as a
+    fraction of the true difference; ≥ 0.25 required), the lower bound of its 95 % bootstrap interval −3.1 pp and its
+    BIDSleep difference −1.8 pp (> 0 required); R, featureless sessions of 90–135 min with 3.5–5.2 % REM of sleep, below
+    the lower bound of the published range (5.1 % at 90–105 min, 5.7 % at 120–135 min), and a late-night deep-sleep tail
+    of 0.226 (the share of 60-min windows from late in the night decoded as at least
+    half deep sleep, minus the true share; ≤ 0.10).
+  - C0 (N1's classifier with a literature-anchored level per length): F, REM r = 0.122, lower bound −3.4 pp, BIDSleep
+    −1.6 pp; R, featureless REM above the range at 30–75 min and deep sleep below it at 105 and 135–170 min (mean2min),
+    late-night deep-sleep tail 0.104.
+  - C1 (a heart-rate-only evidence model with a night-level bias): D, sleep-onset deep-sleep AUC 0.066 below N1's (at
+    most 0.05 allowed); R, featureless REM above and deep sleep below the range, guard excess 0.170 (implausible
+    single-nap compositions beyond those of the true compositions; ≤ 0.05), mid-anchor excess 2.46 pp (distance from the
+    published composition between the anchor lengths minus at them; ≤ 2.0), distance from the published composition
+    14.31 pp, above N1's 12.66.
+  - C2 (the evidence model with a literature-anchored level per length): D, sleep-onset deep-sleep AUC 0.057 below
+    N1's; F, REM r = 0.070, lower bound −6.3 pp; R, featureless deep sleep below the range at 75–170 min, late-night
+    deep-sleep tail 0.132, guard excess 0.104, mid-anchor excess 2.10 pp.
+
+  The test on real afternoon naps (OpenNeuro ds006576) changed nothing: N1 stays in effect with the asleep / awake
+  output. The app still estimates the stages of a nap and shows them as its own estimate; they are not validated, and
+  "Stages" writes them anyway. Settings store only changed values, so the new default applies wherever the setting was
+  left at "Stages" (an explicit "Stages" of 0.1.0 included, since it was the default). Nap sessions already in Health
+  Connect keep their stages until they are recomputed: the new default and the new setting change the params hash, so
+  every estimate is offered for recomputation, and nights decode exactly as before (568 of 568 validation nights, per
+  epoch) ([user guide](https://github.com/alien2003/PulseStages/blob/v0.1.1/docs/user-guide.md#updating-from-010)).
+- **Nap caution in the night detail**: an estimated nap now says "Nap stages are not validated: the nap model failed
+  pre-registered checks, and on test sessions with the stage mix of published naps it was less accurate than calling
+  everything light sleep." (other estimators: "Nap stages are not validated; take them as the app's estimate only.")
+  instead of "Nap estimates are rough: … about 6 in 10 …", and the hint of "Written for a nap" says that nap stages are
+  not validated instead of "rough"; English and Russian.
+- **Documentation of naps**: the README, the user guide and PLAN.md describe the asleep / awake default and say that the
+  nap stages shown in the app are not validated; the earlier figure of about 6 in 10 nap epochs right
+  ([ALGORITHM.md §13.12](https://github.com/alien2003/PulseStages/blob/v0.1.1/ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted))
+  is no longer given as the accuracy of naps, because it came almost entirely from windows at sleep onset.
+  tools/train/README.md and DATASETS.md cover the new experiment, ds006576 and the open nap hypnograms used for the
+  guards.
 
 ## [0.1.0] - 2026-10-14
 

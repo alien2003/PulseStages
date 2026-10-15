@@ -317,13 +317,14 @@ night opens as its own screen.
 
 Tap an entry to open its detail. Its cards, from top to bottom (the terms are explained in [Terms](#terms)):
 
-1. **Header**: the date, time range and duration, "Status", "Processed as" ("Night" or "Nap") and, for a session
-   without output, "Reason". For an estimated nap with the hybrid estimator it says: "Nap estimates are rough: with the
-   hybrid estimator, about 6 in 10 of the 30-second epochs of a test nap matched the sleep lab, against about 5 in 10
-   for calling everything light sleep. Take the stages as a rough guide." (other estimators get a shorter caution).
-   A nap written as asleep / awake adds "Written to Health Connect as asleep / awake only; the stages shown here are
-   the app's estimate." A stale session says "Stale: estimated with other settings or an older algorithm. Recompute
-   it to update its session."
+1. **Header**: the date, time range and duration, "Status", "Processed as" ("Night" or "Nap") and, for a session without
+   output, "Reason". For an estimated nap with the hybrid estimator it says: "Nap stages are not validated: the nap
+   model failed pre-registered checks, and on test sessions with the stage mix of published naps it was less accurate
+   than calling everything light sleep."; with another estimator: "Nap stages are not validated; take them as the app's
+   estimate only." ([Why naps are written as asleep / awake](#why-naps-are-written-as-asleep--awake)). A nap written as
+   asleep / awake (the default) adds "Written to Health Connect as asleep / awake only; the stages shown here are the
+   app's estimate." A stale session says "Stale: estimated with other settings or an older algorithm. Recompute it to
+   update its session."
 2. **Hypnogram**, titled "Hypnogram (as written to Health Connect)", "Hypnogram (the app's estimate; written to
    Health Connect as asleep / awake)" for a nap written as asleep / awake, or "Hypnogram (a new estimate; nothing was
    written)" when nothing was written. Below it is the heart-rate curve ("Heart rate" and "Smoothed", in bpm) and a
@@ -425,7 +426,7 @@ are shown in two columns.
 | ["HMM priors"](settings-reference.md#hmm-priors) | "Time of night, REM lockout, cycles, steps, adaptation" | no |
 | ["Hybrid estimator"](settings-reference.md#hybrid-estimator) | "Classifier with explicit durations" | no |
 | ["Post-processing"](settings-reference.md#post-processing) | "Minimum bouts, sanity check, calibration" | no |
-| ["Naps: algorithm"](settings-reference.md#naps-algorithm) | "Post-processing and hybrid decoder of naps; empty = the value of nights" | no |
+| ["Naps: algorithm"](settings-reference.md#naps-algorithm) | "Heart-rate context, post-processing and hybrid decoder of naps; empty = the value of nights" | no |
 | ["Personalization"](settings-reference.md#personalization) | "Personal model from your nights" | no |
 | ["Debugging"](settings-reference.md#debugging) | "Internal log" (includes the link "Log") | yes |
 
@@ -454,7 +455,7 @@ The settings most people use:
 | "Write awake as light sleep" (Written sessions) | off | For apps that show awakenings poorly; changes the written data |
 | "Estimator" (Algorithm) | "Hybrid" | "Hybrid", "HMM" or "Rules" |
 | "Nap threshold" (Naps) | 180 min | Shorter sessions are naps; 0 = no naps |
-| "Written for a nap" (Naps) | "Stages" | "Stages", "Asleep / awake" or "Nothing" |
+| "Written for a nap" (Naps) | "Asleep / awake" | "Asleep / awake" (only sleep and awakenings), "Stages" or "Nothing" ([Nights and naps](#nights-and-naps)) |
 | "Estimator for naps" (Naps) | "Same as nights" | The estimator of naps |
 | "Log level" (Debugging) | "Info" | Minimum level of the internal log |
 
@@ -521,6 +522,11 @@ A nap differs from a night in these ways:
 
 - it is decoded by the bundle's dedicated nap model (with "Hybrid"), with its own decoder values ("Naps: algorithm";
   empty = the value of nights);
+- its estimate uses the heart rate and steps of "Context margin of naps" minutes before and after it ("Naps:
+  algorithm" → "Heart rate around naps"). Empty, the default, means the value of nights (Preprocessing → "Context
+  margin", 30 min), as before; 0 means the nap itself only; the value cannot exceed that of nights, which sets how much
+  is read from Health Connect. Like every algorithm setting it makes the estimated sessions stale, and the validation
+  numbers apply to the default only;
 - it is never compared with your heart-rate baseline and never counts for it, so it is never marked "Elevated heart
   rate";
 - the stage-share sanity check skips it unless "Check the stage shares of naps" is on, so a nap without deep sleep is
@@ -531,8 +537,8 @@ A nap differs from a night in these ways:
 
 | "Written for a nap" | Written to Health Connect | Shown in PulseStages |
 |---|---|---|
-| "Stages" (default) | The estimated stages, like a night | The stages, with the caution that nap stages are rough |
-| "Asleep / awake" | Only awake and asleep (Health Connect's generic "sleeping" stage for light, deep, REM and no-data spans) | The estimated stages, labelled as the app's estimate |
+| "Asleep / awake" (default) | Only awake and asleep: Health Connect's generic "sleeping" stage for light, deep, REM and no-data spans, "awake" for awakenings (with "Write awake as light sleep" the whole nap is "sleeping") | The estimated stages, labelled as the app's estimate, with the caution that nap stages are not validated |
+| "Stages" | The estimated stages, like a night | The stages, with the caution that nap stages are not validated |
 | "Nothing" | Nothing: the nap is not estimated | "Not estimated" with "Naps are not estimated (Settings, Naps)." (not shown as a problem) |
 
 Switching to "Nothing" does not delete anything at once. The change makes earlier nap outputs stale, and an
@@ -540,9 +546,62 @@ earlier PulseStages session of a nap is removed when that nap is recomputed ("Re
 night that overlaps a skipped nap is never removed or replaced because of the nap. After switching back from
 "Nothing", "Recompute stale nights" writes the skipped naps.
 
-Nap estimates are rougher than nights: about 6 in 10 epochs correct on the test material
-([ALGORITHM.md §13.12](../ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted)). The algorithm side of the
-two modes is in [ALGORITHM.md §18](../ALGORITHM.md#18-night-and-nap-modes-napmode).
+The algorithm side of the two modes is in [ALGORITHM.md §18](../ALGORITHM.md#18-night-and-nap-modes-napmode).
+
+### Why naps are written as asleep / awake
+
+Up to version 0.1.0 naps were written with their stages by default. A later pre-registered test
+([ALGORITHM.md §13.13](../ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)) checked whether the stages of a
+nap can be trusted, on nap-length windows cut from sleep-lab nights and against the published sleep-stage mix of
+afternoon naps of healthy young adults. The nap model failed: its REM sleep hardly followed the heart rate (windows from
+late in the night, which are rich in REM, got almost no more REM than windows at sleep onset), its mix of stages was not
+realistic for naps (too little REM in sessions of 90–135 min with a flat heart rate that carries no information, too
+much deep sleep in hour-long windows from late in the night), and on windows weighted to match the published stage mix
+of naps it was less accurate than calling everything light sleep. Three new candidates did not pass either: one kept the
+nap model and took the level of each stage, by session length, from the published naps (its REM still did not follow the
+heart rate, and sessions without information got too much REM in short and too little deep sleep in long naps), one read
+only the heart rate (it told deep sleep at sleep onset apart less well, and its stage mix was that of a night), and one
+combined both (it failed all three kinds of check); ALGORITHM.md §13.13 lists every failing criterion of every model.
+The earlier figure of about 6 in 10 epochs right
+([ALGORITHM.md §13.12](../ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted)) came almost entirely from
+windows at sleep onset. Telling sleep from wake in a nap did pass the pre-registered bar (κ = 0.27 on nap-length windows
+of sleep-lab nights, where at least 0.20 was required), so that is what is written. That κ was measured on windows cut
+from nights; in afternoon recordings of young adults resting awake the model still decoded 60–85 min of sleep where an
+EEG sleep stager found about 24 min, so the asleep / awake output relies on the watch's start and end of the nap. With
+the default settings only sessions of 90 min to 3 h are estimated as naps (lower "Minimum session length" for shorter
+ones); at those lengths, on windows weighted to the published stage mix of naps, the nap model's deep and REM shares
+were 9.0–12.3 percentage points away from it, and sessions without information got too little REM at 90 and 120 min.
+
+What this means:
+
+- **In PulseStages** the Nights tab and the night detail still show the nap's estimated light, deep and REM sleep;
+  the night detail says "Nap stages are not validated: …" and "Written to Health Connect as asleep / awake only; the
+  stages shown here are the app's estimate." **These stages are not validated.** A nap shown with much deep sleep, or with none, tells you little about the nap itself.
+- **In Health Connect** the nap's session has only "awake" and Health Connect's generic "sleeping" stage, which does
+  not say whether the sleep was light, deep or REM. Apps that read it see when you slept and when you were awake, but
+  no sleep stages ([What other apps see](#what-other-apps-see)).
+- **In Sleep as Android** and other readers, how the generic "sleeping" stage is shown depends on the app; for Sleep
+  as Android it was not verified ([Sleep as Android](#sleep-as-android)).
+- Nights are not affected: they are still written with their stages.
+
+**Writing nap stages anyway.** Set Settings → "Naps" → "Written for a nap" to "Stages", then tap "Recompute stale
+nights" on Home to rewrite the naps written before. The stages are then written exactly as the app shows them; they
+are still not validated.
+
+### Updating from 0.1.0
+
+- **The setting.** PulseStages stores only the settings that differ from the defaults, so the new default "Asleep /
+  awake" applies wherever "Written for a nap" was left at the old default "Stages". That includes picking "Stages"
+  explicitly in 0.1.0: it was the default then, so it was not stored. A choice of "Asleep / awake" or "Nothing" is
+  kept. Importing a settings file exported by 0.1.0 brings "Stages" back, because an export contains every value
+  ([Settings export, import and reset](#settings-export-import-and-reset)).
+- **Sessions already in Health Connect** are not rewritten by the update: naps written by 0.1.0 keep their stages
+  until they are recomputed.
+- **Everything becomes stale.** The new default and the new setting "Context margin of naps" change the parameters
+  hash, so every estimated night and nap is marked "Stale" after the update. With the default "Existing sessions" =
+  "Skip up-to-date nights" nothing is rewritten until you ask: Home → "Recompute stale nights" rewrites the naps as
+  asleep / awake and the nights with the same stages as before (the night model and its settings did not change). With
+  "Never overwrite" the sessions are never rewritten ([Stale nights and recomputing](#stale-nights-and-recomputing)).
 
 ## Which sleep sessions are estimated
 
@@ -675,7 +734,8 @@ treat it as health data.
   emissions") resets only the HMM emission table.
 
 PulseStages stores only the values you changed. Defaults that come from the validation (estimator, hybrid decoder
-settings and others) therefore follow app updates for every value you never changed. An exported file contains the
+settings, "Written for a nap" and others) therefore follow app updates for every value you never changed
+([Updating from 0.1.0](#updating-from-010) is an example). An exported file contains the
 defaults of the version that exported it: importing it into a newer version keeps those older values wherever they
 differ from the new defaults. To return a single value to its default, set it to the default shown in the
 [settings reference](settings-reference.md).
@@ -737,8 +797,8 @@ this was not tested. The full record format, including every key of the notes, i
 | No data (heart-rate gap longer than "Interpolation limit", 10 min) | unknown with the default "Data gaps" = "Unknown"; light or the neighbouring stage with "Light" / "Nearest" |
 | Gap between merged fragments | awake |
 
-A nap written as "Asleep / awake" gets only awake and sleeping. The written stages cover the session exactly, with
-no gaps or overlaps.
+A nap written as "Asleep / awake" (the default for naps) gets only awake and Health Connect's generic "sleeping"
+stage. The written stages cover the session exactly, with no gaps or overlaps.
 
 ## Sleep as Android
 
@@ -752,7 +812,8 @@ night from different Health Connect apps; it documents duplicate filtering only 
 This guide has not verified on a device whether it shows OHealth's session, PulseStages' session or both, how it maps
 Health Connect's "unknown" and "sleeping" stages (its hypnogram has awake, REM, light and deep levels,
 [how to read its graphs](https://sleep.urbandroid.org/docs/sleep/how_to_read_sleep_graphs.html)), or whether it
-writes copies of imported sessions back to Health Connect.
+writes copies of imported sessions back to Health Connect. Naps are written with only "awake" and "sleeping" by default
+([Nights and naps](#nights-and-naps)), so how Sleep as Android shows a nap depends on that unverified mapping.
 
 ### Recommended setup (import only)
 
@@ -810,7 +871,8 @@ the app is open.
 | Sources lists no app ("No app wrote sleep sessions in the scanned range.") | The watch app has not written sleep sessions to Health Connect in the scanned range (90 days without history access) | Check the watch app's Health Connect sync; add the package with "Add an app by package name" to enable it in advance. |
 | Sources: "Reading sleep is not permitted. Grant the permissions on the Home tab." | Sleep read permission missing | Grant the permissions on Home. |
 | Naps are missing | They are shorter than "Minimum session length" (90 min) and were ignored | Lower "Minimum session length", for example to 30 min. New naps are picked up automatically; tap "Backfill history" to estimate the earlier ones. |
-| Naps are "Not estimated": "Naps are not estimated (Settings, Naps)." | "Written for a nap" is "Nothing" | Set "Written for a nap" to "Stages" (or "Asleep / awake") and tap "Recompute stale nights". |
+| Naps are "Not estimated": "Naps are not estimated (Settings, Naps)." | "Written for a nap" is "Nothing" | Set "Written for a nap" to "Asleep / awake" (the default) or "Stages" and tap "Recompute stale nights". |
+| A nap has no light, deep or REM sleep in Health Connect or in another app | "Written for a nap" is "Asleep / awake", the default since 0.1.1 | Expected: the stages are in PulseStages' Nights tab and are not validated ([Why naps are written as asleep / awake](#why-naps-are-written-as-asleep--awake)). To write them anyway, choose "Stages" and tap "Recompute stale nights". |
 | A nap ends up inside a night | It ended less than "Merge gap" (30 min) before the night, so it was merged as a fragment | Expected; set "Merge gap" to 0 to keep them apart (this affects all fragments). |
 | A night is "Not estimated": "There is no heart-rate data for this night." | The heart rate is not in Health Connect (yet), or it comes from another app | Wait: sessions are retried automatically for 36 hours. Later use "Recompute". If another app writes the heart rate, turn on "Heart rate and steps from any app". |
 | A night is "Not estimated": "Too little of the night has heart-rate data." | Less than 40 % of the epochs have heart rate (between 40 % and 60 % the rules estimator is used) | Check that the watch measures heart rate during sleep; recompute later if data arrived late. |
@@ -864,6 +926,10 @@ stage instead.
 **Why did a night's stages change after an update?** They did not change on their own: the written session stays
 until you recompute it. The night is marked "Stale" because the model or the defaults changed; "Recompute stale
 nights" rewrites it with the new version.
+
+**Why does Health Connect show my naps without stages?** "Written for a nap" is "Asleep / awake" by default: no nap
+stage model passed the pre-registered checks, so the stages of naps stay in the app and are not validated
+([Why naps are written as asleep / awake](#why-naps-are-written-as-asleep--awake)).
 
 **Why is a session that already has stages not estimated?** A source session with its own stages (from a watch
 app that records them) needs no estimate and is skipped. Choose "Recompute everything" under "Existing sessions" to

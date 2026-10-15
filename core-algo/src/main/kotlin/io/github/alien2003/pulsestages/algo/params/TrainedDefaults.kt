@@ -60,14 +60,14 @@ object TrainedDefaults {
     val NAP_HYBRID_DURATION_MODEL: DurationModel? = DurationModel.EXPLICIT
 
     /**
-     * Nap mode: exponent of the scaled likelihoods of the hybrid decoder for naps (chosen in run
-     * naps-realistic-final, with the duration model).
+     * Nap mode: exponent of the scaled likelihoods of the hybrid decoder for naps (chosen together with the
+     * duration model, see [NAP_HYBRID_DURATION_MODEL]).
      */
     const val NAP_HYBRID_EMISSION_WEIGHT: Double = 0.5
 
     /**
-     * Nap mode: weight of the time-of-night prior of the hybrid decoder for naps (chosen in run
-     * naps-realistic-final, with the duration model).
+     * Nap mode: weight of the time-of-night prior of the hybrid decoder for naps (chosen together with the duration
+     * model, see [NAP_HYBRID_DURATION_MODEL]).
      */
     const val NAP_HYBRID_TIME_PRIOR_WEIGHT: Double = 0.0
 

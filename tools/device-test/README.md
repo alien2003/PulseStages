@@ -47,7 +47,8 @@ the later steps do not need of the run's read budget (a hard cap), and covers on
 2. idempotency: a second backfill and a Changes-API sync on the same ledger must write and delete nothing;
 3. "recompute all": every written night rewritten exactly once, with clientRecordVersion + 1;
 4. the history again with the default settings;
-5. policies on the most recent weeks: naps SKIP and SLEEP_WAKE, `awakeAsLight`, `gapPolicy` LIGHT, `hrSources` ANY.
+5. policies on the most recent weeks: naps SKIP, STAGES and SLEEP_WAKE (the default since the realistic-nap
+   experiment, so STAGES has its own scenario), `awakeAsLight`, `gapPolicy` LIGHT, `hrSources` ANY.
 
 It reports per session: local date, start, length, NIGHT / NAP, outcome, estimator, coverage, confidence, stage
 shares, warnings, heart-rate samples and their median interval, the estimate's time, and whether the result equals the

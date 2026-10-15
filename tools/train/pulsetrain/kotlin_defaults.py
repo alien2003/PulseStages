@@ -14,11 +14,13 @@
   pre-registered nap experiment, :mod:`pulsetrain.naps`; ``selection.shortSessionMaxMin.note``), which is read as
   ``napMode.maxSessionMin``; else 180.0, the nap threshold the baseline and sanity-check rules used before the modes;
 - ``NAP_ESTIMATOR``: ``napMode.estimator`` of the patch, else ``null`` (naps use the night's estimator);
-- ``NAP_OUTPUT_POLICY``: ``napMode.outputPolicy`` of the patch (rule (ii) of the pre-registered nap-model
-  experiment, :mod:`pulsetrain.napmodel`; ``selection.napOutputPolicy.note``), else ``STAGES``;
+- ``NAP_OUTPUT_POLICY``: ``napMode.outputPolicy`` of the patch (rule (ii) of a pre-registered nap experiment: the
+  nap-model experiment, :mod:`pulsetrain.napmodel`, or the realistic-nap experiment with its rule (iii),
+  :mod:`pulsetrain.napsrealistic`; ``selection.napOutputPolicy.note``), else ``STAGES``;
 - ``NAP_HYBRID_DURATION_MODEL``, ``NAP_HYBRID_EMISSION_WEIGHT``, ``NAP_HYBRID_TIME_PRIOR_WEIGHT``: the nap decoder
-  overrides ``napMode.hybrid.*`` of the patch (``selection.napModel.decoderNote`` explains the choice), else ``null``
-  (naps use the night's decoder parameters);
+  overrides ``napMode.hybrid.*`` of the patch (``selection.napModel.decoderNote`` explains the choice, in the KDoc of
+  the duration model; the two weights refer to it, because a run can carry a nap decoder chosen by an earlier run
+  over unchanged, as ``naps-realistic-final`` does), else ``null`` (naps use the night's decoder parameters);
 - ``NAP_CONTEXT_MARGIN_MIN``: ``napMode.contextMarginMin`` of the patch, whole minutes of heart rate and steps a nap
   reads on each side (the pre-registered realistic-nap experiment, :mod:`pulsetrain.napsrealistic`;
   ``selection.napContextMargin.note``), at most ``preprocess.contextMarginMin``; else ``null`` (the night's margin);
@@ -169,8 +171,10 @@ def _nap_mode(defaults: Mapping, sel: Mapping, run: str, est: str) -> list[str]:
         if v is not None and not float(v) >= 0:
             raise DefaultsError(f"napMode.hybrid.{k} must be >= 0")
         text = _num(v, f"napMode.hybrid.{k}") if v is not None else "null"
-        why = (f"chosen in run {run}, with the duration model" if (sel.get("napModel") or {}).get("decoderNote")
-               else f"chosen in run {run}") if v is not None else same
+        # with a decoderNote the weights were chosen with the duration model, whose KDoc names how and by which
+        # experiment (not necessarily this run: naps-realistic-final carries nap-model-final's decoder over)
+        why = ("chosen together with the duration model, see [NAP_HYBRID_DURATION_MODEL]"
+               if (sel.get("napModel") or {}).get("decoderNote") else f"chosen in run {run}") if v is not None else same
         L += _kdoc(f"Nap mode: {what} of the hybrid decoder for naps ({why}).", "    ")
         # a chosen value is a constant (detekt: MayBeConst, MagicNumber); null = the night's value
         L.append(f"    const val {name}: Double = {text}" if v is not None else f"    val {name}: Double? = null")

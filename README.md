@@ -13,8 +13,9 @@ back to Health Connect as its own sleep session, clearly labelled as an estimate
 with OHealth (`com.heytap.health.international`): OHealth writes sleep sessions without stages, only a start and an
 end, plus a heart-rate sample about every 2 minutes. PulseStages turns those into a stage-by-stage hypnogram on the
 phone, without network access, and never changes or deletes the data of other apps. Daytime naps and nights are
-processed in two separate modes. The output is a statistical estimate, not a measurement, and it is not meant for
-medical decisions.
+processed in two separate modes; naps are written to Health Connect as asleep / awake by default, because their stage
+breakdown is not validated. The output is a statistical estimate, not a measurement, and it is not meant for medical
+decisions.
 
 - [Screenshots](#screenshots)
 - [How accurate it is](#how-accurate-it-is)
@@ -60,12 +61,30 @@ stage-proportion correction scores κ 0.317, so treat about 0.32–0.34 as the e
 agreement. It varies strongly between people (per-subject κ from about −0.03 to 0.65), and single nights can be far
 off. The simpler HMM and RULES estimators score κ 0.070 and 0.076.
 
-**Naps.** No public dataset has labelled naps. A dedicated nap model was trained and tested, in a pre-registered
-experiment, on nap-length pieces cut from the sleep-lab and EEG-headband nights. On the PSG pieces about 6 in 10 of the
-30-second epochs matched PSG (accuracy 0.61, against 0.50 for the earlier night-model approach and 0.53 for calling
-the whole nap light sleep), κ rose from 0.17 to 0.36 and the summed stage-share error fell from 70 to 53 percentage
-points. Nap stages are still rough: 4 in 10 epochs are wrong, deep sleep tends to be over-called in the first hour,
-and the test pieces were night sleep, with only 11 that end with an awakening as a real nap does.
+**Naps.** No public dataset has labelled naps with heart rate. Nap estimates were therefore tested, in pre-registered
+experiments, on nap-length windows cut from the sleep-lab and EEG-headband nights and against published stage
+compositions of afternoon naps of healthy young adults. In the latest one
+([ALGORITHM.md §13.13](ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)) no nap stage model passed the
+checks. The shipped nap model's REM did not follow the heart rate: its REM share was hardly higher in windows from late
+in the night than in windows at sleep onset (1 % of the true difference; at least 25 % was required). Its stage mix was
+not realistic either: featureless sessions of 90–135 min got less REM than the published range for naps of that length,
+and 60-min windows from late in the night were called at least half deep sleep 23 percentage points more often than the
+sleep lab scored them. On windows reweighted to the composition of published naps it was less accurate than calling
+every epoch light sleep (by 0.055); the earlier figure of about 6 in 10 epochs right
+([§13.12](ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted)) came almost entirely from windows at sleep
+onset. Three new candidate models failed as well: C0 (the shipped model with a level per session length taken from the
+published compositions) the REM check and the realism checks, C1 (a model that reads only the heart rate) the check of
+sleep-onset deep-sleep discrimination and the realism checks, and C2 (both changes) all three; §13.13 lists every
+failing criterion of every model. Naps are therefore written to Health Connect as asleep / awake only: the
+pre-registered rule allows that output at a sleep / wake κ of at least 0.20, and the shipped nap model reached κ = 0.27
+on held-out nap-length windows of the PSG nights. That κ comes from windows cut from nights; in afternoon recordings of
+young adults resting awake it still decoded 60–85 min of sleep where an EEG sleep stager found about 24 min, so the
+asleep / awake output relies on the watch's start and end of the nap. **The light / deep / REM breakdown that the app
+shows for a nap is not validated.** With the default settings only sessions of 90 min to 3 h are processed as naps
+([Nights and naps](#nights-and-naps)); at those lengths, on windows reweighted to the published nap composition, the
+shipped nap model's deep and REM shares are 9.0–12.3 percentage points away from it (the two differences summed and
+averaged over the lengths; the range is over the two sampling variants), and its check on featureless sessions fails at
+90 and 120 min.
 
 **Who it was tested on.** The training and test subjects were healthy adults wearing an Apple Watch (the Walch subjects
 were 29 ± 9 years old). An OPPO watch, older people, sleep disorders, heart medication or arrhythmias may behave
@@ -74,7 +93,8 @@ differently.
 [ALGORITHM.md](ALGORITHM.md) is the authoritative source for every number: nights in
 [§13.1](ALGORITHM.md#131-headline-walch-psg-ohealth-like-session-window), the stage-proportion correction in
 [§13.10](ALGORITHM.md#1310-stage-proportions-prior-exponent-and-proportion-matching-pre-registered-v3-adopted), naps in
-[§13.12](ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted), published results for comparison in
+[§13.12](ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted) and
+[§13.13](ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted), published results for comparison in
 [§14](ALGORITHM.md#14-published-results-for-context) and the limitations in
 [§16](ALGORITHM.md#16-limitations). If this summary differs from ALGORITHM.md, ALGORITHM.md wins.
 
@@ -107,10 +127,16 @@ The [user guide](docs/user-guide.md) covers every screen, permission and setting
 A session shorter than the nap threshold (Settings → "Naps" → "Nap threshold", 180 min by default) is a nap, a longer
 one a night. Sessions shorter than "Minimum session length" (Settings → "Sources", 90 min by default) are ignored
 altogether. To estimate short daytime naps, lower that setting (for example to 30 min): new naps are then picked up
-automatically, and "Backfill history" estimates the short sessions that were ignored before. By default a nap is
-written with its estimated stages ("Written for a nap": "Stages"); "Asleep / awake" writes only sleep and awakenings,
-and "Nothing" skips naps. The [user guide](docs/user-guide.md#nights-and-naps) explains the two modes; the algorithm
-side is in [ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
+automatically, and "Backfill history" estimates the short sessions that were ignored before.
+
+By default a nap is written to Health Connect as asleep / awake only ("Written for a nap": "Asleep / awake"), because no
+nap stage model passed the pre-registered checks
+([ALGORITHM.md §13.13](ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)). The app still estimates
+the nap's stages and shows them in the Nights tab as its own estimate; they are not validated. "Stages" writes them to
+Health Connect anyway, and "Nothing" skips naps. After an update from 0.1.0, whose default was "Stages", nap sessions
+already in Health Connect keep their stages until they are recomputed. The
+[user guide](docs/user-guide.md#nights-and-naps) explains the two modes and the switch; the algorithm side is in
+[ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
 
 ## Features
 
@@ -118,7 +144,7 @@ side is in [ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
   (RMSSD) used when present and permitted. Three estimators: HYBRID (default: a trained classifier decoded with
   explicit bout durations), HMM and RULES.
 - **Two processing modes**, night and nap, with a dedicated nap model and a choice of what is written for a nap
-  (stages, asleep / awake only, or nothing).
+  (asleep / awake only by default, the estimated stages, or nothing).
 - **Its own, clearly marked Health Connect record** per night: title "Sleep stages from heart rate (estimate)", the
   algorithm version and a hash of every parameter in its notes; the source data are never modified.
 - **Idempotent writes**: one output per night, keyed by the source sessions and rewritten under the same key on
@@ -168,11 +194,17 @@ side is in [ALGORITHM.md §18](ALGORITHM.md#18-night-and-nap-modes-napmode).
 
 - **First release: 0.1.0.** See the [changelog](CHANGELOG.md) and the
   [releases](https://github.com/alien2003/PulseStages/releases).
+- **Naps.** Written to Health Connect as asleep / awake by default since the pre-registered realistic-nap experiment
+  ([ALGORITHM.md §13.13](ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)), in which no nap stage
+  model passed the checks; the nap stages shown in the app are not validated. No open dataset has labelled naps with
+  heart rate.
 - **Platform.** Android 9 and later (minSdk 28, targetSdk 36, compileSdk 37). The phone used during development was
   an OPPO Find N6 (foldable) with Android 16 and ColorOS 16. The Android 9–13 path, with Health Connect as a separate
   app from Google Play, has not been run on a device.
-- **Tests.** JVM unit, Robolectric and render tests only; there are no instrumented tests against a real Health
-  Connect.
+- **Tests.** JVM unit, Robolectric and render tests run in CI. An on-device end-to-end suite
+  ([tools/device-test/README.md](tools/device-test/README.md)) runs against the installed app and the phone's real
+  Health Connect data, writes only one short-lived test record and checks that nothing else changed; it needs a phone
+  connected over adb, and CI does not run it.
 - **Not verified yet.** How Sleep as Android handles the two overlapping sessions of a night (OHealth's and
   PulseStages'); whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the behaviour
   of readers that filter by recording method or device type.

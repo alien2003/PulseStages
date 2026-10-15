@@ -133,9 +133,10 @@ when it means "no package").
 | `StepsRecord` | `NightInputReader` | as heart rate | as heart rate; records overlapping `[start − margin, end + margin)` are kept |
 | `OxygenSaturationRecord`, `RespiratoryRateRecord`, `HeartRateVariabilityRmssdRecord` | `NightInputReader`, only when enabled in the parameters and granted | as heart rate | `[start − margin, end + margin)`; instantaneous records need no padding |
 
-`margin` is `algo.preprocess.contextMarginMin` (30 min by default). `start` and `end` are those of the merged night.
-Personalization's population EM re-reads the inputs of up to the latest 90 estimated nights when it runs
-([ALGORITHM.md §10](../ALGORITHM.md#10-personalization-personal)).
+`margin` is `algo.preprocess.contextMarginMin` (30 min by default). `start` and `end` are those of the merged night. A
+nap is read with the same margin; `algo.napMode.contextMarginMin`, when set, only narrows what the nap's estimate uses
+(core-algo drops the rest), never what is read. Personalization's population EM re-reads the inputs of up to the latest
+90 estimated nights when it runs ([ALGORITHM.md §10](../ALGORITHM.md#10-personalization-personal)).
 
 PulseStages never calls `aggregate()`. Heart rate and steps are not stored by the app; every reader of an estimation
 input reads them from Health Connect again ([privacy.md §3](privacy.md#3-what-is-stored-on-the-device)).
@@ -260,10 +261,12 @@ this matches Google's intent is an interpretation, not a statement from Google.
 | REM | `STAGE_TYPE_REM` (6) | the same |
 | UNKNOWN (an epoch inside a heart-rate gap longer than `algo.preprocess.maxInterpGapMin`, 10 min, with `algo.post.gapPolicy` = `UNKNOWN`, the default; `LIGHT` writes light sleep and `NEAREST` the stage of the nearest epoch with data instead) | `STAGE_TYPE_UNKNOWN` (0) | the same |
 
-A nap with "Written for a nap" = **Asleep / awake** (`algo.napMode.outputPolicy` = `SLEEP_WAKE`) gets only
-`STAGE_TYPE_AWAKE` (1) and `STAGE_TYPE_SLEEPING` (2): LIGHT, DEEP, REM and UNKNOWN are written as SLEEPING, and with
-`awakeAsLight` AWAKE is SLEEPING too. The ledger keeps the estimated stages for such a nap (`sleepWakeOnly` = true), so
-the app still shows them. A nap with **Nothing** (`SKIP`) is not written at all.
+A nap with "Written for a nap" = **Asleep / awake** (`algo.napMode.outputPolicy` = `SLEEP_WAKE`, the default since
+0.1.1) gets only `STAGE_TYPE_AWAKE` (1) and `STAGE_TYPE_SLEEPING` (2): LIGHT, DEEP, REM and UNKNOWN are written as
+SLEEPING, and with `awakeAsLight` AWAKE is SLEEPING too. The ledger keeps the estimated stages for such a nap
+(`sleepWakeOnly` = true), so the app still shows them as its estimate; they are not validated
+([ALGORITHM.md §13.13](../ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted)). A nap with **Nothing**
+(`SKIP`) is not written at all.
 
 PulseStages never writes `STAGE_TYPE_OUT_OF_BED` (3) or `STAGE_TYPE_AWAKE_IN_BED` (7).
 

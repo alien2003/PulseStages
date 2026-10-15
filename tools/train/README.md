@@ -130,9 +130,9 @@ bias-033541ae --allow-other-build` reproduced `bias/results.jsonl` and `decision
 are never committed: when a worktree is removed, move its `out/bias-base`, `out/bias-final`, `out/prereg-bias.md` and
 `out/commands.log` next to the other runs of the main checkout's `tools/train/out`, since `defaults --run bias-final`
 needs `bias-final` (likewise `out/naps`, `out/naps-final`, `out/naps-verify`, `out/naps-verify-merge`, `out/naps-rerun`,
-`out/naps-posthoc` and `out/prereg-naps.md` of the nap experiment, and `out/nap-model`, `out/nap-model-final`,
-`out/nap-model-verify` and `out/prereg-nap-model.md` of the nap model: `defaults --run nap-model-final` generates the
-current `TrainedDefaults.kt`).
+`out/naps-posthoc` and `out/prereg-naps.md` of the nap experiment, `out/nap-model`, `out/nap-model-final`,
+`out/nap-model-verify` and `out/prereg-nap-model.md` of the nap model, and the runs of the realistic-nap experiment
+listed below: `defaults --run naps-realistic-final` generates the current `TrainedDefaults.kt`).
 
 Nap experiment (pre-registered: `docs/prereg/prereg-naps.md`, a verbatim copy of `tools/train/out/prereg-naps.md`
 with SHA-256 in `docs/prereg/prereg-naps.md.sha256` and the timestamped log `out/naps/commands.log` as
@@ -229,6 +229,90 @@ reproduce candidate B on every night (default parameters except the night decode
 that the installed bundle decodes every night exactly as the previous one (metrics and per-epoch CSV) and that it is
 accepted on every proxy.
 
+Realistic nap estimates (pre-registered: `docs/prereg/prereg-naps-realistic.md`, a verbatim copy of
+`tools/train/out/prereg-naps-realistic.md` as amended once before the code commit (Amendment 1), with SHA-256 in
+`docs/prereg/prereg-naps-realistic.md.sha256` and the timestamped main log `out/commands.log` as
+`docs/prereg/commands-naps-realistic.log`, checked by `tests/test_prereg.py`; the pre-registration was committed on its
+own, then the analysis code before the ds006576 fetch and the first algo-cli call of the experiment; ALGORITHM.md
+section 13.13):
+
+```sh
+# before the code commit: the featureless timing and the reproduction-only gates (no candidate is fitted)
+mise exec -- ./gradlew test ktlintCheck detekt :algo-cli:installDist
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic-timing --out-run naps-realistic-timing \
+    --jobs 16
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic-gates --out-run naps-realistic-gates \
+    --jobs 16
+# after the code commit: its build, then the external test set (OpenNeuro ds006576, test only, no model involved)
+mise exec -- ./gradlew :algo-cli:installDist
+mise exec -- python -I tools/train/external.py fetch --data tools/train/data/external/ds006576 --workers 4
+#   the YASA environment tools/train/.venv-external: the install steps are at the top of requirements-external.lock
+tools/train/.venv-external/bin/python -I tools/train/external_stage.py --self-test
+tools/train/.venv-external/bin/python -I tools/train/external_stage.py --data tools/train/data/external/ds006576
+mise exec -- python -I tools/train/external.py nights --data tools/train/data/external/ds006576   # logs digests only
+# the experiment: gates, nested inner CV, C0 / C1 / C2, LOSO, rules (i) and (ii)
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic --out-run naps-realistic --jobs 16
+mise exec -- python -I tools/train/train.py naps-realistic-report --out-run naps-realistic   # re-render (no algo-cli)
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic-final --exp naps-realistic \
+    --out-run naps-realistic-final                                    # no candidate adopted: shipped bundle unchanged
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic-external --exp naps-realistic \
+    --final naps-realistic-final --data tools/train/data/external/ds006576 --out-run naps-realistic-external
+mise exec -- python -I tools/train/train.py naps-realistic-install --exp naps-realistic --final naps-realistic-final \
+    --external naps-realistic-external --install-model                # rule (iii); trained_defaults.json
+mise exec -- python -I tools/train/train.py defaults --run naps-realistic-final --write   # NAP_OUTPUT_POLICY
+mise exec -- ./gradlew :algo-cli:installDist
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic-verify --exp naps-realistic \
+    --final naps-realistic-final --out-run naps-realistic-verify     # nights unchanged with the final build
+```
+
+`naps-realistic` (`pulsetrain/napsrealistic.py`) reads, read only, `bias-base` (outer fold night bundles, groups,
+selection sets, inner folds and the kept inner fold night models), `bias-base/bias` (b_g), `naps` (b_short_g(180)),
+`naps-posthoc`, `nap-model` (N1's outer nap models, the stored decodes that gate G1 reproduces and the inner selections
+that gate G4 refits), `nap-model-final` and `nap-model-verify`, and the gate-G2 references of the base build in
+`out/naps-realistic-base` (`--g2-base`: the saved algo-cli build of the base commit `cad7a6f`, its decodes of the 568
+whole nights, nap proxies and features, and the bundle fingerprints, all made before any code change). It cuts the
+sessions (`pulsetrain/pools.py`: training tiles that cover every night minute once, the evaluation pools onset,
+ends-in-wake, mid-night and return to sleep at the anchor lengths 30-170 min, the mid-anchor pool, LATESTART, the
+perturbed copies of `pulsetrain/perturb.py` and the featureless synthetic sessions), weights the labelled Walch sessions
+to the published afternoon-nap compositions (`pulsetrain/litprior.py`: the arm table with its inclusion rule, the
+targets, the Tier-1 bands and the guards G and GL, the tilting with its Newton polish), fits and decodes N1, C0, C1 and
+C2 per held-out subject (RULES, HMM-table and "all LIGHT" as context) and applies the gates and rules of
+`pulsetrain/realism.py` (per-epoch AUC, regime contrasts, featureless, late-tail and literature metrics, rule (i) in two
+tiers, rule (ii)) on the common set of sessions every model estimated. Its `summary.json` holds every criterion with its
+value and the reasons generated from the failing ones. `naps-realistic-final` builds the adopted candidate's bundle, or,
+with none adopted, writes the shipped bundle unchanged with the base defaults of `nap-model-final`;
+`naps-realistic-external` checks the freeze of the test set (gate G9: the log order and digests of the extraction, the
+YASA identity), decodes the ds006576 windows with the shipped bundle (and an adopted candidate) and applies rule (iii);
+`naps-realistic-install` applies its result (`--install-model`: the bundle, if a candidate passed) and writes
+`trained_defaults.json` into the final run; `naps-realistic-verify` checks with the final build that nights are
+unchanged (fold level, installed vs previous bundle per epoch, `napMode.contextMarginMin` null, 0 and 30, the
+fingerprints). Outcome of the shipped run: no candidate qualified, N1 kept with the bundle unchanged, rule (ii)
+SLEEP_WAKE, rule (iii) no change; `TrainedDefaults.NAP_OUTPUT_POLICY` = SLEEP_WAKE.
+
+The external test set: OpenNeuro ds006576 v1.0.5 ([DATASETS.md](DATASETS.md), section 6), test only. `external.py fetch`
+checks the snapshot (DatasetDOI, the first CHANGES entry and the 65 `.eeg` objects of the committed key list
+`external-ds006576-v1.0.5.keys.tsv`) before it reads any `.eeg` byte, streams every recording in range requests and
+keeps only the reduced signals; `external_stage.py` stages the recordings with YASA 0.7.0 (only its sleep / wake
+transitions place the test windows); `external.py nights` computes the heart rate from the ECG with the frozen R-peak
+detector and writes the night files, `manifest.json` and `yasa-summary.json`, and logs only their two digests, which
+must appear in `out/commands.log` before the first START of `train.py naps-realistic`. Data live in
+`tools/train/data/external/ds006576/` (never committed; `meta/` public metadata, `pin.json`, `derived/sub-<id>.npz`,
+`stages/sub-<id>.json`, `nights/<variant>/`, the manifest and the summary; about 1 GB, the raw `.eeg` bytes are never
+stored). YASA runs in its own environment `tools/train/.venv-external` (never the training one): `yasa==0.7.0`
+(`requirements-external.txt`) with every dependency pinned with hashes in `requirements-external.lock`, whose comment
+lines also hold the digests of the yasa wheel, of the fixed classifier file and of LightGBM's OpenMP runtime
+`libgomp.so.1` (from Ubuntu's libgomp1 14.2.0-4ubuntu2~24.04.1, extracted into `.venv-external/openmp/`);
+`external_stage.py` refuses any other environment, and the external test is then void.
+
+Keep these runs: the first `naps-realistic-gates` ran in a temporary detached worktree on the identical tree before the
+code moved to `main`, and `naps-realistic-gates-a1` repeated the gates on `main`'s build after Amendment 1;
+`naps-realistic-g2-manual` is the by-hand gate-G2 check of the new build against `naps-realistic-base`. Keep
+`out/naps-realistic-base`, `out/naps-realistic-g2-manual`, `out/naps-realistic-timing`, `out/naps-realistic-gates`,
+`out/naps-realistic-gates-a1`, `out/naps-realistic`, `out/naps-realistic-final`, `out/naps-realistic-external`,
+`out/naps-realistic-verify`, `out/prereg-naps-realistic.md` and `out/commands.log`, the inputs listed above, and
+`tools/train/data/external/ds006576/` (a re-extraction must reproduce the logged digests):
+`defaults --run naps-realistic-final` generates the current `TrainedDefaults.kt`.
+
 Provenance: every nap run records `meta.code` in its `summary.json` (SHA-256 of `train.py` and each `pulsetrain/*.py`,
 one digest over them, the git commit and the hashed files that differ from it) next to the algo-cli fingerprint and
 the pre-registration digest. Commit a pre-registration, with the analysis code it names, before the first run: the
@@ -246,14 +330,15 @@ Provenance: every run records a fingerprint of the algo-cli build it used (SHA-2
 every phase). Rebuild algo-cli only between runs and log the rebuild in `tools/train/out/commands.log`.
 
 `defaults` renders `out/<run>/trained_defaults.json` into the generated Kotlin object `TrainedDefaults`
-(`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`,
-`emissionWeight`, `timePriorWeight`, `priorExponent` — 1 unless the run chose it), nap mode (`napMode.maxSessionMin` —
-180 unless the run chose it, a legacy `hybrid.shortSessionMaxMin` of an earlier run read as it; `napMode.estimator` —
-null, i.e. the night's estimator, unless chosen; `napMode.outputPolicy` — STAGES unless chosen; the nap decoder overrides
-`napMode.hybrid.*` — null = the night's values unless chosen, a chosen weight is written as a `const val`) and HMM (`emissions`, `meanBouts`, `transitions`) defaults from it. The HMM
-fields hold the supervised estimates only when HMM-trained beat the physiology table by the selection rule;
-otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` / `TransitionWeights()`, and `HmmParams.PHYSIOLOGY`
-always gives the specification's table.
+(`pulsetrain/kotlin_defaults.py`): `AlgoParams` takes its estimator, hybrid decoder (`durationModel`, `emissionWeight`,
+`timePriorWeight`, `priorExponent` — 1 unless the run chose it), nap mode (`napMode.maxSessionMin` — 180 unless the run
+chose it, a legacy `hybrid.shortSessionMaxMin` of an earlier run read as it; `napMode.estimator` — null, i.e. the
+night's estimator, unless chosen; `napMode.outputPolicy` — STAGES unless chosen (SLEEP_WAKE in `naps-realistic-final`);
+`napMode.contextMarginMin` — null, i.e. the night's margin, unless chosen; the nap decoder overrides `napMode.hybrid.*`
+— null = the night's values unless chosen, a chosen weight is written as a `const val`) and HMM (`emissions`,
+`meanBouts`, `transitions`) defaults from it. The HMM fields hold the supervised estimates only when HMM-trained beat
+the physiology table by the selection rule; otherwise they point to `EmissionTable.PHYSIOLOGY` / `MeanBouts()` /
+`TransitionWeights()`, and `HmmParams.PHYSIOLOGY` always gives the specification's table.
 
 `run ... --install-model` does both in one go. `train.py report --run <name>` re-renders `report.md` /
 `summary.json` from the stored per-night results. The launcher is looked up as `$ALGO_CLI`, else
@@ -376,7 +461,15 @@ classifiers, C log-losses, the nap-bias fixed point), `selections.json`, `outer/
 nap models, no b), `folds.json`, `results.jsonl` (every decoded session of N0, N1, N2, RULES and HMM-table, the N0 / N1
 / N2 nights included), `summary.json`, `report.md`, `algocli.log`, `run.log`; `nap-model-final` writes
 `out/<out-run>/{final/hybrid_model.json, final/result.json, trained_defaults.json, summary.json}`; `nap-model-verify`
-writes `out/<out-run>/summary.json`.
+writes `out/<out-run>/summary.json`. `train.py naps-realistic-gates` writes `gates.json` (G0-G4) and its subdirectories;
+`naps-realistic` writes `out/<out-run>/` (default `naps-realistic`): `gates.json`, `sessions/` (tile, EVAL, MIDANCHOR,
+LATESTART, perturbed and featureless session files and counts), `features/`, `lit/` (weights, targets, effective
+sample sizes), `inner/<variant>/<group>/selection.json`, `selections.json`, `outer/<variant>/nap/<subject>.json`,
+`folds.json`, `common-set.json`, `results.jsonl` (every decoded session, the nights included), `per-epoch/`,
+`summary.json` (rules (i) and (ii), every criterion), `report.md`, `algocli.log`, `run.log`; `naps-realistic-final`
+writes `final/hybrid_model.json`, `final/result.json`, `summary.json` (and `naps-realistic-install` its
+`trained_defaults.json`); `naps-realistic-external` writes `summary.json` (rule (iii), void status, freeze checks),
+`report.md`, the decodes and `per-epoch/`; `naps-realistic-verify` writes `summary.json`.
 
 ### algo-cli interface (verified against the real launcher in PART B)
 
@@ -421,12 +514,14 @@ Checked on real night files with the installDist launcher; `tests/fake_algo_cli.
 
 ## Data policy
 
-Raw downloads (`data/raw/`) and everything derived from them (`data/nights/`, `out/`, models in progress) stay local
-and are never committed — only the scripts, `requirements.txt`, the tests and the links / citations in DATASETS.md
-are (the final model is committed as an app asset; the stage-proportion, nap and nap-model pre-registrations and their
-command logs, which hold no data but aggregate numbers, are committed under `docs/prereg/`). Downloaded files are treated as untrusted input: nothing from
-them is executed, and every script that reads them is run with `python -I` (isolated mode: no current directory or
-user site-packages on `sys.path`).
+Raw downloads (`data/raw/`) and everything derived from them (`data/nights/`, `out/`, models in progress) stay local and
+are never committed — only the scripts, `requirements.txt`, the tests and the links / citations in DATASETS.md are (the
+final model is committed as an app asset; the stage-proportion, nap, nap-model and realistic-nap pre-registrations and
+their command logs, which hold no data but aggregate numbers, are committed under `docs/prereg/`). The external test
+data (`data/external/`) and the YASA environment (`.venv-external`) stay local too; only the ds006576 key list (public
+metadata) and the environment's lock are committed. Downloaded files are treated as untrusted input: nothing from them
+is executed, and every script that reads them is run with `python -I` (isolated mode: no current directory or user
+site-packages on `sys.path`).
 
 ## Layout
 
@@ -435,7 +530,13 @@ download.py            dataset download + checksum verification
 prepare.py             night-file generation (all variants), summary.csv, manifest.json
 train.py               training / LOSO CLI (run | report | final | defaults | compare | sensitivity | bias | bias-report |
                        bias-final | naps | naps-report | naps-final | naps-verify | naps-posthoc | nap-model |
-                       nap-model-report | nap-model-final | nap-model-verify)
+                       nap-model-report | nap-model-final | nap-model-verify | naps-realistic-gates |
+                       naps-realistic-timing | naps-realistic | naps-realistic-report | naps-realistic-final |
+                       naps-realistic-external | naps-realistic-install | naps-realistic-verify)
+external.py            OpenNeuro ds006576 (test only): fetch with snapshot pin, night files, digests, lock helpers
+external_stage.py      YASA sleep staging of ds006576 (runs in tools/train/.venv-external only)
+requirements-external.txt / .lock   the YASA environment, every dependency pinned with hashes
+external-ds006576-v1.0.5.keys.tsv   the snapshot's 65 recordings (public metadata) for the snapshot pin
 pulsetrain/ohealth.py  2-min HR resampling, session windows, label mapping, coverage proxy
 pulsetrain/pedometer.py  accelerometer step detector
 pulsetrain/walch.py    sleep-accel readers;  pulsetrain/bidsleep.py  BIDSleep readers
@@ -452,5 +553,10 @@ pulsetrain/bias.py     pre-registered stage-proportion experiment (prior exponen
 pulsetrain/naps.py     pre-registered nap-proxy experiment (short-session bias) + its final model and implementation check
 pulsetrain/naps_posthoc.py  post-hoc analyses of the nap experiment (reporting only)
 pulsetrain/napmodel.py pre-registered dedicated nap model (nap proxies v2, LOSO, rules) + its nap section and checks
+pulsetrain/napsrealistic.py  pre-registered realistic-nap experiment (gates, C0 / C1 / C2, rules, final, external,
+                       install, verify);  pulsetrain/realism.py  its metrics and rules
+pulsetrain/pools.py    tiles, evaluation pools, LATESTART, featureless sessions;  pulsetrain/perturb.py  perturbations
+pulsetrain/litprior.py published afternoon-nap compositions: arm table, inclusion rule, targets, bands, guards, tilting
+pulsetrain/ds006576.py ds006576 snapshot pin, streaming, reduction, R-peaks, heart rate, windows, freeze checks
 tests/                 pytest (synthetic data only; tests/fake_algo_cli.py stands in for algo-cli)
 ```

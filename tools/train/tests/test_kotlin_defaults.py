@@ -159,6 +159,12 @@ def test_nap_mode_defaults_are_rendered():
                  "2026", "x")
     assert "val NAP_OUTPUT_POLICY: NapOutputPolicy = NapOutputPolicy.SLEEP_WAKE" in pol
     assert "rule (ii): SLEEP_WAKE" in _flat(pol) and "most frequent" in _flat(pol)
+    # the weights refer to the duration model's note and never credit the current run, which may only carry the nap
+    # decoder of an earlier run over (naps-realistic-final keeps nap-model-final's)
+    for name in ("NAP_HYBRID_EMISSION_WEIGHT", "NAP_HYBRID_TIME_PRIOR_WEIGHT"):
+        doc = _flat(pol.split(f"const val {name}", 1)[0].rsplit("/**", 1)[1])
+        assert "chosen in run r" not in doc and "see [NAP_HYBRID_DURATION_MODEL]" in doc
+    assert "most frequent" in _flat(pol.split("val NAP_HYBRID_DURATION_MODEL", 1)[0].rsplit("/**", 1)[1])
     kt = (kotlin_defaults.REPO_ROOT / "core-algo/src/main/kotlin/io/github/alien2003/pulsestages/algo/params/"
           "NapModeParams.kt").read_text()
     enum = kt.split("enum class NapOutputPolicy", 1)[1].split("}", 1)[0]

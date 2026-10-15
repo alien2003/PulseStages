@@ -18,6 +18,7 @@ from memory.
 | 5c | Naps: pre-registered nap-proxy evaluation (`docs/prereg/prereg-naps.md`; runs `naps`, `naps-final`, `naps-verify`; ALGORITHM.md §13.11) on the `bias-base` fold artefacts, no retraining | done: proxies = the first 30–180 min of every Walch / BIDSleep night, no data after the end; night-level reproduction 1136 / 1136 decodes identical. Shipped default on Walch nap proxies (worse variant, L 30–120 pooled): accuracy 0.413, summed share error 93 pp, 19–30 % REM predicted where PSG has 1–9 %. b off for naps (B) is worse; **short-session bias b_short below 180 min (C-180) adopted** by the rule: accuracy 0.488, error 72 pp (paired ΔE −12 / −21 pp, Δaccuracy +0.07 / +0.10, CIs exclude 0; κ unchanged within noise, 0.1–0.3); BIDSleep the same direction. Naps stay rough (a 30-min nap is no better than "all LIGHT"; about 4 in 5 flagged low-confidence on the experiment's build, 33–41 % (`LOW_HR_RANGE` only) once the sanity check skips sessions under 180 min). Audit follow-up (post hoc, reporting only, `naps-rerun` / `naps-posthoc`): the committed code reproduces every stored file of `naps` byte for byte; at 150 / 170 min, which T = 180 also covers (short nights under the default 90-min filter), C-180 is no clear gain (ΔE +6 / +8 pp instantaneous, −14 / −10 pp mean2min; too little REM); C-180 vs C-120 within noise; RULES would have won the rule as a candidate (κ ≈ 0). New `hybrid.shortSessionMaxMin` = 180 (TrainedDefaults), bundle `stageLogBiasShort`; bundle `pulsestages-walch+bidsleep-mlp-naps-final` installed; the new build reproduces A on 568 / 568 nights and C-180 on 2840 / 2840 proxies, and so does the build merged with `proportionsMinSessionMin` (`naps-verify-merge`: only the `SANITY_*` codes of the proxies shorter than 180 min are gone) |
 | 5d | Night and nap processing modes (`napMode`, `SessionMode`; ALGORITHM.md §18): one nap threshold replacing three, nap estimator / output policy (STAGES, SLEEP_WAKE, SKIP) / post-processing and decoder overrides, optional nap model in the bundle, ledger schema 2, Naps settings group, nap badge and filter | done: default decodes unchanged (`NapModeRegressionTest`: 767 digests of the previous build; real nights + proxies byte-identical in `algo-cli`; `naps-verify-modes` 568 / 568 nights, 2840 / 2840 proxies); no nap model trained yet |
 | 5e | Dedicated nap model: pre-registered LOSO on nap proxies v2 (`docs/prereg/prereg-nap-model.md`, committed with its analysis code `pulsetrain/napmodel.py` as `d0b7f7b` (the same patch is `72eb467` on `main`) before the first run; runs `nap-model`, `nap-model-final`, `nap-model-verify`; ALGORITHM.md §13.12) | done: proxies = onset (first 30–170 min) + ends-in-wake windows (wake bout ≥ 2 min → next wake bout ≥ 5 min, OHealth margins, 30–179 min, ≤ 3 per night; only 11 on Walch, 139 on BIDSleep); gate: N0 (= C-180 of 5c) reproduced 568 / 568 nights and all 3408 onset proxies, Python cut = Kotlin cut on every feature row. Inner CV chose the MLP in 10 / 10 selections. Walch, worse variant, both kinds pooled: N0 accuracy 0.499 / E 70.4 pp, **N1 (nap MLP + nap stageLogBias) 0.606 / 53.1 → adopted** by rule (i) (N2 without b 0.517 / 69.8 misses the +0.02 accuracy); paired N1 − N0 accuracy +0.106 [0.059, 0.148] / +0.121 [0.080, 0.162], κ 0.17 → 0.36; rule (ii): accuracy − all LIGHT +0.076, κ 0.356 → output policy **STAGES**. Final nap MLP on all 78 subjects, nap b (+0.339, +0.167, −0.228, −0.278), decoder EXPLICIT / 0.5 / 0 installed as the bundle's `nap` section (`pulsestages-walch+bidsleep-mlp-nap-model-final`); `TrainedDefaults` `NAP_HYBRID_*`, `NAP_OUTPUT_POLICY`; nights unchanged (568 / 568 fold level, installed vs previous bundle per epoch byte-identical). Naps stay rough (4 in 10 epochs wrong; 11 Walch windows ending in wake, on which it is no better than all LIGHT) |
+| 5f | Realistic nap estimates: an evidence-following nap model with a literature-anchored stage mix, tested on real afternoon naps (pre-registered: `docs/prereg/prereg-naps-realistic.md`, committed on its own as `52517a7`; the analysis code, the app changes of its section 16 and Amendment 1 (implementation details only, logged with the new digest `38c1589e…` before any experiment step) committed as `c0b3471` before the ds006576 fetch and the first algo-cli call of the experiment; runs `naps-realistic-base`, `naps-realistic-g2-manual`, `naps-realistic-timing`, `naps-realistic-gates`, `naps-realistic-gates-a1`, `naps-realistic`, `naps-realistic-final`, `naps-realistic-external`, `naps-realistic-verify`; ALGORITHM.md §13.13) | done: a diagnosis first showed that N1 (the 5e nap model) is in effect a night-onset template (session-level slope of predicted on true DEEP share 0.13–0.28, REM about 0; a quiet hour decodes as about 60 % DEEP). Candidates: C0 (N1 + a per-length level fitted to published afternoon-nap compositions), C1 / C2 (evidence model: session-time and step features masked, trained on tiles of whole nights, night-model HSMM statistics, no heart-rate context around the nap; a night-level bias / the per-length literature level). Gates D (per-epoch AUC vs N1), F (late-night vs sleep-onset contrast of the REM and DEEP shares at least 0.25 of the truth), R (featureless sessions inside the published band, late-night DEEP tail, guard excess on the literature-reweighted pool, interpolation, literature distance not above N1's); every provenance and reproduction gate passed. **Rule (i): tiers 1 and 2 empty, N1 kept, bundle unchanged**: N1 fails F (REM r 0.012) and R (featureless REM below the band at 90–135 min, late DEEP tail 0.226); C0 fails F (REM r 0.122) and R; C1 fails D (sleep-onset DEEP AUC −0.066) and R (guard excess 0.170, literature distance 14.31 > 12.66 pp); C2 fails D (−0.057), F (REM r 0.070) and R; literature distance (worse variant) N1 12.66, C0 4.18, C1 14.31, C2 5.40 pp. **Rule (ii): N1 → SLEEP_WAKE** (literature-reweighted accuracy − all LIGHT −0.055 < 0.03, 4-class κ 0.246, sleep / wake κ 0.269 ≥ 0.20). Rule (iii) on OpenNeuro ds006576 (42 real afternoon naps and 21 complete quiet-wake recordings, test only): no change, N1 in effect and not demoted. `TrainedDefaults.NAP_OUTPUT_POLICY` = SLEEP_WAKE (`defaults --run naps-realistic-final`); new nap-only `napMode.contextMarginMin` (default null) and optional bundle field `nap.stageLogBiasByLength` (absent in the shipped bundle); nights unchanged (568 / 568 per epoch, bundle fingerprints unchanged, personal deltas still apply). The nap stages shown in the app are not validated |
 | 6 | `:data-local` (Room, DataStore, logger), `:data-hc` (repository, night pipeline, Changes API sync, backfill, fake repository, idempotency tests) | |
 | 7 | `:work` (workers, scheduling, backoff), `:app` (Compose M3 UI, adaptive layouts, permissions, rationale activity, icon) | |
 | 8 | README (English), ALGORITHM.md, CHANGELOG.md, screenshots; full check; install on the phone via `$ADB_WIN` | |
@@ -128,15 +129,15 @@ from memory.
   session and work the same on a 30-min nap. `LOW_HR_RANGE` stays (a nap's small P50 − P10 really makes hrNorm
   unreliable). Population EM (HMM only, not with the default HYBRID bundle) still pooled naps; since the two
   processing modes it uses nights only. Details: ALGORITHM.md §4, §8, §9.
-- **Two processing modes, night and nap** (`algo.napMode`, `SessionMode`; ALGORITHM.md §18). Three thresholds of
-  180 min each separated naps from nights (`features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`,
+- **Two processing modes, night and nap** (`algo.napMode`, `SessionMode`; ALGORITHM.md §18). Three thresholds of 180 min
+  each separated naps from nights (`features.baselineMinSessionMin`, `hybrid.shortSessionMaxMin`,
   `post.proportionsMinSessionMin`); a session could be a nap for one rule and a night for another, and nothing else
   could differ between the two. They are replaced by one threshold `napMode.maxSessionMin` (180 min from
   `TrainedDefaults`, 0..720, 0 = no naps; strictly shorter = nap; the source setting `minSessionMin` stays the global
-  minimum) and a nap may get its own estimator (`napMode.estimator`, null = the night's), output policy (`napMode.outputPolicy`:
-  STAGES / SLEEP_WAKE / SKIP, default STAGES), post-processing overrides (`napMode.post`: minimum bouts, sanity
-  corridors, `checkProportions` = false, low-confidence threshold and policy) and HYBRID decoder overrides
-  (`napMode.hybrid`: duration model, emission and time-prior weights). Decisions:
+  minimum) and a nap may get its own estimator (`napMode.estimator`, null = the night's), output policy
+  (`napMode.outputPolicy`: STAGES / SLEEP_WAKE / SKIP; default STAGES until stage 5f, SLEEP_WAKE since), post-processing
+  overrides (`napMode.post`: minimum bouts, sanity corridors, `checkProportions` = false, low-confidence threshold and
+  policy) and HYBRID decoder overrides (`napMode.hybrid`: duration model, emission and time-prior weights). Decisions:
   - **Behaviour is unchanged by default.** All three old thresholds defaulted to 180, so one threshold of 180 decodes
     every session as before; this was proved on synthetic sessions (`NapModeRegressionTest`, 767 digests recorded with
     the previous build) and on the real nights and nap proxies of `tools/train` (old vs new `algo-cli`, per-epoch
@@ -154,16 +155,37 @@ from memory.
     sections, so a nap model is validated out-of-fold. A nap model is shipped since stage 5e, after it passed its own
     pre-registered protocol (`docs/prereg/prereg-nap-model.md`, ALGORITHM.md §13.12); its decoder parameters are set
     as the nap overrides (`TrainedDefaults.NAP_HYBRID_*`) and the default output policy came from the same
-    pre-registration (`TrainedDefaults.NAP_OUTPUT_POLICY`).
+    pre-registration (`TrainedDefaults.NAP_OUTPUT_POLICY`) until rule (ii) of the realistic-nap pre-registration set it
+    to SLEEP_WAKE (stage 5f).
   - **SLEEP_WAKE writes AWAKE / SLEEPING only** (Health Connect's generic sleeping stage for LIGHT, DEEP, REM and
-    no-data spans), for readers that want naps without a rough stage breakdown; the ledger row keeps the estimated
-    stages (`sleepWakeOnly` = true) so the night detail still shows them. **SKIP** is checked before any data is read:
-    the session is NOT_ESTIMATED with `NAP_SKIPPED` and an earlier output for it is deleted on the next run.
+    no-data spans), for readers that want naps without the unvalidated stage breakdown, and the default since stage 5f;
+    the ledger row keeps the estimated stages (`sleepWakeOnly` = true) so the night detail still shows them. **SKIP** is
+    checked before any data is read: the session is NOT_ESTIMATED with `NAP_SKIPPED` and an earlier output for it is
+    deleted on the next run.
   - **Ledger schema 2** (`estimated_nights.mode`, `sleepWakeOnly`; migration 1 → 2 with an exported schema and a
     migration test; rows of sessions shorter than 180 min, the version-1 threshold, become naps). The notes JSON has
     `"mode"`; the night detail, reference comparison and personalization take the mode of the session; calibration
     and population EM use nights only; Compare splits kappa / accuracy by mode when the reference sessions include
     naps; Home counts written nights and naps apart; the Nights list has a nap badge and an All / Nights / Naps filter.
+- **Naps are written as asleep / awake, their stages stay in the app** (stage 5f). The realistic-nap pre-registration
+  fixed in advance that a nap estimator that fails the evidence check F or the realism check R gets no stage output in
+  Health Connect, and SLEEP_WAKE only with a sleep / wake κ of at least 0.20; N1 failed F and R and reached 0.269. As
+  that rule specifies, the app still estimates and shows the stages of a nap (ledger and night detail), labelled as
+  its estimate; the documentation says they are not validated, and "Stages" stays a user choice. The default is a
+  `TrainedDefaults` value like the other trained defaults, so it follows the update wherever the user never changed
+  it (the settings file stores only values that differ from the defaults). The update changes the params hash of
+  every estimate (new default, new field), so every night and nap becomes stale and is rewritten only when the user
+  recomputes; nights are rewritten with identical stages, and nap records keep their stages until then.
+- **Nap context margin** (`napMode.contextMarginMin`, null = the night's `preprocess.contextMarginMin`). Added for the
+  evidence model, which is trained without heart rate around a nap. core-algo restricts a nap's input to that margin
+  itself (`NightPreparer`), so the app keeps one read window (± the night's margin) and the pipeline, night detail,
+  CSV export and Compare give the same estimate; validators keep it between 0 and the night's margin, so a nap never
+  uses more context than is read. Nights never read it (568 / 568 nights byte-identical with null, 0 and 30). It stays
+  null because no model trained without context was adopted.
+- **Nap level per session length** (`nap.stageLogBiasByLength` in the bundle): a table of nap stage log-biases by
+  session length with linear interpolation, exclusive with the nap section's scalar `stageLogBias` and left out of the
+  canonical JSON when absent, so every existing bundle keeps its fingerprint and personal deltas keyed to the night
+  model stay valid. Built for the literature-anchored candidates of stage 5f; the shipped bundle has none.
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 
@@ -255,6 +277,9 @@ constructor; pagination samples loop on `!= null`; some pages put `<uses-permiss
 | [BIDSleep 1.0.1](https://physionet.org/content/bidsleep-dataset/) (47 subjects, 253 nights, Apple Watch HR + accel, Dreem 2 EEG, expert-corrected AASM) | ODC-By 1.0, open | extra training data, second validation set |
 | [DREAMT 2.2.0](https://physionet.org/content/dreamt/) | restricted (DUA, research only) | **not used** |
 | HMC, CAP, UCDDB, SLPDB (ECG + PSG), NSRR MESA/SHHS (DAUA) | open / DAUA | not used now (ECG-derived HR, clinical cohorts); noted as future work |
+| [OpenNeuro ds006576 1.0.5](https://doi.org/10.18112/openneuro.ds006576.v1.0.5) (McDevitt et al. 2026; afternoon naps with ECG + EEG; 21 NREM-nap, 21 REM-nap and 23 quiet-wake recordings, group labels only) | CC0, open | **test only** (rule (iii) of the realistic-nap experiment, stage 5f); never for training, any parameter or a choice between models |
+| Open nap hypnograms: Zenodo 6642860 (Nicolas et al. 2022), OSF chav7 (Mei et al. 2018), Sleep-EDF Expanded SC daytime bouts | CC BY 4.0; BSD-3-Clause; ODC-By 1.0 | composition only, no heart rate: false-flag rates of the nap guards and genuine-nap reference rates (aggregate counts in `pulsetrain/litprior.py`) |
+| Bergamo et al. 2026 OSF deposit (individual naps) | no licence | **not used** (only the published paper's group means) |
 
 Published expectations (Walch 2019 Table 6): 3-class kappa with HR only 0.04–0.17, motion + HR + clock ≈ 0.30.
 4-class kappa ≈ 0.2–0.3 is a realistic target for 2-minute HR without an accelerometer; > 0.5 would indicate leakage.
@@ -266,3 +291,6 @@ Attribution notice for produced works (ODC-By §4.3) is in README and in the app
 - Whether OHealth writes SpO2 / respiratory rate at night — the app works with or without them.
 - OHealth HeartRateRecord granularity (one sample per record or series) — handled either way by the 24 h left
   padding.
+- How OHealth delimits a nap session (start and end of a daytime nap) is undocumented; nap estimates depend on it.
+- No open dataset has labelled naps with heart rate, and none has labelled heart-rate sessions at daytime clock times;
+  a nap stage model that could be written by default needs such data (ALGORITHM.md §13.13).

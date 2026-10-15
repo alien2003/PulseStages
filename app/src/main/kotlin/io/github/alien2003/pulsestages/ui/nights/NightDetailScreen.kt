@@ -284,10 +284,15 @@ private fun HeaderCard(
         LabeledValue(stringResource(R.string.night_detail_status), stringResource(night.status.labelRes()))
         LabeledValue(stringResource(R.string.night_detail_mode), stringResource(night.mode.labelRes()))
         if (night.mode == SessionMode.NAP && night.status == NightStatus.WRITTEN) {
-            // The figures describe the validated hybrid nap model; other estimators get the caution without them.
-            val rough =
-                if (night.estimator == EstimatorType.HYBRID) R.string.night_detail_nap_rough else R.string.night_detail_nap_rough_generic
-            Text(text = stringResource(rough), style = MaterialTheme.typography.bodyMedium)
+            // Nap stages are not validated (ALGORITHM.md section 13.13): the hybrid caution names the checks the nap model
+            // failed; other estimators get the short caution.
+            val caution =
+                if (night.estimator == EstimatorType.HYBRID) {
+                    R.string.night_detail_nap_not_validated
+                } else {
+                    R.string.night_detail_nap_not_validated_generic
+                }
+            Text(text = stringResource(caution), style = MaterialTheme.typography.bodyMedium)
             if (night.sleepWakeOnly) {
                 Text(text = stringResource(R.string.night_detail_nap_sleep_wake), style = MaterialTheme.typography.bodySmall)
             }

@@ -263,6 +263,11 @@ comparison and personalization:
   `features.baselineNights` nights that lasted at least the nap threshold; at least 3 such nights are needed). A nap
   gets no baseline.
 
+A nap is read with the same window. When `algo.napMode.contextMarginMin` is set (null by default: the night's
+margin), core-algo (`NightPreparer`) keeps only the samples within that many minutes of the nap and builds its epoch
+grid with that context, so the pipeline, the night detail, the CSV export and Compare give the same estimate from the
+reader's usual input; the validators keep the value between 0 and `algo.preprocess.contextMarginMin`.
+
 `NightEstimator.estimate` runs on the Default dispatcher. The production implementation, `SleepStagerNightEstimator`
 in `:work`, wraps core-algo's `SleepStager` with the bundled hybrid model (`BundledHybridModelProvider`, loaded once
 from `assets/models/hybrid_model.json`; absent or invalid means HYBRID falls back to the HMM) and the personal model
@@ -278,7 +283,7 @@ The outcome is either `Estimated` or `NotEstimated` (`NO_HR_DATA`, `LOW_COVERAGE
 `NightRun.write`:
 
 1. maps the estimated stages to Health Connect stage types (`StageMapping.toHcStages`, or `toSleepWakeHcStages` for a
-   nap with the `SLEEP_WAKE` output policy);
+   nap with the `SLEEP_WAKE` output policy, the default for naps);
 2. validates them (`StageMapping.validate`): non-empty, sorted, contiguous, covering the session exactly, only
    written types, every stage at least one epoch long. A violation is a bug upstream: the night is marked FAILED
    (`InvalidStagesException`);
