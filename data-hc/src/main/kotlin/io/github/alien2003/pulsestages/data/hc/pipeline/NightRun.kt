@@ -15,6 +15,7 @@ import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.WriteResult
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightEntity
+import io.github.alien2003.pulsestages.data.local.db.InputUpdate
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.db.SourceOutcome
 import io.github.alien2003.pulsestages.data.local.db.SourceSessionEntity
@@ -86,6 +87,12 @@ internal enum class NightResult {
 
     /** A repair or retirement of outputs (counted through `superseded` only). */
     REPAIRED,
+
+    /** A refresh target whose input was read again; its record was not rewritten (unchanged input or result). */
+    INPUT_CHECKED,
+
+    /** A refresh target whose input changed and whose record was rewritten (version + 1). */
+    REFRESHED,
 }
 
 /** Uuids among [uuids] whose source row belongs to another night (not [ownNight]) that currently has an output. */
@@ -126,6 +133,8 @@ internal fun HcSleepSession.toSourceRow(
  * @property granted the granted Health Connect permissions.
  * @property paramsHash the params hash of [settings] with [granted].
  * @property requestedAtMs when the user asked for the run; nights deleted after it are not recreated (null = no limit).
+ * @property refreshTargets clientRecordIds of WRITTEN nights whose input is read again ([NightRun.refresh]) when they
+ *   are otherwise up to date.
  */
 internal class RunSpec(
     val settings: AppSettings,
@@ -133,13 +142,14 @@ internal class RunSpec(
     val granted: Set<String>,
     val paramsHash: String,
     val requestedAtMs: Long? = null,
+    val refreshTargets: Set<String> = emptySet(),
 )
 
 /**
  * The state of one [NightPipeline.process] call (or of one ledger repair): decides, estimates and writes night by
  * night. Not thread-safe; always used under [LedgerLock].
  */
-@Suppress("TooManyFunctions") // One private function per decision / write step.
+@Suppress("TooManyFunctions", "LargeClass") // One private function per decision / write step, all on the run's state.
 internal class NightRun(
     deps: PipelineDeps,
     spec: RunSpec,
@@ -150,6 +160,7 @@ internal class NightRun(
     private val granted = spec.granted
     private val paramsHash = spec.paramsHash
     private val requestedAtMs = spec.requestedAtMs
+    private val refreshTargets = spec.refreshTargets
     private val repository = deps.repository
     private val estimator = deps.estimator
     private val ledger = deps.ledger
@@ -289,14 +300,219 @@ internal class NightRun(
             logger.i(TAG, "NEVER policy: an overlapping output exists; not writing this night", nightKey = candidate.clientRecordId)
         }
         val skip = if (blockedByNever) NightResult.NEVER_SKIPPED else skipReason(candidate, existing, linked)
-        if (skip == null) return estimateAndWrite(candidate, existing, related)
-        if (hasOutput && policy != OverwritePolicy.NEVER) {
-            // An up-to-date or stale output: make sure nothing it replaces is left behind.
-            supersede(related, candidate.clientRecordId)
-            refreshSourceRows(candidate)
+        val refreshTarget = skip == NightResult.UP_TO_DATE && candidate.clientRecordId in refreshTargets
+        return when {
+            skip == null -> {
+                estimateAndWrite(candidate, existing, related)
+            }
+
+            refreshTarget && existing != null -> {
+                refresh(candidate, existing, related)
+            }
+
+            else -> {
+                if (hasOutput && policy != OverwritePolicy.NEVER) keepOutput(candidate, related)
+                skip
+            }
         }
-        return skip
     }
+
+    /** An up-to-date or stale output is kept: make sure nothing it replaces is left behind. */
+    private suspend fun keepOutput(
+        candidate: NightCandidate,
+        related: List<EstimatedNightEntity>,
+    ) {
+        supersede(related, candidate.clientRecordId)
+        refreshSourceRows(candidate)
+    }
+
+    /**
+     * The refresh of an up-to-date WRITTEN night ([RunSpec.refreshTargets]): its input is read again and compared with
+     * the fingerprint stored at the last write.
+     * - Unchanged: nothing is estimated or written; only `inputCheckedAt` moves.
+     * - Changed (or no fingerprint stored and the heart-rate sample count or coverage differs): the night is
+     *   estimated again. The record is rewritten (same clientRecordId, version + 1, `statusReason` = [InputUpdate]) only
+     *   when the record itself would change (stages, title or notes). Otherwise only the ledger takes the new estimate
+     *   and fingerprint, keeping its version and `updatedAt`.
+     * - Never rewritten: a night that can no longer be estimated (the previous output stays, as for a recompute), and a
+     *   night whose record is no longer in Health Connect (deleted outside PulseStages: not recreated).
+     */
+    private suspend fun refresh(
+        candidate: NightCandidate,
+        existing: EstimatedNightEntity,
+        related: List<EstimatedNightEntity>,
+    ): NightResult {
+        val input = buildInput(candidate)
+        val fingerprint = InputFingerprint.of(input, InputSelection.of(settings, granted))
+        val unchanged = fingerprint == existing.inputFingerprint
+        if (unchanged) logger.d(TAG, "refresh: input unchanged", nightKey = candidate.clientRecordId)
+        val estimate = if (unchanged) null else changedEstimate(candidate.clientRecordId, existing, input)
+        return if (estimate == null) {
+            inputChecked(candidate, related, fingerprint)
+        } else {
+            refreshWith(candidate, existing, related, estimate, fingerprint)
+        }
+    }
+
+    /**
+     * The new estimate of the refresh target [existing] whose input changed to [input], or null when its output is kept
+     * as it is: the night can no longer be estimated; the session now has fewer heart-rate samples than at the last write
+     * (data being replaced by its source, or deleted: an automatic update never makes a night worse, a recompute uses the
+     * data as it is); or no fingerprint was stored ([sameCounts]) and the heart-rate sample count and coverage are
+     * unchanged.
+     */
+    private suspend fun changedEstimate(
+        key: String,
+        existing: EstimatedNightEntity,
+        input: NightInput,
+    ): NightEstimate? {
+        val outcome = withContext(estimationDispatcher) { estimator.estimate(input, settings.algo) }
+        val estimate = (outcome as? EstimationOutcome.Estimated)?.estimate
+        val kept =
+            when {
+                outcome is EstimationOutcome.NotEstimated -> {
+                    logger.w(
+                        TAG,
+                        "refresh: the input changed but the night can no longer be estimated (${outcome.reason}: ${outcome.detail}); " +
+                            "keeping the previous output",
+                        nightKey = key,
+                    )
+                    true
+                }
+
+                estimate != null && estimate.hrSampleCount < existing.hrSamples -> {
+                    logger.i(
+                        TAG,
+                        "refresh: fewer heart-rate samples than at the last write (${existing.hrSamples} -> ${estimate.hrSampleCount}); " +
+                            "keeping the previous output",
+                        nightKey = key,
+                    )
+                    true
+                }
+
+                existing.inputFingerprint == null && estimate != null && sameCounts(existing, estimate) -> {
+                    logger.d(TAG, "refresh: no fingerprint stored yet; heart-rate samples and coverage unchanged", nightKey = key)
+                    true
+                }
+
+                else -> {
+                    false
+                }
+            }
+        return if (kept) null else estimate
+    }
+
+    /**
+     * Applies the new [estimate] of the refresh target [existing] (input [fingerprint]): not written again when our record
+     * is no longer in Health Connect, a ledger-only update when the record would stay the same, otherwise a rewrite.
+     */
+    private suspend fun refreshWith(
+        candidate: NightCandidate,
+        existing: EstimatedNightEntity,
+        related: List<EstimatedNightEntity>,
+        estimate: NightEstimate,
+        fingerprint: String,
+    ): NightResult {
+        val key = candidate.clientRecordId
+        val update =
+            InputUpdate(
+                InputFingerprint.changeOf(existing.inputFingerprint, fingerprint, existing.hrSamples, estimate.hrSampleCount),
+                existing.hrSamples,
+                estimate.hrSampleCount,
+            )
+        val planned = plan(candidate, estimate)
+        val stored = storedOwnSessions()[key]
+        return when {
+            stored == null -> {
+                logger.w(
+                    TAG,
+                    "refresh: the input changed (${update.describe()}), but our session of this night is no longer in Health " +
+                        "Connect (deleted outside PulseStages?); not written again",
+                    nightKey = key,
+                )
+                inputChecked(candidate, related, fingerprint)
+            }
+
+            planned.sameRecordAs(stored) -> {
+                ledger.nights.recordNight(
+                    keptRecordNight(candidate, existing, estimate, planned, fingerprint, stored, update),
+                    candidate.fragments.map { it.toSourceRow(SourceOutcome.ESTIMATED, null, key, clock.millis()) },
+                )
+                supersede(related, key)
+                if (stored.clientRecordVersion > existing.clientRecordVersion) {
+                    logger.i(TAG, "updated: ${update.describe()} (written by an earlier run that was interrupted)", nightKey = key)
+                } else {
+                    logger.i(TAG, "refresh: the input changed (${update.describe()}); the written session stays the same", nightKey = key)
+                }
+                NightResult.INPUT_CHECKED
+            }
+
+            else -> {
+                logger.i(TAG, "updated: ${update.describe()}", nightKey = key)
+                write(candidate, existing, related, estimate, Rewrite(fingerprint, update.reason(), planned))
+                NightResult.REFRESHED
+            }
+        }
+    }
+
+    /**
+     * The ledger row of a refresh target whose new [estimate] gives exactly the [stored] record: the new estimate and
+     * [fingerprint] with the record facts of the row (record id, version, recompute count, reason and `updatedAt`), as
+     * nothing is written. When [stored] has a higher version than the row, an earlier refresh wrote it and was interrupted
+     * before its ledger transaction (the record is already this estimate): the row takes the record's id and version, the
+     * matching recompute count, the [update] as its reason and the record's modification time.
+     */
+    @Suppress("LongParameterList") // The parts of a ledger-only update.
+    private fun keptRecordNight(
+        candidate: NightCandidate,
+        existing: EstimatedNightEntity,
+        estimate: NightEstimate,
+        planned: PlannedRecord,
+        fingerprint: String,
+        stored: HcSleepSession,
+        update: InputUpdate,
+    ): EstimatedNightEntity {
+        val row = writtenNight(candidate, existing, estimate, planned.written(existing), fingerprint)
+        return if (stored.clientRecordVersion > existing.clientRecordVersion) {
+            row.copy(
+                hcRecordId = stored.uuid,
+                clientRecordVersion = stored.clientRecordVersion,
+                recomputeCount =
+                    maxOf(existing.recomputeCount.toLong(), stored.clientRecordVersion - ALGO_VERSION * VERSION_FACTOR).toInt(),
+                statusReason = update.reason(),
+                updatedAt = stored.lastModifiedMs.takeIf { it > 0 } ?: clock.millis(),
+            )
+        } else {
+            row.copy(
+                hcRecordId = existing.hcRecordId,
+                clientRecordVersion = existing.clientRecordVersion,
+                statusReason = existing.statusReason,
+                updatedAt = existing.updatedAt,
+            )
+        }
+    }
+
+    /** A refresh that does not rewrite the output: the output is kept and the input is marked as checked. */
+    private suspend fun inputChecked(
+        candidate: NightCandidate,
+        related: List<EstimatedNightEntity>,
+        fingerprint: String,
+    ): NightResult {
+        keepOutput(candidate, related)
+        ledger.nights.markInputChecked(candidate.clientRecordId, fingerprint, clock.millis())
+        return NightResult.INPUT_CHECKED
+    }
+
+    /**
+     * For a night written before fingerprints were stored: the new [estimate] has the heart-rate sample count and the
+     * coverage (as written in the notes, three decimals) of the stored output, so its input is taken as unchanged.
+     */
+    private fun sameCounts(
+        existing: EstimatedNightEntity,
+        estimate: NightEstimate,
+    ): Boolean =
+        existing.hrSamples == estimate.hrSampleCount &&
+            SessionText.round3(existing.coverage) == SessionText.round3(estimate.coverage)
 
     /**
      * The candidate with the zone offsets the ledger stored for this night where the source session has none: the
@@ -328,8 +544,15 @@ internal class NightRun(
         }
         val input = buildInput(candidate)
         return when (val outcome = withContext(estimationDispatcher) { estimator.estimate(input, settings.algo) }) {
-            is EstimationOutcome.Estimated -> write(candidate, existing, related, outcome.estimate)
-            is EstimationOutcome.NotEstimated -> notEstimated(candidate, existing, related, outcome)
+            is EstimationOutcome.Estimated -> {
+                val planned = plan(candidate, outcome.estimate)
+                val fingerprint = InputFingerprint.of(input, InputSelection.of(settings, granted))
+                write(candidate, existing, related, outcome.estimate, Rewrite(fingerprint, reason = null, planned))
+            }
+
+            is EstimationOutcome.NotEstimated -> {
+                notEstimated(candidate, existing, related, outcome)
+            }
         }
     }
 
@@ -367,11 +590,17 @@ internal class NightRun(
                 null
             }
 
-            policy == OverwritePolicy.RECOMPUTE_ALL || trigger.forcesRecompute -> {
+            trigger.forcesRecompute -> {
                 null
             }
 
-            existing.algoVersion == ALGO_VERSION && existing.paramsHash == paramsHash -> {
+            // A refresh target that is up to date is checked by refresh(), also under RECOMPUTE_ALL: re-reading its input
+            // must not rewrite it on every sync.
+            policy == OverwritePolicy.RECOMPUTE_ALL && !(candidate.clientRecordId in refreshTargets && existing.isCurrent()) -> {
+                null
+            }
+
+            existing.isCurrent() -> {
                 NightResult.UP_TO_DATE
             }
 
@@ -380,6 +609,9 @@ internal class NightRun(
                 NightResult.STALE_LEFT
             }
         }
+
+    /** Estimated with the current algorithm version and params hash (not stale). */
+    private fun EstimatedNightEntity.isCurrent(): Boolean = algoVersion == ALGO_VERSION && paramsHash == this@NightRun.paramsHash
 
     /** True when the session boundaries / offsets or a fragment's times differ from what the ledger knows. */
     private suspend fun sourcesChanged(
@@ -420,12 +652,15 @@ internal class NightRun(
 
     private suspend fun buildInput(candidate: NightCandidate): NightInput = inputReader.read(NightSpan.of(candidate), settings, granted)
 
-    private suspend fun write(
+    /**
+     * The record [estimate] gives for [candidate]: the mapped stages (AWAKE / SLEEPING only for a nap with the
+     * SLEEP_WAKE output policy), validated, the title and the notes. Throws [InvalidStagesException] when the stages
+     * cannot be written.
+     */
+    private fun plan(
         candidate: NightCandidate,
-        existing: EstimatedNightEntity?,
-        related: List<EstimatedNightEntity>,
         estimate: NightEstimate,
-    ): NightResult {
+    ): PlannedRecord {
         val awakeAsLight = settings.write.awakeAsLight
         val sleepWakeOnly = estimate.mode == SessionMode.NAP && settings.algo.napMode.outputPolicy == NapOutputPolicy.SLEEP_WAKE
         val stages =
@@ -442,14 +677,27 @@ internal class NightRun(
                 settings.algo.preprocess.epochSec * SECOND_MS,
             )
         if (problems.isNotEmpty()) throw InvalidStagesException(problems)
+        return PlannedRecord(stages, sleepWakeOnly, title(estimate), notes(candidate, estimate))
+    }
 
+    private suspend fun write(
+        candidate: NightCandidate,
+        existing: EstimatedNightEntity?,
+        related: List<EstimatedNightEntity>,
+        estimate: NightEstimate,
+        rewrite: Rewrite,
+    ): NightResult {
+        val planned = rewrite.planned
+        val stages = planned.stages
+        val sleepWakeOnly = planned.sleepWakeOnly
         val recomputeCount = nextRecomputeCount(candidate, existing)
         val version = ALGO_VERSION * VERSION_FACTOR + recomputeCount
-        val result = repository.writeEstimatedSession(sessionWrite(candidate, estimate, stages, version))
+        val result = repository.writeEstimatedSession(sessionWrite(candidate, planned, version))
 
         val now = clock.millis()
         ledger.nights.recordNight(
-            writtenNight(candidate, existing, estimate, Written(stages, sleepWakeOnly, recomputeCount, result)),
+            writtenNight(candidate, existing, estimate, Written(stages, sleepWakeOnly, recomputeCount, result), rewrite.fingerprint)
+                .copy(statusReason = rewrite.reason),
             candidate.fragments.map { it.toSourceRow(SourceOutcome.ESTIMATED, null, candidate.clientRecordId, now) },
         )
         val coverage = SessionText.round3(estimate.coverage)
@@ -530,8 +778,7 @@ internal class NightRun(
 
     private fun sessionWrite(
         candidate: NightCandidate,
-        estimate: NightEstimate,
-        stages: List<HcStage>,
+        planned: PlannedRecord,
         version: Long,
     ): EstimatedSessionWrite =
         EstimatedSessionWrite(
@@ -541,34 +788,46 @@ internal class NightRun(
             endMs = candidate.endMs,
             startZoneOffsetSec = candidate.startZoneOffsetSec,
             endZoneOffsetSec = candidate.endZoneOffsetSec,
-            stages = stages,
-            title =
-                SessionText.title(
-                    template = settings.write.titleTemplate,
-                    defaultTemplate = titles.defaultTitleTemplate(),
-                    estimator = estimate.estimator,
-                    algoVersion = estimate.algoVersion,
-                    confidence = estimate.confidence,
-                ),
-            notes =
-                SessionText.notes(
-                    estimator = estimate.estimator,
-                    mode = estimate.mode,
-                    algoVersion = estimate.algoVersion,
-                    paramsHash = paramsHash,
-                    coverage = estimate.coverage,
-                    confidence = estimate.confidence,
-                    sourceUuids = candidate.sourceUuids,
-                    hrSamples = estimate.hrSampleCount,
-                    calibrated = estimate.flags.calibrated,
-                ),
+            stages = planned.stages,
+            title = planned.title,
+            notes = planned.notes,
         )
 
+    private fun title(estimate: NightEstimate): String =
+        SessionText.title(
+            template = settings.write.titleTemplate,
+            defaultTemplate = titles.defaultTitleTemplate(),
+            estimator = estimate.estimator,
+            algoVersion = estimate.algoVersion,
+            confidence = estimate.confidence,
+        )
+
+    private fun notes(
+        candidate: NightCandidate,
+        estimate: NightEstimate,
+    ): String =
+        SessionText.notes(
+            estimator = estimate.estimator,
+            mode = estimate.mode,
+            algoVersion = estimate.algoVersion,
+            paramsHash = paramsHash,
+            coverage = estimate.coverage,
+            confidence = estimate.confidence,
+            sourceUuids = candidate.sourceUuids,
+            hrSamples = estimate.hrSampleCount,
+            calibrated = estimate.flags.calibrated,
+        )
+
+    /**
+     * The ledger row of a written night. [fingerprint] is the input fingerprint of [estimate] ([InputFingerprint]);
+     * `inputCheckedAt` is now.
+     */
     private fun writtenNight(
         candidate: NightCandidate,
         existing: EstimatedNightEntity?,
         estimate: NightEstimate,
         written: Written,
+        fingerprint: String,
     ): EstimatedNightEntity {
         val now = clock.millis()
         // The estimated stages (after awakeAsLight): for a sleep/wake nap the ledger keeps them, not the two written types.
@@ -610,6 +869,8 @@ internal class NightRun(
             updatedAt = now,
             mode = estimate.mode,
             sleepWakeOnly = written.sleepWakeOnly,
+            inputFingerprint = fingerprint,
+            inputCheckedAt = now,
         )
     }
 
@@ -797,6 +1058,40 @@ internal class NightRun(
         val result: WriteResult,
     )
 
+    /**
+     * The record an estimate gives ([plan]): the stages as written, whether they are AWAKE / SLEEPING only, the title
+     * and the notes.
+     */
+    private class PlannedRecord(
+        val stages: List<HcStage>,
+        val sleepWakeOnly: Boolean,
+        val title: String,
+        val notes: String,
+    ) {
+        /** True when [stored] (our record in Health Connect) already has these stages, this title and these notes. */
+        fun sameRecordAs(stored: HcSleepSession): Boolean =
+            stored.title == title && stored.notes == notes && stored.stages.sortedWith(STAGE_ORDER) == stages.sortedWith(STAGE_ORDER)
+
+        /** The [Written] of a ledger-only update of [existing]: its record, version and recompute count stay. */
+        fun written(existing: EstimatedNightEntity): Written =
+            Written(
+                stages,
+                sleepWakeOnly,
+                existing.recomputeCount.toLong(),
+                WriteResult(existing.hcRecordId.orEmpty(), existing.clientRecordVersion),
+            )
+    }
+
+    /**
+     * How [write] stores a night: the input [fingerprint] of the estimate, the `statusReason` ([reason]: null for a
+     * regular write, the [InputUpdate] of a refresh) and the [planned] record.
+     */
+    private class Rewrite(
+        val fingerprint: String,
+        val reason: String?,
+        val planned: PlannedRecord,
+    )
+
     /** Constants. */
     companion object {
         private const val TAG = "NightPipeline"
@@ -809,6 +1104,9 @@ internal class NightRun(
 
         /** Margin around the nights' starts in which our existing records are looked up. */
         private const val STORED_LOOKUP_MS = 24L * 60 * 60 * 1000
+
+        /** Order in which stages are compared. */
+        private val STAGE_ORDER: Comparator<HcStage> = compareBy({ it.startMs }, { it.endMs }, { it.type })
 
         /** Statuses of nights that a new night may replace. */
         val REPLACEABLE: Set<NightStatus> = setOf(NightStatus.WRITTEN, NightStatus.NOT_ESTIMATED, NightStatus.FAILED)

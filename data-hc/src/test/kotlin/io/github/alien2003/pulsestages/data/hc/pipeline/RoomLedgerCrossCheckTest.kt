@@ -79,6 +79,21 @@ class RoomLedgerCrossCheckTest {
         return pipeline.process(windowReader.nightsInWindow(NOON - 10 * DAY, NOON, current), current, trigger, repository.granted.toSet())
     }
 
+    /**
+     * The refresh of a sync ([NightPipeline.refresh]) with every refreshable night as a target: those whose input
+     * changed are estimated again (rewritten or updated in the ledger only), the others are marked as checked.
+     */
+    private suspend fun Env.refresh(): PipelineReport {
+        val current = settings.current
+        val granted = repository.granted.toSet()
+        val now = clock.millis()
+        val targets =
+            pipeline
+                .refreshableNights(sinceMs = 0, processedBeforeMs = now, paramsHash = pipeline.currentParamsHash(current, granted))
+                .mapTo(HashSet()) { it.clientRecordId }
+        return pipeline.refresh(windowReader.nightsInWindow(NOON - 10 * DAY, now, current), current, granted, targets)
+    }
+
     /** The scenario; returns the reports of every step. */
     private suspend fun Env.scenario(): List<PipelineReport> {
         settings.set {
@@ -92,6 +107,7 @@ class RoomLedgerCrossCheckTest {
         repository.addNight(OTHER_APP, nightStart(5) + 10 * MINUTE_MS, durationMs = 7 * HOUR_MS)
         repository.addNight(OHEALTH, nightStart(2), withHeartRate = false)
         val single = repository.addNight(OHEALTH, nightStart(1), durationMs = 5 * HOUR_MS)
+        val partial = repository.addPartialNight(OHEALTH, nightStart(6))
 
         val reports = mutableListOf(process(), process())
         repository.addNight(OHEALTH, nightStart(1) + 5 * HOUR_MS + 20 * MINUTE_MS, durationMs = 2 * HOUR_MS)
@@ -111,6 +127,12 @@ class RoomLedgerCrossCheckTest {
         }
         reports += process()
         reports += process(PipelineTrigger.RECOMPUTE)
+        // The refresh of written nights: the rest of one night's heart rate arrives (a rewrite), steps arrive for another
+        // night (an update of the ledger only), every other written night is only marked as checked.
+        clock.advanceBy(HOUR_MS)
+        repository.addRestOfHeartRate(partial)
+        repository.addSteps(OHEALTH, single.startMs + HOUR_MS, single.startMs + HOUR_MS + 5 * MINUTE_MS, 30)
+        reports += refresh()
 
         val deleted = listOf(fifth, first, single).map { it.uuid }
         deleted.forEach(repository::deleteSleepSession)
@@ -150,6 +172,11 @@ class RoomLedgerCrossCheckTest {
                     n.stages.size,
                     n.paramsHash,
                     n.awakeMin + n.lightMin + n.deepMin + n.remMin + n.unknownMin,
+                    n.coverage,
+                    n.hrSamples,
+                    n.updatedAt,
+                    n.inputFingerprint,
+                    n.inputCheckedAt,
                 ).joinToString("|")
             }
         val uuids = repository.allSessions().map { it.uuid }
@@ -180,6 +207,10 @@ class RoomLedgerCrossCheckTest {
             assertTrue("the scenario wrote nights", onRoom.own.isNotEmpty())
             assertTrue("the scenario superseded nights", onRoom.nights.any { "SUPERSEDED" in it })
             assertTrue("the scenario removed a night", onRoom.nights.any { "SOURCE_DELETED" in it })
+            val refresh = onRoom.reports[onRoom.reports.size - 2]
+            assertEquals("the refresh rewrote one night", 1, refresh.refreshed)
+            assertTrue("the refresh checked other nights without rewriting them", refresh.inputChecks > refresh.refreshed + 1)
+            assertTrue("the rows carry fingerprints", onRoom.nights.any { "|1|hr:" in it })
             assertEquals(onRoom.reports, inMemory.reports)
             assertEquals(onRoom.nights, inMemory.nights)
             assertEquals(onRoom.sources, inMemory.sources)

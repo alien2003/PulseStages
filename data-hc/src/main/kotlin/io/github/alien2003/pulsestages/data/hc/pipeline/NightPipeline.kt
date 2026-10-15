@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
+import io.github.alien2003.pulsestages.algo.ALGO_VERSION
 import io.github.alien2003.pulsestages.algo.model.TimeSpan
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
@@ -107,25 +108,64 @@ class NightPipeline
             requestedAtMs: Long? = null,
         ): PipelineReport =
             LedgerLock.withLock {
-                val run =
-                    NightRun(
-                        deps,
-                        RunSpec(settings, trigger, granted, currentParamsHash(settings, granted), requestedAtMs),
-                        nights.candidates,
-                    )
-                var report = PipelineReport(found = nights.nightCount, skipped = nights.skipped.size)
-                val remaining = nights.candidates.iterator()
-                var stopped = false
-                while (!stopped && remaining.hasNext()) {
-                    currentCoroutineContext().ensureActive()
-                    val step = if (shouldStop()) Step.Cancelled else run.step(remaining.next())
-                    report = report.add(step, run.takeSuperseded())
-                    stopped = step.stopsRun
-                }
-                if (!stopped) run.retireStagedOutputs(nights.skipped)?.let { report = report.add(it, run.takeSuperseded()) }
-                recordSkipped(nights)
-                report
+                run(nights, RunSpec(settings, trigger, granted, currentParamsHash(settings, granted), requestedAtMs), shouldStop)
             }
+
+        /**
+         * Processes [nights] like a sync ([PipelineTrigger.NEW_NIGHTS]) and refreshes the WRITTEN nights among them whose
+         * clientRecordId is in [targets] ([refreshableNights]): when such a night is up to date, its input is read again
+         * and the night is estimated and rewritten only when the input changed and the record would change (see
+         * `NightRun.refresh`). Every other rule of [process] applies unchanged (NEVER, deleted nights, staged sources,
+         * priority, superseding), decided under [LedgerLock] with the ledger as it is then.
+         */
+        suspend fun refresh(
+            nights: CandidateSet,
+            settings: AppSettings,
+            granted: Set<String>,
+            targets: Set<String>,
+        ): PipelineReport =
+            LedgerLock.withLock {
+                val hash = currentParamsHash(settings, granted)
+                val report = run(nights, RunSpec(settings, PipelineTrigger.NEW_NIGHTS, granted, hash, refreshTargets = targets)) { false }
+                if (!report.stoppedEarly) markNotCandidatesChecked(targets - nights.candidates.mapTo(HashSet()) { it.clientRecordId })
+                // Skipped groups made only of the targets' own sessions (a target that is no candidate any more) were not
+                // found by this run either: like the refresh checks, they are left out of found and skipped.
+                val targetUuids = targets.mapNotNull { ledger.nights.findByClientRecordId(it) }.flatMapTo(HashSet()) { it.sourceUuids }
+                val targetGroups = nights.skipped.count { group -> group.sessions.all { it.uuid in targetUuids } }
+                report.copy(found = report.found - targetGroups, skipped = report.skipped - targetGroups)
+            }
+
+        /**
+         * Refresh targets that are no candidate of their window any more (now a lower-priority duplicate, shorter than the
+         * minimum session length, merged into another night, ...) have nothing to refresh: they are marked as checked, with
+         * the fingerprint they have, so they do not take a place of the per-run limit on every run.
+         */
+        private suspend fun markNotCandidatesChecked(clientRecordIds: Set<String>) {
+            val now = clock.millis()
+            clientRecordIds.forEach { id ->
+                ledger.nights.findByClientRecordId(id)?.let { ledger.nights.markInputChecked(id, it.inputFingerprint, now) }
+            }
+        }
+
+        private suspend fun run(
+            nights: CandidateSet,
+            spec: RunSpec,
+            shouldStop: () -> Boolean,
+        ): PipelineReport {
+            val run = NightRun(deps, spec, nights.candidates)
+            var report = PipelineReport(found = nights.nightCount, skipped = nights.skipped.size)
+            val remaining = nights.candidates.iterator()
+            var stopped = false
+            while (!stopped && remaining.hasNext()) {
+                currentCoroutineContext().ensureActive()
+                val step = if (shouldStop()) Step.Cancelled else run.step(remaining.next())
+                report = report.add(step, run.takeSuperseded())
+                stopped = step.stopsRun
+            }
+            if (!stopped) run.retireStagedOutputs(nights.skipped)?.let { report = report.add(it, run.takeSuperseded()) }
+            recordSkipped(nights)
+            return report
+        }
 
         /**
          * Repairs nights left with two outputs: every WRITTEN night whose source session now belongs to another
@@ -159,6 +199,21 @@ class NightPipeline
             ledger.nights
                 .findOverlapping(sinceMs, Long.MAX_VALUE, listOf(NightStatus.NOT_ESTIMATED, NightStatus.FAILED))
                 .filter { it.updatedAt < processedBeforeMs && !it.skippedNap }
+
+        /**
+         * WRITTEN nights that end after [sinceMs], were neither written nor refresh-checked at or after [processedBeforeMs]
+         * (`updatedAt`, `inputCheckedAt`) and are up to date ([ALGO_VERSION] and [paramsHash]): candidates for
+         * [refresh]. Stale nights are left to an explicit recompute, as everywhere else.
+         */
+        suspend fun refreshableNights(
+            sinceMs: Long,
+            processedBeforeMs: Long,
+            paramsHash: String,
+        ): List<EstimatedNightEntity> =
+            ledger.nights
+                .findOverlapping(sinceMs, Long.MAX_VALUE, listOf(NightStatus.WRITTEN))
+                .filter { it.updatedAt < processedBeforeMs && (it.inputCheckedAt ?: Long.MIN_VALUE) < processedBeforeMs }
+                .filter { it.algoVersion == ALGO_VERSION && it.paramsHash == paramsHash }
 
         /**
          * Source uuids of the ledger's nights (with or without an output) of [packages] starting in `[fromMs, toMs)`
@@ -286,7 +341,9 @@ class NightPipeline
         ): SourceSessionEntity {
             val night = ledger.nights.findByClientRecordId(candidate.clientRecordId)
             val outcome = if (night?.status == NightStatus.FAILED) SourceOutcome.FAILED else SourceOutcome.NOT_ESTIMATED
-            return relinked(outcome, night?.statusReason, candidate.clientRecordId, now)
+            // The reason of a night without an output explains the row; a written night's reason (a refresh) does not.
+            val reason = night?.statusReason?.takeIf { night.status != NightStatus.WRITTEN }
+            return relinked(outcome, reason, candidate.clientRecordId, now)
         }
 
         private fun SourceSessionEntity.relinked(
@@ -340,6 +397,7 @@ class NightPipeline
             }
         }
 
+        /** Counts [result]; a refresh check is not a night "found" by the run: it is counted in inputChecks (and refreshed) only. */
         private fun PipelineReport.count(result: NightResult): PipelineReport =
             when (result) {
                 NightResult.WRITTEN -> copy(estimated = estimated + 1)
@@ -348,6 +406,8 @@ class NightPipeline
                 NightResult.UP_TO_DATE -> copy(skipped = skipped + 1, upToDate = upToDate + 1)
                 NightResult.NEVER_SKIPPED, NightResult.DELETED_SKIPPED -> copy(skipped = skipped + 1)
                 NightResult.REPAIRED -> this
+                NightResult.INPUT_CHECKED -> copy(found = found - 1, inputChecks = inputChecks + 1)
+                NightResult.REFRESHED -> copy(found = found - 1, refreshed = refreshed + 1, inputChecks = inputChecks + 1)
             }
 
         private companion object {

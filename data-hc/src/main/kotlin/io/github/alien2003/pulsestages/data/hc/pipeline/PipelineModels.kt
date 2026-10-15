@@ -137,7 +137,8 @@ enum class BlockedReason {
 /**
  * Outcome of processing a set of nights. A "night" is one merged group of source sessions of one package.
  * `found − estimated − skipped − failed` nights were not processed because the run stopped early ([quotaHit],
- * [blockedReason] or [cancelled]).
+ * [blockedReason] or [cancelled]). The refresh checks of written nights ([inputChecks], [refreshed]) are counted outside
+ * [found].
  *
  * @property found nights found (merged groups, naps and duplicates included; our own sessions excluded).
  * @property estimated nights estimated and written in this run.
@@ -149,6 +150,10 @@ enum class BlockedReason {
  * @property notEstimated nights the estimator declined (no heart rate / low coverage; a subset of [skipped]).
  * @property superseded older outputs replaced by a merged / changed night or removed because their sources were
  *   deleted.
+ * @property inputChecks written nights whose input was read again by the refresh ([NightPipeline.refresh]), rewritten
+ *   or not; they are not counted in [found], [skipped] or [upToDate] (a refresh check that fails is counted in [found]
+ *   and [failed] like any night).
+ * @property refreshed written nights rewritten because their input changed (not counted in [estimated]).
  * @property quotaHit the run stopped because Health Connect's rate limit was hit (after the in-call retries).
  * @property blockedReason why the run read nothing or stopped, if it did.
  * @property cancelled the run was cancelled between nights.
@@ -162,6 +167,8 @@ data class PipelineReport(
     val failed: Int = 0,
     val notEstimated: Int = 0,
     val superseded: Int = 0,
+    val inputChecks: Int = 0,
+    val refreshed: Int = 0,
     val quotaHit: Boolean = false,
     val blockedReason: BlockedReason? = null,
     val cancelled: Boolean = false,
@@ -180,6 +187,8 @@ data class PipelineReport(
             failed = failed + other.failed,
             notEstimated = notEstimated + other.notEstimated,
             superseded = superseded + other.superseded,
+            inputChecks = inputChecks + other.inputChecks,
+            refreshed = refreshed + other.refreshed,
             quotaHit = quotaHit || other.quotaHit,
             blockedReason = blockedReason ?: other.blockedReason,
             cancelled = cancelled || other.cancelled,

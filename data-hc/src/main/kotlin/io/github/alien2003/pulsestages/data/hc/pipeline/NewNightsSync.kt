@@ -7,6 +7,7 @@ import io.github.alien2003.pulsestages.data.hc.SleepChanges
 import io.github.alien2003.pulsestages.data.local.db.EstimatedNightEntity
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
+import io.github.alien2003.pulsestages.data.local.settings.OverwritePolicy
 import io.github.alien2003.pulsestages.data.local.settings.SettingsRepository
 import io.github.alien2003.pulsestages.data.local.sync.ChangesTokenState
 import io.github.alien2003.pulsestages.data.local.sync.SyncOutcome
@@ -65,6 +66,11 @@ data class SyncReport(
  *   arrive after the sleep session, which the Changes API does not report, and a failure may have been transient.
  *   Nights that ended in the last [RETRY_RECENT_MS] are retried by every run; nights that arrived late (first seen in
  *   the last [RETRY_RECENT_MS], at most [LATE_ARRIVAL_MAX_MS] after they ended) are retried with growing gaps.
+ * - Written nights are refreshed after that, on the same schedule: heart rate (or steps) that arrives after a night was
+ *   written would otherwise leave it estimated from part of its data. At most [MAX_REFRESH_NIGHTS_PER_RUN] up-to-date
+ *   WRITTEN nights per run have their input read again; a night is estimated again only when its input fingerprint
+ *   changed, and rewritten (version + 1) only when its record would change ([NightPipeline.refresh]). Nothing is
+ *   refreshed under OverwritePolicy.NEVER; stale nights are left to an explicit recompute.
  * - Runs in the background never read without READ_HEALTH_DATA_IN_BACKGROUND ([HealthAccessGuard]).
  *
  * [run] never throws except for cancellation; every failure is reported in [SyncReport].
@@ -147,7 +153,9 @@ class NewNightsSync
             if (repaired.stoppedEarly) return SyncReport(outcomeOf(repaired), repaired)
             val synced = syncChanges(packages, settings, granted, now)
             val retried = if (synced.pipeline.stoppedEarly) PipelineReport() else retryUnfinished(settings, granted, runStartMs = now)
-            val combined = repaired + synced.pipeline + retried
+            val stopped = synced.pipeline.stoppedEarly || retried.stoppedEarly
+            val refreshed = if (stopped) PipelineReport() else refreshWritten(settings, granted, runStartMs = now)
+            val combined = repaired + synced.pipeline + retried + refreshed
             return synced.copy(outcome = outcomeOf(combined), pipeline = combined)
         }
 
@@ -200,20 +208,110 @@ class NewNightsSync
         }
 
         /**
-         * A night that ended in the last [RETRY_RECENT_MS] is retried by every run. A night first seen in the last
-         * [RETRY_RECENT_MS] that ended at most [LATE_ARRIVAL_MAX_MS] before it was first seen (a late arrival through the
-         * Changes API, or a recent night of a backfill) is retried when the time since its last attempt is at least the
-         * time between its first and its last attempt: about 1, 2, 4, 8, 16 and 32 hours after it was first seen with
-         * hourly syncs. Older nights are left to an explicit recompute or a backfill.
+         * Refreshes recent WRITTEN nights whose heart rate (or other input) may have grown since they were written: the
+         * Changes API only reports sleep sessions. Due are the up-to-date nights ([NightPipeline.refreshableNights]) on the
+         * schedule of [isDue], where the last attempt is the last write or refresh check. At most
+         * [MAX_REFRESH_NIGHTS_PER_RUN] are checked per run (nights that ended recently first, then the longest unchecked
+         * late arrivals); the rest are left to later runs. Never under OverwritePolicy.NEVER (no read at all).
          */
+        private suspend fun refreshWritten(
+            settings: AppSettings,
+            granted: Set<String>,
+            runStartMs: Long,
+        ): PipelineReport {
+            val due =
+                if (settings.write.overwritePolicy == OverwritePolicy.NEVER) emptyList() else dueForRefresh(settings, granted, runStartMs)
+            if (due.isEmpty()) return PipelineReport()
+            val nights = due.take(MAX_REFRESH_NIGHTS_PER_RUN)
+            if (due.size > nights.size) {
+                logger.i(TAG, "${due.size - nights.size} more written night(s) are due for a refresh; later runs check them")
+            }
+            logger.d(TAG, "refreshing ${nights.size} recent written night(s): reading their input again")
+            val uuids = nights.flatMapTo(mutableSetOf()) { it.sourceUuids }
+            return try {
+                val set =
+                    windowReader
+                        .read(
+                            nights.minOf { it.sessionStartMs } - NightWindowReader.OVERLAP_MS,
+                            nights.maxOf { it.sessionEndMs } + NightWindowReader.OVERLAP_MS,
+                            settings,
+                        ).containingAny(uuids)
+                pipeline.refresh(set, settings, granted, nights.mapTo(HashSet()) { it.clientRecordId })
+            } catch (e: HealthDataException) {
+                refreshStopped(e)
+            }
+        }
+
+        /**
+         * A Health Connect error outside the per-night isolation of the refresh (the read of its window): only the refresh
+         * stops, and the run keeps the report of what it did before. A quota error or a refused access stops the run as
+         * anywhere else; a transient or invalid read is logged and left to the next run.
+         */
+        private suspend fun refreshStopped(e: HealthDataException): PipelineReport {
+            logger.w(TAG, "refresh of written nights stopped: ${e.message}", throwable = e)
+            return when (e) {
+                is HealthDataException.QuotaExceeded -> PipelineReport(quotaHit = true)
+                is HealthDataException.PermissionDenied -> PipelineReport.blocked(guard.reasonForDenial())
+                is HealthDataException.Unavailable -> PipelineReport.blocked(BlockedReason.HEALTH_CONNECT_UNAVAILABLE)
+                is HealthDataException.Transient, is HealthDataException.InvalidData -> PipelineReport()
+            }
+        }
+
+        /**
+         * The up-to-date WRITTEN nights due for a refresh ([isDue]) that this run did not process, in [refreshOrder]. Only
+         * nights of an enabled source: the window read finds no other, so a night of a source that was disabled would
+         * never be checked and, never moving back in the order, would take a place of the per-run limit on every run.
+         */
+        private suspend fun dueForRefresh(
+            settings: AppSettings,
+            granted: Set<String>,
+            runStartMs: Long,
+        ): List<EstimatedNightEntity> {
+            val now = clock.millis()
+            val packages = windowReader.enabledPackages(settings)
+            return pipeline
+                .refreshableNights(
+                    sinceMs = now - RETRY_RECENT_MS - LATE_ARRIVAL_MAX_MS,
+                    processedBeforeMs = runStartMs,
+                    paramsHash = pipeline.currentParamsHash(settings, granted),
+                ).filter { it.sourcePackage in packages && isDue(it, now, lastAttemptMs = lastCheck(it)) }
+                .sortedWith(refreshOrder(now))
+        }
+
+        /** The last write or refresh check of a written night. */
+        private fun lastCheck(night: EstimatedNightEntity): Long = maxOf(night.updatedAt, night.inputCheckedAt ?: Long.MIN_VALUE)
+
+        /**
+         * Nights that ended in the last [RETRY_RECENT_MS] first, then late arrivals; within each, the night checked longest
+         * ago first (then the newest), so that the per-run limit rotates through all due nights.
+         */
+        private fun refreshOrder(nowMs: Long): Comparator<EstimatedNightEntity> =
+            compareBy<EstimatedNightEntity> { it.sessionEndMs <= nowMs - RETRY_RECENT_MS }
+                .thenBy { lastCheck(it) }
+                .thenByDescending { it.sessionEndMs }
+
+        /** [isDue] for a night without an output: its last attempt is its last processing. */
         private fun isDueForRetry(
             night: EstimatedNightEntity,
             nowMs: Long,
+        ): Boolean = isDue(night, nowMs, lastAttemptMs = night.updatedAt)
+
+        /**
+         * A night that ended in the last [RETRY_RECENT_MS] is due on every run. A night first seen in the last
+         * [RETRY_RECENT_MS] that ended at most [LATE_ARRIVAL_MAX_MS] before it was first seen (a late arrival through the
+         * Changes API, or a recent night of a backfill) is due when the time since its last attempt ([lastAttemptMs]) is at
+         * least the time between its first and its last attempt: about 1, 2, 4, 8, 16 and 32 hours after it was first
+         * seen with hourly syncs. Older nights are left to an explicit recompute or a backfill.
+         */
+        private fun isDue(
+            night: EstimatedNightEntity,
+            nowMs: Long,
+            lastAttemptMs: Long,
         ): Boolean {
             if (night.sessionEndMs > nowMs - RETRY_RECENT_MS) return true
             val firstSeen = night.createdAt
             val lateArrival = firstSeen >= nowMs - RETRY_RECENT_MS && firstSeen - night.sessionEndMs <= LATE_ARRIVAL_MAX_MS
-            return lateArrival && nowMs - night.updatedAt >= night.updatedAt - firstSeen
+            return lateArrival && nowMs - lastAttemptMs >= lastAttemptMs - firstSeen
         }
 
         /** Progress through the Changes-API pages of one run. */
@@ -383,7 +481,8 @@ class NewNightsSync
 
         private fun SyncReport.detail(): String =
             "found=${pipeline.found} estimated=${pipeline.estimated} skipped=${pipeline.skipped} stale=${pipeline.stale} " +
-                "failed=${pipeline.failed} superseded=${pipeline.superseded} pages=$pages deletions=$deletedSessions" +
+                "failed=${pipeline.failed} superseded=${pipeline.superseded} refreshChecks=${pipeline.inputChecks} " +
+                "refreshed=${pipeline.refreshed} pages=$pages deletions=$deletedSessions" +
                 (rereadFromMs?.let { " rereadFrom=$it" } ?: "") + (error?.let { " error=$it" } ?: "")
 
         /** Constants and the outcome mapping. */
@@ -405,6 +504,14 @@ class NewNightsSync
 
             /** Nights first seen at most this long after they ended are retried as late arrivals (see [RETRY_RECENT_MS]). */
             const val LATE_ARRIVAL_MAX_MS: Long = 30 * DAY_MS
+
+            /**
+             * Most written nights whose input one run reads again. Each costs about two Health Connect read calls (heart rate
+             * and steps with their 24 h left padding, one page each with OHealth's records), at worst about nine (dense
+             * heart rate and all three optional channels), plus a verification read when it is rewritten; so a run stays far
+             * below the background read quota (1000 calls per 15 min) even when a backfill made many nights due at once.
+             */
+            const val MAX_REFRESH_NIGHTS_PER_RUN: Int = 8
 
             /** The [SyncOutcome] of a pipeline [report]. */
             fun outcomeOf(report: PipelineReport): SyncOutcome =

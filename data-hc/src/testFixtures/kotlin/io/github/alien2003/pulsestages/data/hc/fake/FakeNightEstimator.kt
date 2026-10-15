@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.data.hc.fake
 import io.github.alien2003.pulsestages.algo.ALGO_VERSION
 import io.github.alien2003.pulsestages.algo.model.EpochResult
 import io.github.alien2003.pulsestages.algo.model.EstimationOutcome
+import io.github.alien2003.pulsestages.algo.model.EstimationWarning
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.model.NightEstimate
 import io.github.alien2003.pulsestages.algo.model.NightFlags
@@ -12,6 +13,7 @@ import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.SleepStage
 import io.github.alien2003.pulsestages.algo.model.StageInterval
 import io.github.alien2003.pulsestages.algo.model.StageProbabilities
+import io.github.alien2003.pulsestages.algo.model.WarningCode
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
 import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightEstimator
@@ -38,6 +40,9 @@ class FakeNightEstimator(
     /** Throws the returned error for an input (per-night failure injection). */
     var failWhen: (NightInput) -> Throwable? = { null }
 
+    /** Declines an input with the returned outcome instead of estimating it (per-night NotEstimated injection). */
+    var declineWhen: (NightInput) -> EstimationOutcome.NotEstimated? = { null }
+
     /** Runs before every estimate (e.g. to suspend, to observe concurrency or to cancel something mid-run). */
     var beforeEstimate: suspend (NightInput) -> Unit = {}
 
@@ -50,6 +55,13 @@ class FakeNightEstimator(
     /** Extra text mixed into [paramsHash] (stands in for a personal-model fingerprint). */
     var hashSalt: String = ""
 
+    /**
+     * When true, a coverage between `preprocess.rulesMinCoverage` and `preprocess.minCoverage` is estimated like the real
+     * estimator does: as RULES with the rules-fallback flag and the RULES_FALLBACK_LOW_COVERAGE warning (off by default,
+     * so [reportedType] is reported at every estimable coverage).
+     */
+    var emulateRulesFallback: Boolean = false
+
     override suspend fun estimate(
         input: NightInput,
         params: AlgoParams,
@@ -57,6 +69,7 @@ class FakeNightEstimator(
         inputs += input
         beforeEstimate(input)
         failWhen(input)?.let { throw it }
+        declineWhen(input)?.let { return it }
         val inSession = input.heartRate.filter { it.timeMs in input.sessionStartMs until input.sessionEndMs }
         val epochMs = params.preprocess.epochSec * SECOND_MS
         val labelled = if (inSession.isEmpty()) null else label(input, params, epochMs, shiftBpm = 0.0)
@@ -82,7 +95,18 @@ class FakeNightEstimator(
             else -> {
                 val computed = intervals(labelled.epochs.map { it.stage }, input.sessionStartMs, input.sessionEndMs, epochMs)
                 val stages = stagesOverride?.invoke(input, computed) ?: computed
-                EstimationOutcome.Estimated(nightEstimate(input, params, labelled, stages, reportedType))
+                val fallback = emulateRulesFallback && coverage < params.preprocess.minCoverage
+                val estimate = nightEstimate(input, params, labelled, stages, if (fallback) EstimatorType.RULES else reportedType)
+                EstimationOutcome.Estimated(
+                    if (fallback) {
+                        estimate.copy(
+                            flags = estimate.flags.copy(rulesFallback = true),
+                            warnings = listOf(EstimationWarning(WarningCode.RULES_FALLBACK_LOW_COVERAGE, "coverage $coverage")),
+                        )
+                    } else {
+                        estimate
+                    },
+                )
             }
         }
     }

@@ -268,6 +268,18 @@ class FakeHealthRepository(
         }
     }
 
+    /**
+     * Deletes the heart-rate records of [packageName] that start in `[fromMs, toMs)` (as the source app does while it
+     * replaces its records).
+     */
+    fun removeHeartRate(
+        packageName: String,
+        fromMs: Long,
+        toMs: Long,
+    ) {
+        synchronized(lock) { heartRateSeries.removeAll { it.packageName == packageName && it.startMs >= fromMs && it.startMs < toMs } }
+    }
+
     /** Adds a step record. */
     fun addSteps(
         packageName: String,
