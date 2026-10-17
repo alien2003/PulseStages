@@ -17,6 +17,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -43,7 +44,7 @@ class SettingsJsonTest {
                     overwritePolicy = OverwritePolicy.NEVER,
                     awakeAsLight = true,
                     startBeforeSource = true,
-                    requestSleepAsAndroidSync = true,
+                    requestSleepAsAndroidSync = false,
                 ),
             algo =
                 AlgoParams(
@@ -170,6 +171,20 @@ class SettingsJsonTest {
         // The storage format leaves out the defaults, nulls included.
         val stored = SettingsJson.storage.encodeToString(AppSettings.serializer(), AppSettings())
         assertEquals("{}", stored)
+    }
+
+    @Test
+    fun `the sync request to Sleep as Android is on unless a file or an export turns it off`() {
+        fun requestOf(json: String): Boolean =
+            assertInstanceOf(SettingsImportResult.Success::class.java, SettingsJson.decode(json)).settings.write.requestSleepAsAndroidSync
+
+        // Files and exports of the versions before the option have no key: they get the default.
+        assertTrue(requestOf("""{"write": {"awakeAsLight": true}}"""))
+        assertFalse(requestOf("""{"write": {"requestSleepAsAndroidSync": false}}"""))
+        // Turned off it differs from the default, so the DataStore file keeps it.
+        val off = AppSettings(write = WriteSettings(requestSleepAsAndroidSync = false))
+        val stored = SettingsJson.storage.encodeToString(AppSettings.serializer(), off)
+        assertEquals("""{"write":{"requestSleepAsAndroidSync":false}}""", stored)
     }
 
     @Test

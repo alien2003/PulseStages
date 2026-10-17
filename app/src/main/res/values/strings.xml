@@ -205,7 +205,7 @@
     <string name="rationale_device_title">Nothing leaves your device</string>
     <string name="rationale_device_no_internet">PulseStages has no internet permission: it cannot send your data anywhere.</string>
     <string name="rationale_device_local">All processing happens on the phone. Its own records (settings, log, which nights were estimated) stay in the app\'s private storage.</string>
-    <string name="rationale_device_saa_request">Only if you turn on “Ask Sleep as Android to sync”: after writing a night it asks Sleep as Android to sync with Health Connect. The request carries no data.</string>
+    <string name="rationale_device_saa_request">With “Ask Sleep as Android to sync” (on by default; Settings → Written sessions), after writing a night it asks Sleep as Android, if installed, to sync with Health Connect. The request carries no data.</string>
     <string name="rationale_delete_title">How to delete its data</string>
     <string name="rationale_delete_in_app">In the app: Home → “Delete my sessions from Health Connect” removes every session PulseStages wrote.</string>
     <string name="rationale_delete_health_connect">In Health Connect: App permissions → PulseStages → Delete app data; there you can also revoke every permission.</string>

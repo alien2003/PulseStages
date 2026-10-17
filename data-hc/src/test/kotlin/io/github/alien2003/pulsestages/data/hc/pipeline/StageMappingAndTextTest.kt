@@ -218,9 +218,10 @@ class SessionTextTest {
     @Test
     fun `asking Sleep as Android to sync changes nothing that is written, so it is not part of the params hash`() {
         val base = WriteSettings()
-        assertEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(requestSleepAsAndroidSync = true)))
+        assertTrue(base.requestSleepAsAndroidSync, "on by default")
+        assertEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(requestSleepAsAndroidSync = false)))
         val compatible = base.copy(startBeforeSource = true)
-        assertEquals(OutputOptions.hashExtra(compatible), OutputOptions.hashExtra(compatible.copy(requestSleepAsAndroidSync = true)))
+        assertEquals(OutputOptions.hashExtra(compatible), OutputOptions.hashExtra(compatible.copy(requestSleepAsAndroidSync = false)))
     }
 
     @Test

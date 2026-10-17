@@ -179,7 +179,7 @@ object WorkResultText {
             } else {
                 main
             }
-        // The opt-in sync request to Sleep as Android after a run that wrote (write.requestSleepAsAndroidSync).
+        // The sync request to Sleep as Android after a run that wrote (write.requestSleepAsAndroidSync, on by default).
         val withSaaSync =
             if (summary.sleepAsAndroidSyncRequested) {
                 UiText.of(R.string.result_with_saa_sync, withRefreshed, UiText.of(R.string.result_saa_sync_requested))

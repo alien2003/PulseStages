@@ -313,7 +313,7 @@ from memory.
     a day.
   - **Disabled sources.** The retry skips nights whose source is no longer enabled: the window read never finds
     them, so they never moved their last attempt and cost a sleep read on every pass.
-- **Sync request to Sleep as Android (`write.requestSleepAsAndroidSync`, off by default).** Sleep as Android has no
+- **Sync request to Sleep as Android (`write.requestSleepAsAndroidSync`, on by default).** Sleep as Android has no
   periodic import, and it attaches heart rate and SpO2 only to the records it had before a sync (§4), so with
   `write.startBeforeSource` a new night appeared there only after the user synced, and without heart rate until a
   second sync (confirmed on the development phone).
@@ -350,11 +350,16 @@ from memory.
   - **No follow-up after a rewrite only.** A refresh after late heart rate rewrites a night Sleep as Android imported
     earlier, so the request's own sync attaches the new heart rate; a second one would only add another set of
     heart-rate values (an inference, below). A follow-up that is due by then is taken as sent.
-  - **Opt-in, outside the params hash.** Every request also runs Sleep as Android's backup and its other enabled
-    syncs, spends its Health Connect quota, can make its heart-rate awake detection add awake stretches over our
-    stages, and can make it write heart rate and SpO2 of its own nights to Health Connect; observed with Sleep as
-    Android 20261006, not yet confirmed on the development phone. Nothing written changes, so the option is not part
-    of the params hash.
+  - **On by default, outside the params hash.** Opt-in at first; the project owner chose on by default on
+    2026-10-17. That is acceptable because it has no effect without Sleep as Android (the sender checks for its
+    receiver and sends nothing when it is missing) and the request carries no data, while without it a night reaches
+    Sleep as Android only when the user syncs there, and its heart rate only on a second sync. The trade-off: every
+    Sleep as Android user then gets, after each write, its backup and its other enabled syncs, a Health Connect sync
+    that spends its quota, heart-rate awake detection that can add awake stretches over our stages, and possibly heart
+    rate and SpO2 of its own nights written to Health Connect (observed with Sleep as Android 20261006, not yet
+    confirmed on the development phone); the user guide says so and how to turn it off (Settings → "Written
+    sessions"). Nothing written changes, so the option is not part of the params hash, and switching it never makes
+    nights stale.
   - **Best effort.** Every failure is logged as a warning and never fails the run. A failure before the send counts
     as not sent; once the request is out, a failure to store or schedule its follow-up is logged on its own and the
     request still counts as sent. Android reports nothing back, so a request to a stopped Sleep as Android counts as

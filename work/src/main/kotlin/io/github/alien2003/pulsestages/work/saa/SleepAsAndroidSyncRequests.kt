@@ -14,10 +14,11 @@ import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * Asks Sleep as Android to sync with Health Connect after a run that wrote to it (`write.requestSleepAsAndroidSync`, off
- * by default; see [SleepAsAndroid]). Sleep as Android imports a new night in that sync, but attaches heart rate and SpO2
- * only to the records it had before the sync, so a run that wrote a new or recomputed night also schedules one
- * follow-up request [FOLLOW_UP_DELAY_MS] later:
+ * Asks Sleep as Android to sync with Health Connect after a run that wrote to it (`write.requestSleepAsAndroidSync`, on
+ * by default: nothing is sent while Sleep as Android is not installed, and the request carries no data; see
+ * [SleepAsAndroid]). Sleep as Android imports a new night in that sync, but attaches heart rate and SpO2 only to the
+ * records it had before the sync, so a run that wrote a new or recomputed night also schedules one follow-up request
+ * [FOLLOW_UP_DELAY_MS] later:
  * - the follow-up is a one-time WorkManager work ([SleepAsAndroidFollowUps]) rather than a step of the next run: it
  *   then comes about 10 minutes after the import whatever check interval is set (up to 24 h), needs no Health Connect
  *   access and survives process death;

@@ -13,8 +13,8 @@ stores, what it writes, where data can leave the app and how to delete everythin
   each written night it keeps only a fingerprint of them (sample counts and one-way digests), to notice data that
   arrives late.
 - Data leaves the app only through Health Connect, through files you export or share yourself, and through the system
-  log (logcat). Only if you turn on "Ask Sleep as Android to sync", it also asks Sleep as Android to sync after
-  writing a night; that request carries no data.
+  log (logcat). By default it also asks Sleep as Android, if installed, to sync after writing a night ("Ask Sleep as
+  Android to sync", which you can turn off); that request carries no data.
 - Its private data is excluded from Android backups and device transfer.
 
 The same points, in shorter form, are on the app's own privacy screen "PulseStages and your health data" (Home →
@@ -74,21 +74,23 @@ libraries. There is no analytics, advertising or crash-reporting library.
 
 **Package visibility.** The app declares `<queries>` for the Health Connect app, OHealth and the apps that declare a
 Health Connect permission-rationale screen (that is, Health Connect clients), only to show their names and icons, and
-for Sleep as Android, only to check that it is installed before the opt-in sync request (below). It does not request
+for Sleep as Android, only to check that it is installed before the sync request (below). It does not request
 `QUERY_ALL_PACKAGES` (also checked by `MergedManifestTest`).
 
-**How data can still leave the app**, always on your action or through Android:
+**How data can still leave the app**, on your action, through Android, or through the sync request to Sleep as
+Android, which is on by default:
 
 - Health Connect: the sessions PulseStages writes can be read by every app you allow to read sleep
   ([4](#4-what-is-written-to-health-connect)).
 - Files you export or share ([6](#6-exports-and-sharing)).
 - The system log (logcat), which receives a copy of the app's log ([5](#5-logs)).
-- Only with Settings → "Written sessions" → "Ask Sleep as Android to sync" (off by default): a broadcast to Sleep as
-  Android (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) after a run that wrote or updated a
-  session, and once more about 10 minutes after a new or recomputed one. It carries no extras and no data: it tells
-  Sleep as Android only that a sync is wanted, and with that when PulseStages wrote. Sleep as Android then reads
-  Health Connect with its own permissions, like after its own "Sync now"
-  ([health-connect.md §8.3](health-connect.md#83-sleep-as-android)).
+- With Settings → "Written sessions" → "Ask Sleep as Android to sync" (on by default) and Sleep as Android
+  installed: a broadcast to Sleep as Android (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) after a
+  run that wrote or updated a session, and once more about 10 minutes after a new or recomputed one. Nothing is sent
+  when Sleep as Android is not installed. It carries no extras and no data: it tells Sleep as Android only that a sync
+  is wanted, and with that when PulseStages wrote. Sleep as Android then reads Health Connect with its own
+  permissions, like after its own "Sync now" ([health-connect.md §8.3](health-connect.md#83-sleep-as-android)). To
+  stop it, turn the setting off.
 
 What Health Connect and other apps do with data they hold is outside PulseStages' control.
 

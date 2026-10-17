@@ -65,7 +65,7 @@ fun PipelineHarness.sleepAsAndroidRequests(
     followUps: SleepAsAndroidFollowUps = RecordingFollowUps(),
 ): SleepAsAndroidSyncRequests = SleepAsAndroidSyncRequests(settings, syncState, sender, followUps, clock, logger)
 
-/** Turns `write.requestSleepAsAndroidSync` on or off. */
+/** Turns `write.requestSleepAsAndroidSync` (on by default) on or off. */
 suspend fun PipelineHarness.requestSleepAsAndroidSync(on: Boolean = true) {
     settings.set { it.copy(write = it.write.copy(requestSleepAsAndroidSync = on)) }
 }

@@ -35,7 +35,7 @@ Contents:
 | `:algo-cli` | Kotlin/JVM application | Command-line front end of `:core-algo` (`features`, `evaluate`, `estimate`, ...). `tools/train` calls it so that training and validation use exactly the code that runs on the phone ([INTERCHANGE.md](INTERCHANGE.md#2-algo-cli-commands)). |
 | `:data-local` | Android library | The Room ledger (`pulsestages.db`), the settings DataStore, the sync-state DataStore, the internal logger, the UTC `Clock` and the application `CoroutineScope`. |
 | `:data-hc` | Android library | The `HealthRepository` boundary and its Health Connect implementation, the night pipeline (candidate building, estimation, idempotent writing), the Changes-API sync, the backfill engine, recompute, the data eraser, the source scanner, and the use cases the UI calls. Test doubles in `src/testFixtures`. |
-| `:work` | Android library | WorkManager workers, the runners behind them, the scheduler, the foreground notifications, the production `NightEstimator` (`SleepStagerNightEstimator`), the loader of the bundled model, and the opt-in sync request to Sleep as Android (`work/saa`, [6.7](#67-what-a-sync-does)). |
+| `:work` | Android library | WorkManager workers, the runners behind them, the scheduler, the foreground notifications, the production `NightEstimator` (`SleepStagerNightEstimator`), the loader of the bundled model, and the sync request to Sleep as Android (`work/saa`, on by default, [6.7](#67-what-a-sync-does)). |
 | `:app` | Android application | Compose Material 3 UI, the Hilt component root (`PulseStagesApp`), the manifest, the permission-rationale activity, platform services (Storage Access Framework, FileProvider, PackageManager), the model asset `assets/models/hybrid_model.json`, and the debug-only demo mode. |
 | `tools/train` | Python (not a Gradle module) | Dataset download, OHealth emulation, training and leave-one-subject-out validation ([tools/train/README.md](../tools/train/README.md)). |
 
@@ -139,7 +139,7 @@ flowchart TB
     RUN --> JOBS
     RUN --> SAA
     SAA --> DS
-    SAA -->|"opt-in REQUEST_SYNC broadcast"| SLEEP
+    SAA -->|"REQUEST_SYNC broadcast"| SLEEP
     SLEEP -->|"its own sync"| HC
     JOBS --> PIPE
     UC --> PIPE
@@ -607,7 +607,7 @@ All background work runs on WorkManager. Every job is a **unique work**, so repe
 | `BackfillWorker` | `backfill` | one-time | Home "Backfill history" / "Resume backfill" | yes |
 | `RecomputeWorker` (all or stale) | `recompute-all` | one-time | Home "Recompute all" / "Recompute stale nights", the Settings recompute offer | yes |
 | `RecomputeWorker` (one night) | `recompute-night:<clientRecordId>` | one-time, expedited | night detail "Recompute" | yes |
-| `SleepAsAndroidSyncWorker` | `sleep-as-android-follow-up` | one-time, initial delay 10 min, `REPLACE` | a run that wrote a new or recomputed night with `write.requestSleepAsAndroidSync` on, and the work itself when it runs before its due time ([6.7](#67-what-a-sync-does)) | no |
+| `SleepAsAndroidSyncWorker` | `sleep-as-android-follow-up` | one-time, initial delay 10 min, `REPLACE` | a run that wrote a new or recomputed night with `write.requestSleepAsAndroidSync` on (the default), and the work itself when it runs before its due time ([6.7](#67-what-a-sync-does)) | no |
 
 Every request carries the tag `pulsestages`, a job tag (`estimate`, `backfill`, `recompute`, `sleep-as-android`) and
 exponential backoff starting at 30 s (`WorkRequests.BACKOFF_DELAY_MS`; WorkManager doubles it per retry up to 5
@@ -754,12 +754,13 @@ error that `NewNightsSync.run` reports), and also when it threw (a Health Connec
 other exception, or a cancellation such as WorkManager stopping the work), then inside `withContext(NonCancellable)`
 before the exception goes on. Only a process death loses the request; the next request's sync, which reads the last
 30 days, covers such sessions too. With `write.requestSleepAsAndroidSync` off `afterRun` only cancels a pending
-follow-up. With the option on and at least one session written or rewritten, `BroadcastSyncRequestSender` checks with
-`queryBroadcastReceivers` that Sleep as Android's receiver is installed and sends the broadcast
-`com.urbandroid.sleep.REQUEST_SYNC` restricted to `com.urbandroid.sleep`, without extras. After a new or recomputed
-write it also stores the due time in `SyncStateStore` and enqueues the follow-up (`SleepAsAndroidFollowUps`, the
-unique work `sleep-as-android-follow-up` with `REPLACE`, `FOLLOW_UP_DELAY_MS` = 10 min); a run that only rewrote
-nights gets no follow-up, and one at or after the due time of a pending follow-up takes its place.
+follow-up. With the option on (the default) and at least one session written or rewritten, `BroadcastSyncRequestSender`
+checks with `queryBroadcastReceivers` that Sleep as Android's receiver is installed (nothing is sent when it is not) and
+sends the broadcast `com.urbandroid.sleep.REQUEST_SYNC` restricted to `com.urbandroid.sleep`, without extras. After a
+new or recomputed write it also stores the due time in `SyncStateStore` and enqueues the follow-up
+(`SleepAsAndroidFollowUps`, the unique work `sleep-as-android-follow-up` with `REPLACE`,
+`FOLLOW_UP_DELAY_MS` = 10 min); a run that only rewrote nights gets no follow-up, and one at or after the due time of
+a pending follow-up takes its place.
 `SleepAsAndroidSyncWorker` later calls `sendFollowUp`, which sends only while the option is on and once the due time
 is reached: then it clears the due time first, so a re-run sends nothing twice. A work that runs before the due time
 (one that `REPLACE` did not stop in time, or after a clock change) sends nothing and schedules itself again for the

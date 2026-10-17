@@ -111,9 +111,10 @@ data class WriteSettings(
     /**
      * After a run that wrote or rewrote a session, ask Sleep as Android (its REQUEST_SYNC broadcast) to sync with Health
      * Connect, and once more about 10 minutes after a new or recomputed session, so that it attaches heart rate and SpO2
-     * to the night it imported. Not part of the params hash.
+     * to the night it imported. On by default: it does nothing while Sleep as Android is not installed, and the request
+     * carries no data. Not part of the params hash.
      */
-    val requestSleepAsAndroidSync: Boolean = false,
+    val requestSleepAsAndroidSync: Boolean = true,
 )
 
 /** Internal log level, in increasing severity. */

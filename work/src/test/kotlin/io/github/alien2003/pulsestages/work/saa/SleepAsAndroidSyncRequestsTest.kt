@@ -16,9 +16,9 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
 /**
- * When PulseStages asks Sleep as Android to sync (`write.requestSleepAsAndroidSync`): one request after a run that
- * wrote, one follow-up 10 minutes after a new or recomputed write (never sent before it is due), nothing when the
- * option is off or Sleep as Android is missing, and never an exception.
+ * When PulseStages asks Sleep as Android to sync (`write.requestSleepAsAndroidSync`, on by default): one request after
+ * a run that wrote, one follow-up 10 minutes after a new or recomputed write (never sent before it is due), nothing
+ * when the option is off or Sleep as Android is missing, and never an exception.
  */
 class SleepAsAndroidSyncRequestsTest {
     @TempDir
@@ -46,8 +46,20 @@ class SleepAsAndroidSyncRequestsTest {
     private fun worldTest(block: suspend (World) -> Unit) = harnessTest(dir) { h -> block(World(h)) }
 
     @Test
+    fun `with the default settings a write sends one request and schedules the follow-up`() =
+        worldTest { w ->
+            assertTrue(w.requests.afterRun(written = 1, rewritten = 0))
+
+            assertEquals(1, w.sender.sent)
+            assertEquals(1, w.followUps.scheduled.size)
+            assertEquals(NOON + 10 * MINUTE_MS, w.pending())
+        }
+
+    @Test
     fun `with the option off nothing is sent and nothing is scheduled`() =
         worldTest { w ->
+            w.h.requestSleepAsAndroidSync(on = false)
+
             assertFalse(w.requests.afterRun(written = 2, rewritten = 1))
 
             assertEquals(0, w.sender.attempts, "not even looked up")

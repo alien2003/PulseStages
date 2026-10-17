@@ -109,14 +109,19 @@ class SettingsViewModelTest {
             }
 
         @Test
-        fun `asking Sleep as Android to sync is stored and leaves the nights up to date`() =
+        fun `asking Sleep as Android to sync is on by default, turning it off is stored and leaves the nights up to date`() =
             runTest(main.dispatcher) {
                 val vm = viewModel()
+                assertTrue(repository.current.write.requestSleepAsAndroidSync, "on by default")
+
+                vm.onEdit(SettingsEdit.Switch("write.requestSleepAsAndroidSync", false))
+
+                assertFalse(repository.current.write.requestSleepAsAndroidSync)
+                assertTrue(vm.prompts().isEmpty(), "nothing written changes: no recompute is offered")
 
                 vm.onEdit(SettingsEdit.Switch("write.requestSleepAsAndroidSync", true))
-
                 assertTrue(repository.current.write.requestSleepAsAndroidSync)
-                assertTrue(vm.prompts().isEmpty(), "nothing written changes: no recompute is offered")
+                assertTrue(vm.prompts().isEmpty())
             }
     }
 

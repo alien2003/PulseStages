@@ -147,7 +147,7 @@ a phone.
 | `:algo-cli` | Kotlin/JVM application | Command-line front end of `:core-algo` (`features`, `evaluate`, `estimate`, `synthesize`, `feature-names`, `stages`), used by `tools/train` ([INTERCHANGE.md §2](INTERCHANGE.md#2-algo-cli-commands)) |
 | `:data-local` | Android library | Room ledger, DataStore settings and sync state, internal logger |
 | `:data-hc` | Android library | Health Connect repository, night pipeline, Changes-API sync, backfill, eraser, source scanner, use cases. Test fixtures: `FakeHealthRepository`, an in-memory ledger and other test doubles |
-| `:work` | Android library | WorkManager workers, scheduling, notifications, the opt-in sync request to Sleep as Android |
+| `:work` | Android library | WorkManager workers, scheduling, notifications, the sync request to Sleep as Android |
 | `:app` | Android application | Compose Material 3 UI, Hilt graph, navigation, manifest, permission rationale activity, debug-only demo mode |
 | `tools/train/` | Python | Dataset download, OHealth emulation, training, leave-one-subject-out validation |
 

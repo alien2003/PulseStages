@@ -72,8 +72,26 @@ class EstimateNewNightsRunnerTest {
             assertEquals(2, outcome.summary.estimated)
             assertEquals(2, h.repository.ownSessions().size)
             assertEquals(ResultKind.SUCCESS, WorkResults.kindOf(outcome, 0, limits))
+            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertEquals(1, sender.sent, "Sleep as Android is asked once by default")
+        }
+
+    @Test
+    fun `with the option off, a sync that writes nights asks Sleep as Android nothing and schedules no follow-up`() =
+        harnessTest(dir) { h ->
+            h.requestSleepAsAndroidSync(on = false)
+            h.repository.addNight(OHEALTH, nightStart(2))
+            h.repository.addNight(OHEALTH, nightStart(1))
+            val sender = RecordingSyncRequestSender()
+            val followUps = RecordingFollowUps()
+
+            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.runner(sender, followUps).run(inBackground = true))
+
+            assertEquals(2, h.repository.ownSessions().size)
             assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
-            assertEquals(0, sender.attempts, "Sleep as Android is not asked by default")
+            assertEquals(0, sender.attempts, "not even looked up")
+            assertTrue(followUps.scheduled.isEmpty())
+            assertNull(h.pendingFollowUp())
         }
 
     @Test

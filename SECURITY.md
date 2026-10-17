@@ -81,9 +81,10 @@ Out of scope:
 - Data leaves the app only when the user exports or shares it (log, CSV export, settings export) to a destination the
   user chooses, through the sessions it writes to Health Connect, which other apps with sleep read permission can
   read, and through the system log (logcat), which receives a copy of the internal log and can be read over adb when
-  USB debugging is on ([docs/privacy.md](docs/privacy.md#5-logs)). The opt-in "Ask Sleep as Android to sync" (off by
-  default) sends Sleep as Android's sync broadcast (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package)
-  after a write; it carries no extras and no data
+  USB debugging is on ([docs/privacy.md](docs/privacy.md#5-logs)). "Ask Sleep as Android to sync" (on by default;
+  Settings → "Written sessions", where the user can turn it off) sends Sleep as Android's sync broadcast
+  (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) after a write when Sleep as Android is installed,
+  and nothing when it is not; it carries no extras and no data
   ([docs/privacy.md](docs/privacy.md#2-everything-stays-on-the-device)).
 - Package visibility is limited to Health Connect, OHealth, Sleep as Android (only to check that it is installed
   before that sync request) and the apps that declare a Health Connect permission rationale; the app does not request

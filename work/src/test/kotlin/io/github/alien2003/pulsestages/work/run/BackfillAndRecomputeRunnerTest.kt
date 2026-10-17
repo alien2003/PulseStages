@@ -58,7 +58,7 @@ class BackfillAndRecomputeRunnerTest {
             assertEquals(20, outcome.summary.estimated)
             assertEquals(listOf(0, 1, 2, 3, 4, 4), progress.map { it.windowsDone })
             assertEquals(ResultKind.SUCCESS, WorkResults.kindOf(outcome, 0, limits))
-            assertFalse(outcome.summary.sleepAsAndroidSyncRequested, "off by default")
+            assertTrue(outcome.summary.sleepAsAndroidSyncRequested, "on by default")
         }
 
     @Test
@@ -79,6 +79,20 @@ class BackfillAndRecomputeRunnerTest {
             assertEquals(20, again.summary.estimated, "every night is up to date")
             assertFalse(again.summary.sleepAsAndroidSyncRequested)
             assertEquals(1, sender.sent, "nothing was written")
+        }
+
+    @Test
+    fun `with the option off, a backfill that wrote nights asks Sleep as Android nothing`() =
+        harnessTest(dir) { h ->
+            h.requestSleepAsAndroidSync(on = false)
+            h.addNights(20 downTo 1)
+            val sender = RecordingSyncRequestSender()
+
+            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(sender).run(inBackground = false))
+
+            assertEquals(20, h.repository.ownSessions().size)
+            assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
+            assertEquals(0, sender.attempts, "not even looked up")
         }
 
     @Test
@@ -304,7 +318,7 @@ class BackfillAndRecomputeRunnerTest {
                 )
 
             assertEquals(3, outcome.summary.estimated)
-            assertFalse(outcome.summary.sleepAsAndroidSyncRequested, "off by default")
+            assertTrue(outcome.summary.sleepAsAndroidSyncRequested, "on by default")
             assertEquals(3, progress.last().done)
             assertEquals(
                 listOf(1),

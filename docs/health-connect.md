@@ -98,9 +98,9 @@ in the [user guide](user-guide.md).
   `com.google.android.apps.healthdata` (so `getSdkStatus` can see it on Android 11–13), OHealth, Sleep as Android
   (`com.urbandroid.sleep`), and every app that declares one of the two rationale intents, i.e. every Health Connect
   client, so the Sources, Home and Compare screens can show the label and icon of the apps that wrote the data. Sleep
-  as Android is listed only so that the opt-in sync request can check that it and its `REQUEST_SYNC` receiver are
-  installed before it is sent ([8.3](#83-sleep-as-android)); the system delivers the broadcast itself without
-  visibility.
+  as Android is listed only so that the sync request (on by default) can check that it and its `REQUEST_SYNC`
+  receiver are installed before it is sent ([8.3](#83-sleep-as-android)); the system delivers the broadcast itself
+  without visibility.
 - **No `INTERNET`.** The manifest removes it (`tools:node="remove"`) even if a library asks for it; the connect-client
   AAR itself merges no permission ([privacy.md §2](privacy.md#2-everything-stays-on-the-device)).
 
@@ -636,7 +636,7 @@ sleep") remains for readers that show awakenings poorly; it changes the written 
 Android does not need it, because it imports AWAKE as awake. The user's steps are in the
 [user guide](user-guide.md#sleep-as-android).
 
-**`write.requestSleepAsAndroidSync`** (Settings → "Written sessions" → "Ask Sleep as Android to sync", off by default)
+**`write.requestSleepAsAndroidSync`** (Settings → "Written sessions" → "Ask Sleep as Android to sync", on by default)
 lets PulseStages start that sync. After a run that wrote or rewrote at least one session (a periodic or daily check,
 "Estimate new", a backfill or a recompute; also one that stopped after writing: a quota error, a refused access,
 another Health Connect error, or WorkManager stopping it), `SleepAsAndroidSyncRequests.afterRun` sends Sleep as
@@ -677,9 +677,9 @@ that it does not use up a newer night's follow-up within Sleep as Android's firs
 the option is off, and a run with the option off cancels a pending one. A run that only rewrote nights (`rewritten`:
 a refresh after late heart rate) gets no follow-up: Sleep as Android imported those nights earlier, so the request's
 own sync attaches the new heart rate, and every further sync may add another set of heart-rate values (below). A
-night Sleep as Android did not have yet (the option was turned on later, the first request did not reach a stopped
-Sleep as Android, or the night was deleted there) is imported by that sync and gets its heart rate only from the next
-request. A pending follow-up that is due by then counts as sent by that request.
+night Sleep as Android did not have yet (the option was off when PulseStages wrote it, the first request did not reach
+a stopped Sleep as Android, or the night was deleted there) is imported by that sync and gets its heart rate only from
+the next request. A pending follow-up that is due by then counts as sent by that request.
 
 **The first version stays in Sleep as Android.** Its copy of a night keeps the stages of the first import (above),
 and with the option Sleep as Android imports a night seconds after PulseStages first wrote it. With 15- or 30-minute
@@ -715,12 +715,14 @@ after the recompute makes Sleep as Android import it again, and the follow-up at
   imported; nights tracked or added in Sleep as Android itself in between do add to it.
 
 The option changes nothing that is written and is not part of the params hash (`OutputOptions.hashExtra` leaves it
-out). It is meant for use with `write.startBeforeSource`: without that, the session Sleep as Android imports is the
-source's, without stages. PulseStages' log has "asked Sleep as Android to sync (written=N rewritten=M; follow-up in 10
-min)" and, 10 min later, "asked Sleep as Android to sync again: heart rate and SpO2 for the night it imported" (tag
-`SleepAsAndroid`); the message of a run the user started adds "Sleep as Android was asked to sync.", and the work
-output carries `sleepAsAndroidSyncRequested`. The user's steps are in the
-[user guide](user-guide.md#ask-sleep-as-android-to-sync).
+out). It is on by default because it has no effect without Sleep as Android (nothing is sent) and the request carries
+no data; the cost is that with Sleep as Android installed every write brings the side effects above, so the user guide
+says when to turn it off. It is meant for use with `write.startBeforeSource`, which stays off by default: without
+that, the session Sleep as Android imports in the requested sync is the source's, without stages, as in its own syncs.
+PulseStages' log has "asked Sleep as Android to sync (written=N rewritten=M; follow-up in 10 min)" and, 10 min later,
+"asked Sleep as Android to sync again: heart rate and SpO2 for the night it imported" (tag `SleepAsAndroid`); the
+message of a run the user started adds "Sleep as Android was asked to sync.", and the work output carries
+`sleepAsAndroidSyncRequested`. The user's steps are in the [user guide](user-guide.md#ask-sleep-as-android-to-sync).
 
 ## 9. Deleting PulseStages data
 

@@ -13,24 +13,26 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 ### Added
 
 - **Ask Sleep as Android to sync** (Settings → "Written sessions" → "Ask Sleep as Android to sync",
-  `write.requestSleepAsAndroidSync`, off by default). Sleep as Android imports from Health Connect only when it syncs,
-  and it attaches heart rate and SpO2 only to the nights it had before a sync. With the setting on, every run that
-  wrote or rewrote a session (the automatic checks, "Estimate new", a backfill, a recompute; also one that stopped
-  after writing, on a Health Connect error or because WorkManager stopped it) sends Sleep as Android its public sync
-  request, "Request Backup Sync" (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package, without extras or
-  data), if Sleep as Android is installed; after a new or recomputed night it sends one more 10 minutes later (the
-  one-time work `sleep-as-android-follow-up`, its due time kept in the sync state; a work that runs early waits for
+  `write.requestSleepAsAndroidSync`, on by default; turn it off there). Sleep as Android imports from Health Connect
+  only when it syncs, and it attaches heart rate and SpO2 only to the nights it had before a sync. With the setting on,
+  every run that wrote or rewrote a session (the automatic checks, "Estimate new", a backfill, a recompute; also one
+  that stopped after writing, on a Health Connect error or because WorkManager stopped it) sends Sleep as Android its
+  public sync request, "Request Backup Sync" (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package, without
+  extras or data), if Sleep as Android is installed; after a new or recomputed night it sends one more 10 minutes later
+  (the one-time work `sleep-as-android-follow-up`, its due time kept in the sync state; a work that runs early waits for
   that time), so that the night it imported gets its heart rate and SpO2. A run that only updated nights after late
-  heart rate gets no second request, and Sleep as Android keeps the stages it imported first: to get an automatic
-  update there, delete the night in Sleep as Android and recompute it. Confirmed on the development phone: a second
-  sync attaches heart rate to the nights Sleep as Android imported. Observed with Sleep as Android 20261006 but not
-  yet confirmed on the development phone: the request also runs its backup and its other enabled syncs and, when its
-  Health Connect integration is on, a Health Connect sync of the last 30 days (not described in its documentation, so
-  it may change); its heart-rate awake detection can then add awake stretches over the stages; repeated syncs
-  probably add further 10-minute heart-rate values; and it may write the heart rate and SpO2 of its own nights to
-  Health Connect. Not part of the params hash. The manifest now queries `com.urbandroid.sleep`, only to check that it
-  is installed; the message of a run you started adds "Sleep as Android was asked to sync.", and the privacy screen
-  has a point about the request. English and Russian texts
+  heart rate gets no second request, and Sleep as Android keeps the stages it imported first: to get an automatic update
+  there, delete the night in Sleep as Android and recompute it. Confirmed on the development phone: a second sync
+  attaches heart rate to the nights Sleep as Android imported. Observed with Sleep as Android 20261006 but not yet
+  confirmed on the development phone: the request also runs its backup and its other enabled syncs and, when its Health
+  Connect integration is on, a Health Connect sync of the last 30 days (not described in its documentation, so it may
+  change); its heart-rate awake detection can then add awake stretches over the stages; repeated syncs probably add
+  further 10-minute heart-rate values; and it may write the heart rate and SpO2 of its own nights to Health Connect. It
+  is on by default because without Sleep as Android it does nothing and the request carries no data; with Sleep as
+  Android installed, every write therefore also brings its backup, its other syncs and these heart-rate effects, so turn
+  the setting off if you do not want them. Not part of the params hash. The manifest now queries `com.urbandroid.sleep`,
+  only to check that it is installed; the message of a run you started adds "Sleep as Android was asked to sync.", and
+  the privacy screen has a point about the request. English and Russian texts
   ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync),
   [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android),
   [privacy.md §2](docs/privacy.md#2-everything-stays-on-the-device), [PLAN.md §2](PLAN.md#2-decisions)).
