@@ -132,7 +132,7 @@ object SystemLocalZone : LocalZone {
  */
 interface WorkScheduler {
     /**
-     * Makes sure the periodic check (every `periodicHours`, battery-not-low when enabled) and the daily run (at
+     * Makes sure the periodic check (every `periodicMinutes`, battery-not-low when enabled) and the daily run (at
      * `dailyTimeMinutes` local time) are enqueued with [schedule]. Works that already match are left alone; changed
      * settings re-enqueue them with ExistingPeriodicWorkPolicy.UPDATE (a running work is not interrupted).
      */

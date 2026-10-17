@@ -9,10 +9,14 @@ const val OHEALTH_PACKAGE: String = "com.heytap.health.international"
 /** Default daily run time: 09:00 local time, in minutes after midnight. */
 const val DEFAULT_DAILY_TIME_MINUTES: Int = 540
 
+/** Default period of the Changes-API check: hourly, in minutes. */
+const val DEFAULT_PERIODIC_MINUTES: Int = 60
+
 /**
  * All user settings. Persisted in DataStore as JSON (only the values that differ from the defaults, see
  * [SettingsJson]), exported/imported as the same JSON with every value. Only ADD fields with defaults; never rename
- * (old files and exports must keep loading).
+ * (old files and exports must keep loading). The one sanctioned exception is a renamed key that keeps loading through a
+ * read migration: `schedule.periodicHours` became `schedule.periodicMinutes` ([ScheduleSettingsSerializer]).
  *
  * @property sources sleep sources ("Sources" screen).
  * @property schedule background scheduling.
@@ -23,6 +27,7 @@ const val DEFAULT_DAILY_TIME_MINUTES: Int = 540
 @Serializable
 data class AppSettings(
     val sources: SourceSettings = SourceSettings(),
+    @Serializable(with = ScheduleSettingsSerializer::class)
     val schedule: ScheduleSettings = ScheduleSettings(),
     val write: WriteSettings = WriteSettings(),
     val algo: AlgoParams = AlgoParams(),
@@ -66,8 +71,8 @@ data class SourceSettings(
 data class ScheduleSettings(
     /** Daily run time, minutes after local midnight (09:00 = 540). */
     val dailyTimeMinutes: Int = DEFAULT_DAILY_TIME_MINUTES,
-    /** Period of the Changes-API check. */
-    val periodicHours: Int = 1,
+    /** Period of the Changes-API check, minutes (one of SettingsLimits.periodicMinutes; WorkManager's minimum is 15). */
+    val periodicMinutes: Int = DEFAULT_PERIODIC_MINUTES,
     /** WorkManager constraint: run only when the battery is not low. */
     val runOnlyWhenNotLowBattery: Boolean = true,
 )

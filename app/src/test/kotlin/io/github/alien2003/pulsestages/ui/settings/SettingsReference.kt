@@ -150,7 +150,9 @@ internal class SettingsReference(
         )
         appendParagraph(
             "**$import** accepts a complete export or any part of one: missing keys take their defaults, unknown keys " +
-                "are ignored, and a value of the wrong type or an unknown option name rejects the file. Every value is " +
+                "are ignored, and a value of the wrong type or an unknown option name rejects the file. A file of " +
+                "version 0.3.0 or older that gives the check interval as `schedule.periodicHours` (whole hours) still " +
+                "loads: the hours become `schedule.periodicMinutes`. Every value is " +
                 "checked before anything is stored. The app stores only the values that differ from the defaults, so a " +
                 "default that a later version changes (for example a retrained one) applies to every value you never " +
                 "changed, while a value you set to something else stays as you set it. An export contains every value, " +

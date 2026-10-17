@@ -62,7 +62,8 @@ class RealAppGraphTest {
         val periodic = awaitUnfinished(workManager, WorkRequests.Names.PERIODIC)
         val daily = awaitUnfinished(workManager, WorkRequests.Names.DAILY)
         val defaults = ScheduleSettings()
-        assertTrue(periodic.tags.toString(), WorkRequests.periodicTag(defaults) in periodic.tags)
+        assertTrue(periodic.tags.toString(), "schedule:periodic:60min:batteryNotLow=true" in periodic.tags)
+        assertEquals(60 * 60 * 1000L, periodic.periodicityInfo?.repeatIntervalMillis)
         assertTrue(daily.tags.toString(), daily.tags.any { it.startsWith("schedule:daily:${defaults.dailyTimeMinutes}min") })
         assertTrue(periodic.constraints.requiresBatteryNotLow())
         assertTrue(daily.constraints.requiresBatteryNotLow())
@@ -76,11 +77,12 @@ class RealAppGraphTest {
 
         // keepScheduled (started in onCreate) follows a schedule change in the settings.
         val settings = field<SettingsRepository>(scheduler, "settingsRepository")
-        runBlocking { settings.update { it.copy(schedule = it.schedule.copy(periodicHours = 3, runOnlyWhenNotLowBattery = false)) } }
-        val changed = ScheduleSettings(periodicHours = 3, runOnlyWhenNotLowBattery = false)
+        runBlocking { settings.update { it.copy(schedule = it.schedule.copy(periodicMinutes = 15, runOnlyWhenNotLowBattery = false)) } }
+        val changed = ScheduleSettings(periodicMinutes = 15, runOnlyWhenNotLowBattery = false)
+        assertEquals("schedule:periodic:15min:batteryNotLow=false", WorkRequests.periodicTag(changed))
         val updated = awaitUnfinished(workManager, WorkRequests.Names.PERIODIC) { WorkRequests.periodicTag(changed) in it.tags }
         assertEquals(false, updated.constraints.requiresBatteryNotLow())
-        assertEquals(3 * 60 * 60 * 1000L, updated.periodicityInfo?.repeatIntervalMillis)
+        assertEquals(15 * 60 * 1000L, updated.periodicityInfo?.repeatIntervalMillis)
     }
 
     @Test

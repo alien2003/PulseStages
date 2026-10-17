@@ -62,10 +62,12 @@ data class SyncReport(
  * - Deleted sessions: nights whose every source is gone lose our record (SOURCE_DELETED) and their time span is
  *   re-read (a lower-priority duplicate of another source takes their place); nights with remaining sources are
  *   rebuilt from them (the old output is superseded), or retired if the rest is no night.
- * - Nights without an estimate (NOT_ESTIMATED / FAILED) are retried after every complete run: their heart rate may
- *   arrive after the sleep session, which the Changes API does not report, and a failure may have been transient.
- *   Nights that ended in the last [RETRY_RECENT_MS] are retried by every run; nights that arrived late (first seen in
- *   the last [RETRY_RECENT_MS], at most [LATE_ARRIVAL_MAX_MS] after they ended) are retried with growing gaps.
+ * - Nights without an estimate (NOT_ESTIMATED / FAILED) of an enabled source are retried after a complete run: their
+ *   heart rate may arrive after the sleep session, which the Changes API does not report, and a failure may have been
+ *   transient. Nights that ended in the last [RETRY_RECENT_MS] are retried by every run, but at most every
+ *   [MIN_RECHECK_GAP_MS] (55 min), so about hourly also with a 15- or 30-minute check interval; nights that arrived late
+ *   (first seen in the last [RETRY_RECENT_MS], at most [LATE_ARRIVAL_MAX_MS] after they ended) are retried with growing
+ *   gaps. A run the user asked for ("Estimate new now") re-checks every due night at once, without that gap.
  * - Written nights are refreshed after that, on the same schedule: heart rate (or steps) that arrives after a night was
  *   written would otherwise leave it estimated from part of its data. At most [MAX_REFRESH_NIGHTS_PER_RUN] up-to-date
  *   WRITTEN nights per run have their input read again; a night is estimated again only when its input fingerprint
@@ -88,13 +90,20 @@ class NewNightsSync
     ) {
         private val guard = HealthAccessGuard(repository)
 
-        /** Runs one sync; [inBackground] is true for WorkManager runs. */
+        /**
+         * Runs one sync; [inBackground] is true for WorkManager runs. [userRequested] is true for a run the user asked for
+         * ("Estimate new now"): it retries and refreshes every due recent night at once, also one checked less than
+         * [MIN_RECHECK_GAP_MS] ago.
+         */
         @Suppress("TooGenericExceptionCaught") // The sync reports every failure instead of throwing (workers must not crash).
-        suspend fun run(inBackground: Boolean): SyncReport {
+        suspend fun run(
+            inBackground: Boolean,
+            userRequested: Boolean = false,
+        ): SyncReport {
             val report =
                 try {
                     syncState.markRunStarted()
-                    sync(inBackground)
+                    sync(inBackground, minRecheckGapMs = if (userRequested) 0L else MIN_RECHECK_GAP_MS)
                 } catch (e: CancellationException) {
                     withContext(NonCancellable) { recordFinished(SyncReport(SyncOutcome.CANCELLED, error = "cancelled")) }
                     throw e
@@ -122,7 +131,10 @@ class NewNightsSync
             }
         }
 
-        private suspend fun sync(inBackground: Boolean): SyncReport {
+        private suspend fun sync(
+            inBackground: Boolean,
+            minRecheckGapMs: Long,
+        ): SyncReport {
             val settings = settingsRepository.settings.first()
             val access = guard.check(inBackground)
             val blocked = access.blockedReason
@@ -138,7 +150,7 @@ class NewNightsSync
                 }
 
                 else -> {
-                    syncPackages(packages, settings, access.granted)
+                    syncPackages(packages, settings, access.granted, minRecheckGapMs)
                 }
             }
         }
@@ -147,14 +159,16 @@ class NewNightsSync
             packages: Set<String>,
             settings: AppSettings,
             granted: Set<String>,
+            minRecheckGapMs: Long,
         ): SyncReport {
             val now = clock.millis()
             val repaired = pipeline.supersedeLeftovers(settings, granted)
             if (repaired.stoppedEarly) return SyncReport(outcomeOf(repaired), repaired)
             val synced = syncChanges(packages, settings, granted, now)
-            val retried = if (synced.pipeline.stoppedEarly) PipelineReport() else retryUnfinished(settings, granted, runStartMs = now)
+            val retried =
+                if (synced.pipeline.stoppedEarly) PipelineReport() else retryUnfinished(settings, granted, now, minRecheckGapMs)
             val stopped = synced.pipeline.stoppedEarly || retried.stoppedEarly
-            val refreshed = if (stopped) PipelineReport() else refreshWritten(settings, granted, runStartMs = now)
+            val refreshed = if (stopped) PipelineReport() else refreshWritten(settings, granted, now, minRecheckGapMs)
             val combined = repaired + synced.pipeline + retried + refreshed
             return synced.copy(outcome = outcomeOf(combined), pipeline = combined)
         }
@@ -182,18 +196,22 @@ class NewNightsSync
         /**
          * Retries nights that have no output yet (NOT_ESTIMATED / FAILED) and were not processed in this run: the
          * Changes API only reports sleep sessions, so heart rate that arrives after its session would otherwise never be
-         * picked up automatically, and a night that failed transiently would stay failed. See [isDueForRetry].
+         * picked up automatically, and a night that failed transiently would stay failed. See [isDueForRetry]. Only nights
+         * of an enabled source: the window read finds no other, so a night of a source that was disabled would never be
+         * processed, never move its last attempt, and cost a sleep-session read on every run.
          */
         private suspend fun retryUnfinished(
             settings: AppSettings,
             granted: Set<String>,
             runStartMs: Long,
+            minRecheckGapMs: Long,
         ): PipelineReport {
             val now = clock.millis()
+            val packages = windowReader.enabledPackages(settings)
             val nights =
                 pipeline
                     .unfinishedNights(sinceMs = now - RETRY_RECENT_MS - LATE_ARRIVAL_MAX_MS, processedBeforeMs = runStartMs)
-                    .filter { isDueForRetry(it, now) }
+                    .filter { it.sourcePackage in packages && isDueForRetry(it, now, minRecheckGapMs) }
             if (nights.isEmpty()) return PipelineReport()
             logger.d(TAG, "retrying ${nights.size} recent night(s) without an estimate")
             val uuids = nights.flatMapTo(mutableSetOf()) { it.sourceUuids }
@@ -218,9 +236,14 @@ class NewNightsSync
             settings: AppSettings,
             granted: Set<String>,
             runStartMs: Long,
+            minRecheckGapMs: Long,
         ): PipelineReport {
             val due =
-                if (settings.write.overwritePolicy == OverwritePolicy.NEVER) emptyList() else dueForRefresh(settings, granted, runStartMs)
+                if (settings.write.overwritePolicy == OverwritePolicy.NEVER) {
+                    emptyList()
+                } else {
+                    dueForRefresh(settings, granted, runStartMs, minRecheckGapMs)
+                }
             if (due.isEmpty()) return PipelineReport()
             val nights = due.take(MAX_REFRESH_NIGHTS_PER_RUN)
             if (due.size > nights.size) {
@@ -266,6 +289,7 @@ class NewNightsSync
             settings: AppSettings,
             granted: Set<String>,
             runStartMs: Long,
+            minRecheckGapMs: Long,
         ): List<EstimatedNightEntity> {
             val now = clock.millis()
             val packages = windowReader.enabledPackages(settings)
@@ -274,7 +298,7 @@ class NewNightsSync
                     sinceMs = now - RETRY_RECENT_MS - LATE_ARRIVAL_MAX_MS,
                     processedBeforeMs = runStartMs,
                     paramsHash = pipeline.currentParamsHash(settings, granted),
-                ).filter { it.sourcePackage in packages && isDue(it, now, lastAttemptMs = lastCheck(it)) }
+                ).filter { it.sourcePackage in packages && isDue(it, now, lastAttemptMs = lastCheck(it), minRecheckGapMs) }
                 .sortedWith(refreshOrder(now))
         }
 
@@ -294,24 +318,31 @@ class NewNightsSync
         private fun isDueForRetry(
             night: EstimatedNightEntity,
             nowMs: Long,
-        ): Boolean = isDue(night, nowMs, lastAttemptMs = night.updatedAt)
+            minRecheckGapMs: Long,
+        ): Boolean = isDue(night, nowMs, lastAttemptMs = night.updatedAt, minRecheckGapMs)
 
         /**
-         * A night that ended in the last [RETRY_RECENT_MS] is due on every run. A night first seen in the last
-         * [RETRY_RECENT_MS] that ended at most [LATE_ARRIVAL_MAX_MS] before it was first seen (a late arrival through the
-         * Changes API, or a recent night of a backfill) is due when the time since its last attempt ([lastAttemptMs]) is at
-         * least the time between its first and its last attempt: about 1, 2, 4, 8, 16 and 32 hours after it was first
-         * seen with hourly syncs. Older nights are left to an explicit recompute or a backfill.
+         * Never due less than [minRecheckGapMs] ([MIN_RECHECK_GAP_MS], or 0 for a run the user asked for) after its last
+         * attempt ([lastAttemptMs]). Beyond that, a night that ended in the last [RETRY_RECENT_MS] is due on every run, so
+         * at most every 55 min with the gap. A night first seen in the last [RETRY_RECENT_MS] that ended at most
+         * [LATE_ARRIVAL_MAX_MS] before it was first seen (a late arrival through the Changes API, or a recent night of a
+         * backfill) is due when the time since its last attempt is at least the time between its first and its last
+         * attempt: about 1, 2, 4, 8, 16 and 32 hours after it was first seen with hourly or shorter check intervals. Older
+         * nights are left to an explicit recompute or a backfill.
          */
         private fun isDue(
             night: EstimatedNightEntity,
             nowMs: Long,
             lastAttemptMs: Long,
+            minRecheckGapMs: Long,
         ): Boolean {
-            if (night.sessionEndMs > nowMs - RETRY_RECENT_MS) return true
             val firstSeen = night.createdAt
             val lateArrival = firstSeen >= nowMs - RETRY_RECENT_MS && firstSeen - night.sessionEndMs <= LATE_ARRIVAL_MAX_MS
-            return lateArrival && nowMs - lastAttemptMs >= lastAttemptMs - firstSeen
+            return when {
+                nowMs - lastAttemptMs < minRecheckGapMs -> false
+                night.sessionEndMs > nowMs - RETRY_RECENT_MS -> true
+                else -> lateArrival && nowMs - lastAttemptMs >= lastAttemptMs - firstSeen
+            }
         }
 
         /** Progress through the Changes-API pages of one run. */
@@ -499,8 +530,18 @@ class NewNightsSync
             /** A token not advanced for this long is treated as expired (tokens live 30 days). */
             const val TOKEN_MAX_AGE_MS: Long = 25 * DAY_MS
 
-            /** Nights without an estimate that ended (or, arriving late, were first seen) this recently are retried. */
+            /**
+             * Nights without an estimate that ended (or, arriving late, were first seen) this recently are retried, and
+             * written nights refreshed: those that ended this recently at most every [MIN_RECHECK_GAP_MS].
+             */
             const val RETRY_RECENT_MS: Long = 36L * 60 * 60 * 1000
+
+            /**
+             * The retry and the refresh of a recent night happen at most this often, so that a 15- or 30-minute check
+             * interval keeps the hourly cadence of the late-data work; 55 rather than 60 min so that an hourly run is never
+             * skipped by a few minutes of jitter. A run the user asked for ignores it.
+             */
+            const val MIN_RECHECK_GAP_MS: Long = 55L * 60 * 1000
 
             /** Nights first seen at most this long after they ended are retried as late arrivals (see [RETRY_RECENT_MS]). */
             const val LATE_ARRIVAL_MAX_MS: Long = 30 * DAY_MS

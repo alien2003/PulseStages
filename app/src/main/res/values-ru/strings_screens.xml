@@ -78,7 +78,7 @@
     <string name="home_job_pending">Ожидает запуска…</string>
     <string name="home_job_retrying">Ожидает повтора: Health Connect был занят.</string>
     <string name="home_estimate_title">Новые ночи</string>
-    <string name="home_estimate_body">Ищет в Health Connect новые сессии сна и сразу их оценивает. Это же происходит автоматически каждый час и раз в день.</string>
+    <string name="home_estimate_body">Ищет в Health Connect новые сессии сна и сразу их оценивает. Это же происходит автоматически с интервалом, заданным в настройках, и раз в день.</string>
     <string name="home_estimate_running">Оценка новых ночей…</string>
     <string name="home_action_estimate">Оценить новые</string>
     <string name="home_backfill_title">Бэкфилл истории</string>

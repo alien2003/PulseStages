@@ -16,11 +16,11 @@ import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Finds and estimates new nights (periodic, daily, or "estimate now"): a thin adapter over [EstimateNewNightsRunner].
- * "Estimate now" first goes foreground ([WorkerSupport.enterForeground]); every run then reads as a background run
- * unless the app is in the foreground at that moment ([WorkerSupport.inBackground]: a visible activity or the foreground
- * service), whatever started it. After a daily run (unless it is retried with backoff) the next daily run is pinned to
- * the configured time again (WorkManager would otherwise drift by the run's delay). Never throws out of [doWork] except
- * for cancellation.
+ * "Estimate now" first goes foreground ([WorkerSupport.enterForeground]) and re-checks every due recent night at once
+ * (`userRequested`); every run then reads as a background run unless the app is in the foreground at that moment
+ * ([WorkerSupport.inBackground]: a visible activity or the foreground service), whatever started it. After a daily run
+ * (unless it is retried with backoff) the next daily run is pinned to the configured time again (WorkManager would
+ * otherwise drift by the run's delay). Never throws out of [doWork] except for cancellation.
  */
 @HiltWorker
 class EstimateNewNightsWorker
@@ -37,7 +37,7 @@ class EstimateNewNightsWorker
             val result =
                 support.complete(this, TAG) {
                     if (trigger.userInitiated) support.enterForeground(this, TAG, support.notifications.estimateInfo())
-                    runner.run(support.inBackground())
+                    runner.run(support.inBackground(), userRequested = trigger.userInitiated)
                 }
             // A retry keeps its backoff; otherwise the next daily run is pinned to the configured time again.
             if (trigger == EstimateTrigger.DAILY && result !is Result.Retry) realignDaily()

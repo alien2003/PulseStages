@@ -117,6 +117,16 @@ internal fun text(id: Int): UiText = UiText.of(id)
 internal inline fun <reified E : Enum<E>> enumOptions(label: (E) -> Int): List<ChoiceOption> =
     enumValues<E>().map { ChoiceOption(it.name, text(label(it))) }
 
+private const val MINUTES_PER_HOUR = 60
+
+/** Label of a check interval: "15 min" below an hour, whole hours as "2 h". */
+private fun periodLabel(minutes: Int): UiText =
+    if (minutes % MINUTES_PER_HOUR == 0) {
+        UiText.of(R.string.format_value_unit, (minutes / MINUTES_PER_HOUR).toString(), UNIT_HOURS)
+    } else {
+        UiText.of(R.string.format_value_unit, minutes.toString(), UNIT_MIN)
+    }
+
 // ------------------------------------------------------------------------------------------------ sections
 
 private val sourcesSection =
@@ -199,15 +209,14 @@ private val scheduleSection =
                     ),
                 ),
                 SettingsItem.Field(
-                    IntSpec(
-                        path = "schedule.periodicHours",
-                        title = text(R.string.set_sch_periodic_hours_title),
-                        hint = text(R.string.set_sch_periodic_hours_hint),
-                        range = SettingsLimits.periodicHours,
-                        slider = true,
-                        unit = UNIT_HOURS,
-                        read = { it.schedule.periodicHours },
-                        write = { s, v -> s.copy(schedule = s.schedule.copy(periodicHours = v)) },
+                    ChoiceSpec(
+                        path = "schedule.periodicMinutes",
+                        title = text(R.string.set_sch_periodic_title),
+                        hint = text(R.string.set_sch_periodic_hint),
+                        options = SettingsLimits.periodicMinutes.map { ChoiceOption(it.toString(), periodLabel(it)) },
+                        style = ChoiceStyle.DROPDOWN,
+                        read = { it.schedule.periodicMinutes.toString() },
+                        write = { s, v -> s.copy(schedule = s.schedule.copy(periodicMinutes = v.toInt())) },
                     ),
                 ),
                 SettingsItem.Field(

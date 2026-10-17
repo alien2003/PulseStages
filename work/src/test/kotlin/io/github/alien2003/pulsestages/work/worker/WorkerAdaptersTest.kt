@@ -22,6 +22,7 @@ import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository.Operati
 import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
 import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
+import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.NOON
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.OTHER_APP
@@ -207,6 +208,26 @@ class WorkerAdaptersTest {
             assertTrue(result is ListenableWorker.Result.Success)
             assertEquals(1, report(result).summary?.estimated)
             assertEquals(0, world.scheduler.realigned)
+        }
+
+    @Test
+    fun onlyEstimateNowReChecksARecentNightCheckedLessThanAnHourAgo() =
+        runTest {
+            val world = World(this)
+            val h = world.harness
+            h.repository.addNight(OHEALTH, nightStart(0))
+            world.worker<EstimateNewNightsWorker>(periodic()).doWork()
+            h.clock.advanceBy(15 * MINUTE_MS)
+            h.repository.clearCalls()
+
+            world.worker<EstimateNewNightsWorker>(periodic()).doWork()
+            world.worker<EstimateNewNightsWorker>(WorkerInputs.estimate(EstimateTrigger.DAILY)).doWork()
+            assertEquals("scheduled runs keep the hourly cadence", 0, h.repository.callCount(Operation.READ_HEART_RATE))
+
+            val result = world.worker<EstimateNewNightsWorker>(now()).doWork()
+
+            assertEquals(OutcomeKind.COMPLETED, report(result).kind)
+            assertEquals("\"estimate now\" checks it again at once", 1, h.repository.callCount(Operation.READ_HEART_RATE))
         }
 
     @Test

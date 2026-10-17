@@ -7,6 +7,11 @@ import androidx.datastore.core.Serializer
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonTransformingSerializer
+import kotlinx.serialization.json.intOrNull
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -20,6 +25,9 @@ import java.io.OutputStream
  * the open-dataset training (`TrainedDefaults`: estimator, hybrid decoder settings, ...) follow app updates for every
  * value the user never changed; a value the user changed (to anything but the default of the build that stored it)
  * stays as chosen. An export always contains every value ([export]), so it is complete and self-describing.
+ *
+ * A renamed key keeps loading through a read migration on its part of the document ([ScheduleSettingsSerializer]), so
+ * every decode (the DataStore file, import) reads old files and exports; what is written uses only the new key.
  */
 object SettingsJson {
     /** Compact configuration used for the DataStore file: values equal to their default are not written. */
@@ -60,6 +68,35 @@ object SettingsJson {
         } else {
             SettingsImportResult.Invalid(validation.errors)
         }
+    }
+}
+
+/**
+ * The JSON of [ScheduleSettings] with the read migration of `periodicHours` (up to v0.3.0) to `periodicMinutes`: a
+ * whole number of hours (also a quoted one, which the old decoder accepted) becomes that many minutes; when both keys
+ * are present `periodicMinutes` wins. Any other legacy value is moved under the new key unchanged, so that it is
+ * rejected as before: a value that is no whole number fails to decode (MALFORMED_JSON on import, defaults on a
+ * corrupted DataStore file), and an hour count whose minutes would overflow an Int stays a number the validator
+ * rejects. Writing is unchanged: files and exports contain only `periodicMinutes`. The DataStore file keeps the legacy
+ * key until the next settings write, so this migration is permanent.
+ */
+object ScheduleSettingsSerializer : JsonTransformingSerializer<ScheduleSettings>(ScheduleSettings.serializer()) {
+    private const val LEGACY_KEY = "periodicHours"
+    private const val KEY = "periodicMinutes"
+    private const val MINUTES_PER_HOUR = 60
+
+    override fun transformDeserialize(element: JsonElement): JsonElement {
+        val schedule = element as? JsonObject
+        val legacy = schedule?.get(LEGACY_KEY) ?: return element
+        val rest = schedule - LEGACY_KEY
+        return JsonObject(if (KEY in rest) rest else rest + (KEY to (minutesOf(legacy) ?: legacy)))
+    }
+
+    /** The minutes of a legacy hour count, or null when [legacy] is no whole number of hours or its minutes overflow. */
+    private fun minutesOf(legacy: JsonElement): JsonPrimitive? {
+        val hours = (legacy as? JsonPrimitive)?.intOrNull ?: return null
+        val convertible = hours in Int.MIN_VALUE / MINUTES_PER_HOUR..Int.MAX_VALUE / MINUTES_PER_HOUR
+        return if (convertible) JsonPrimitive(hours * MINUTES_PER_HOUR) else null
     }
 }
 

@@ -29,10 +29,11 @@ import kotlinx.coroutines.flow.first
  *
  * Every row of the shadow ledger was created during the test, so every written night of the last 30 days is a late
  * arrival for NewNightsSync, which checks one again only once the time since its last check is at least the time
- * between its first sighting and that check. Before each sync the environment's clock moves forward by the age of the
- * oldest written row ([ShadowEnvironment.advanceClock]), so that every such night is due again, as at a later hourly
- * sync; never beyond [DUE_HORIZON_MS] after that row was created (the nights stay late arrivals). The late heart rate
- * is removed at the end; the ledger stays as it is ("recompute all" follows on it).
+ * between its first sighting and that check, and never less than [NewNightsSync.MIN_RECHECK_GAP_MS] after it. Before
+ * each sync the environment's clock moves forward by the age of the oldest written row, and at least by that gap
+ * ([ShadowEnvironment.advanceClock]), so that every such night is due again, as at a later hourly sync; never beyond
+ * [DUE_HORIZON_MS] after that row was created (the nights stay late arrivals). The late heart rate is removed at the
+ * end; the ledger stays as it is ("recompute all" follows on it).
  */
 class RefreshScenario(
     private val env: ShadowEnvironment,
@@ -119,12 +120,13 @@ class RefreshScenario(
         val before = written()
         val firstSeen = before.values.minOfOrNull { it.createdAt }
         val age = firstSeen?.let { env.nowMs() - it } ?: 0L
-        val step = minOf(age + SECOND_MS, DUE_HORIZON_MS - age).coerceAtLeast(0L)
+        val gap = NewNightsSync.MIN_RECHECK_GAP_MS
+        val step = minOf(maxOf(age + SECOND_MS, gap), DUE_HORIZON_MS - age).coerceAtLeast(0L)
         env.advanceClock(step)
         env.health.phase = name
         val startedAtMs = env.nowMs()
         val report = env.sync.run(inBackground = false)
-        val phase = Phase(name, before, written(), startedAtMs, allDue = step > age, report)
+        val phase = Phase(name, before, written(), startedAtMs, allDue = step > age && step >= gap, report)
         ShadowChecks.consistencyProblems(env).forEach { problems += "$name: $it" }
         val pipeline = report.pipeline
         val changes =

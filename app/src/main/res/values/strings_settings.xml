@@ -11,8 +11,8 @@
     <string name="set_src_backfill_days_hint">How far back the history backfill goes; 0 = all available history.</string>
     <string name="set_sch_daily_time_title">Daily run</string>
     <string name="set_sch_daily_time_hint">Time of the daily run (approximate: Android may delay background work).</string>
-    <string name="set_sch_periodic_hours_title">Check for new nights every</string>
-    <string name="set_sch_periodic_hours_hint">How often the background job asks Health Connect for new sleep sessions.</string>
+    <string name="set_sch_periodic_title">Check for new nights every</string>
+    <string name="set_sch_periodic_hint">How often the background job asks Health Connect for new sleep sessions. A check that finds nothing new costs almost nothing; recent nights are re-checked for late heart rate at most once an hour.</string>
     <string name="set_sch_not_low_battery_title">Only when the battery is not low</string>
     <string name="set_sch_not_low_battery_hint">Background runs wait until the battery is not low.</string>
     <string name="set_wr_title_template_title">Session title</string>

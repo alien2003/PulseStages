@@ -20,8 +20,11 @@ object SettingsLimits {
     /** `schedule.dailyTimeMinutes`, minutes after local midnight. */
     val dailyTimeMinutes: IntRange = 0..1439
 
-    /** `schedule.periodicHours`. */
-    val periodicHours: IntRange = 1..24
+    /**
+     * Allowed `schedule.periodicMinutes` values, in display order: 15 and 30 minutes (WorkManager's minimum period is 15
+     * minutes) and every whole hour up to 24 (each value the hour-based setting allowed).
+     */
+    val periodicMinutes: Set<Int> = setOf(15, 30) + (1..24).map { it * 60 }
 
     /** Maximum length of `write.titleTemplate` (Health Connect limits titles to 1000 characters). */
     const val TITLE_TEMPLATE_MAX_LENGTH: Int = 1000

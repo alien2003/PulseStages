@@ -38,11 +38,17 @@ class EstimateNewNightsRunner
     ) {
         private val mutex = Mutex()
 
-        /** One run; [inBackground] is true when the app is not visible (Health Connect's background rule applies). */
-        suspend fun run(inBackground: Boolean): WorkOutcome =
+        /**
+         * One run; [inBackground] is true when the app is not visible (Health Connect's background rule applies),
+         * [userRequested] for "Estimate new now" (recent nights are re-checked at once, see [NewNightsSync.run]).
+         */
+        suspend fun run(
+            inBackground: Boolean,
+            userRequested: Boolean = false,
+        ): WorkOutcome =
             mutex.withLock {
                 guardedRun(logger, TAG) {
-                    when (val outcome = outcomeOf(sync.run(inBackground))) {
+                    when (val outcome = outcomeOf(sync.run(inBackground, userRequested))) {
                         is WorkOutcome.Completed -> outcome.copy(summary = outcome.summary.copy(personalModelUpdated = adapt(inBackground)))
                         else -> outcome
                     }

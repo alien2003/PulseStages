@@ -10,11 +10,12 @@ import io.github.alien2003.pulsestages.work.run.RecomputeRequest
 enum class EstimateTrigger(
     /**
      * Requested by the user: the run goes foreground (a foreground service), so that leaving the app does not turn it
-     * into a background read. Whether it reads as a background run is still decided by the app's state when it runs.
+     * into a background read, and re-checks every due recent night at once (NewNightsSync's minimum re-check gap does
+     * not apply). Whether it reads as a background run is still decided by the app's state when it runs.
      */
     val userInitiated: Boolean,
 ) {
-    /** The periodic Changes-API check (every `periodicHours`). */
+    /** The periodic Changes-API check (every `periodicMinutes`). */
     PERIODIC(userInitiated = false),
 
     /** The daily run at `dailyTimeMinutes`. */

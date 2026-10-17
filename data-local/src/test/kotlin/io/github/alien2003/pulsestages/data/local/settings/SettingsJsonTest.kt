@@ -36,7 +36,7 @@ class SettingsJsonTest {
                     mergeGapMin = 45,
                     backfillDays = 365,
                 ),
-            schedule = ScheduleSettings(dailyTimeMinutes = 480, periodicHours = 3, runOnlyWhenNotLowBattery = false),
+            schedule = ScheduleSettings(dailyTimeMinutes = 480, periodicMinutes = 15, runOnlyWhenNotLowBattery = false),
             write =
                 WriteSettings(
                     titleTemplate = "Stages {estimator} v{version}",
@@ -172,6 +172,69 @@ class SettingsJsonTest {
     }
 
     @Test
+    fun `the legacy periodicHours key is read as that many minutes`() {
+        fun minutesOf(json: String): Int =
+            assertInstanceOf(SettingsImportResult.Success::class.java, SettingsJson.decode(json)).settings.schedule.periodicMinutes
+
+        assertEquals(180, minutesOf("""{"schedule": {"periodicHours": 3}}"""))
+        // The hour-based decoder accepted a quoted number too.
+        assertEquals(180, minutesOf("""{"schedule": {"periodicHours": "3"}}"""))
+        assertEquals(1440, minutesOf("""{"schedule": {"periodicHours": 24}}"""))
+        assertEquals(60, minutesOf("""{"schedule": {"periodicHours": 1, "dailyTimeMinutes": 480}}"""))
+        // With both keys the new one wins, in either order.
+        assertEquals(30, minutesOf("""{"schedule": {"periodicHours": 3, "periodicMinutes": 30}}"""))
+        assertEquals(30, minutesOf("""{"schedule": {"periodicMinutes": 30, "periodicHours": 3}}"""))
+    }
+
+    @Test
+    fun `an export of an older version with periodicHours imports unchanged, with the hours as minutes`() {
+        val current = SettingsJson.encode(AppSettings())
+        val old = current.replace("\"periodicMinutes\": 60", "\"periodicHours\": 1")
+        assertTrue("periodicHours" in old && "periodicMinutes" !in old, "the old export has only the legacy key")
+
+        assertEquals(SettingsImportResult.Success(AppSettings()), SettingsJson.decode(old))
+
+        val customizedOld = SettingsJson.encode(customized).replace("\"periodicMinutes\": 15", "\"periodicHours\": 3")
+        val expected = customized.copy(schedule = customized.schedule.copy(periodicMinutes = 180))
+        assertEquals(SettingsImportResult.Success(expected), SettingsJson.decode(customizedOld))
+    }
+
+    @Test
+    fun `exports and the storage format contain only periodicMinutes`() {
+        val schedule =
+            Json
+                .parseToJsonElement(SettingsJson.encode(AppSettings()))
+                .jsonObject
+                .getValue("schedule")
+                .jsonObject
+        assertEquals(setOf("dailyTimeMinutes", "periodicMinutes", "runOnlyWhenNotLowBattery"), schedule.keys)
+        assertEquals("60", schedule.getValue("periodicMinutes").toString())
+
+        fun stored(json: String): String =
+            SettingsJson.storage.encodeToString(
+                AppSettings.serializer(),
+                SettingsJson.storage.decodeFromString(AppSettings.serializer(), json),
+            )
+        assertEquals("""{"schedule":{"periodicMinutes":180}}""", stored("""{"schedule":{"periodicHours":3}}"""))
+        // One hour is the default: nothing is stored.
+        assertEquals("{}", stored("""{"schedule":{"periodicHours":1}}"""))
+        assertTrue("periodicHours" !in SettingsJson.encode(customized))
+    }
+
+    @Test
+    fun `a legacy hour count that is no allowed interval is rejected at schedule periodicMinutes`() {
+        listOf(0 to "0", 48 to "2880", 40_000_000 to "40000000").forEach { (hours, minutes) ->
+            val result = SettingsJson.decode("""{"schedule": {"periodicHours": $hours}}""")
+
+            val error = assertInstanceOf(SettingsImportResult.Invalid::class.java, result).errors.single()
+            assertEquals("schedule.periodicMinutes", error.path, "$hours h")
+            assertEquals(SettingsErrorCode.NOT_ALLOWED, error.code, "$hours h")
+            // An hour count whose minutes overflow an Int is kept as it is (then rejected as a number of minutes).
+            assertEquals(minutes, error.value, "$hours h")
+        }
+    }
+
+    @Test
     fun `empty object imports as defaults`() {
         assertEquals(SettingsImportResult.Success(AppSettings()), SettingsJson.decode("{}"))
     }
@@ -229,6 +292,12 @@ class SettingsJsonTest {
             """{"algo": {"estimator": "NEURAL"}}""",
             """{"write": {"overwritePolicy": "sometimes"}}""",
             """{"sources": {"sourcePackages": "com.example.a"}}""",
+            """{"schedule": {"periodicHours": "hourly"}}""",
+            """{"schedule": {"periodicHours": 2.5}}""",
+            """{"schedule": {"periodicHours": null}}""",
+            """{"schedule": {"periodicHours": 99999999999}}""",
+            """{"schedule": {"periodicMinutes": "often"}}""",
+            """{"schedule": null}""",
         ],
     )
     fun `malformed JSON is rejected with a MALFORMED_JSON error`(json: String) {

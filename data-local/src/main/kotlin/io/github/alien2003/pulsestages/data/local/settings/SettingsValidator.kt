@@ -132,7 +132,7 @@ private fun Checker.checkSources(s: SourceSettings) {
 
 private fun Checker.checkSchedule(s: ScheduleSettings) {
     int("schedule.dailyTimeMinutes", s.dailyTimeMinutes, SettingsLimits.dailyTimeMinutes)
-    int("schedule.periodicHours", s.periodicHours, SettingsLimits.periodicHours)
+    intOneOf("schedule.periodicMinutes", s.periodicMinutes, SettingsLimits.periodicMinutes)
 }
 
 private fun Checker.checkWrite(w: WriteSettings) {

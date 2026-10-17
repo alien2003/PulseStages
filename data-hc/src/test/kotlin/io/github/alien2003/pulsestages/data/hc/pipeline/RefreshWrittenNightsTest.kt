@@ -213,7 +213,7 @@ class RefreshWrittenNightsTest {
                     h.sync.run(inBackground = false)
                 }
 
-            assertEquals(24, h.repository.callCount(Operation.READ_HEART_RATE), "checked by every sync while it ended in the last 36 h")
+            assertEquals(24, h.repository.callCount(Operation.READ_HEART_RATE), "checked by each hourly sync while it ended < 36 h ago")
             assertEquals(0, h.repository.callCount(Operation.WRITE))
             assertEquals(0, h.repository.callCount(Operation.DELETE))
             assertEquals(0, h.repository.callCount(Operation.READ_OWN_SESSIONS), "an unchanged input needs no look at our records")
@@ -461,7 +461,7 @@ class RefreshWrittenNightsTest {
         }
 
     @Test
-    fun `a night seen when it ended is checked by every sync for 36 hours after its end and then never again`() =
+    fun `a night seen when it ended is checked by every hourly sync for 36 hours after its end and then never again`() =
         harnessTest(dir) { h ->
             // Ended 5 h before the first sync.
             val source = h.repository.addPartialNight(OHEALTH, nightStart(0))

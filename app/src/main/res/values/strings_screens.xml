@@ -78,7 +78,7 @@
     <string name="home_job_pending">Waiting to run…</string>
     <string name="home_job_retrying">Waiting for a retry: Health Connect was busy.</string>
     <string name="home_estimate_title">New nights</string>
-    <string name="home_estimate_body">Checks Health Connect for new sleep sessions and estimates them now. This also runs automatically every hour and once a day.</string>
+    <string name="home_estimate_body">Checks Health Connect for new sleep sessions and estimates them now. This also runs automatically at the interval set in Settings and once a day.</string>
     <string name="home_estimate_running">Estimating new nights…</string>
     <string name="home_action_estimate">Estimate new</string>
     <string name="home_backfill_title">History backfill</string>

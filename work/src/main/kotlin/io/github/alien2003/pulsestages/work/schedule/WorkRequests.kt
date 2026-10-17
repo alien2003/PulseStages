@@ -51,7 +51,8 @@ object DailySchedule {
  * The work requests of PulseStages. Every request uses [BackoffPolicy.EXPONENTIAL] with [BACKOFF_DELAY_MS] (WorkManager
  * doubles it per retry up to 5 hours), carries [TAG_ALL] and its job tag; periodic requests also carry a tag
  * describing their schedule, so that a change of the schedule settings is recognised on the enqueued work.
- * - periodic: every `periodicHours` hours, battery-not-low constraint when `runOnlyWhenNotLowBattery`;
+ * - periodic: every `periodicMinutes` minutes (15 at least, WorkManager's minimum), battery-not-low constraint when
+ *   `runOnlyWhenNotLowBattery`;
  * - daily: a 24-hour periodic work whose next run is pinned to the next `dailyTimeMinutes` local time (initial delay
  *   and next-schedule-time override) — approximate, Doze and the constraint may delay it;
  * - "estimate now": one-time, expedited, run as normal work when the expedited quota is used up
@@ -104,7 +105,7 @@ object WorkRequests {
 
     /** The schedule tag of the periodic work for [schedule]. */
     fun periodicTag(schedule: ScheduleSettings): String =
-        "schedule:periodic:${schedule.periodicHours}h:batteryNotLow=${schedule.runOnlyWhenNotLowBattery}"
+        "schedule:periodic:${schedule.periodicMinutes}min:batteryNotLow=${schedule.runOnlyWhenNotLowBattery}"
 
     /** The schedule tag of the daily work for [schedule] in [zone]. */
     fun dailyTag(
@@ -116,9 +117,9 @@ object WorkRequests {
     fun constraints(schedule: ScheduleSettings): Constraints =
         Constraints.Builder().setRequiresBatteryNotLow(schedule.runOnlyWhenNotLowBattery).build()
 
-    /** The periodic check every `periodicHours` hours. */
+    /** The periodic check every `periodicMinutes` minutes. */
     fun periodic(schedule: ScheduleSettings): PeriodicWorkRequest =
-        PeriodicWorkRequestBuilder<EstimateNewNightsWorker>(schedule.periodicHours.toLong(), TimeUnit.HOURS)
+        PeriodicWorkRequestBuilder<EstimateNewNightsWorker>(schedule.periodicMinutes.toLong(), TimeUnit.MINUTES)
             .setConstraints(constraints(schedule))
             .setInputData(WorkerInputs.estimate(EstimateTrigger.PERIODIC))
             .withDefaults(Tags.ESTIMATE)

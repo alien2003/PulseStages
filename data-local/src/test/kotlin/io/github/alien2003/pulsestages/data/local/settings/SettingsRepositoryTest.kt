@@ -60,23 +60,55 @@ class SettingsRepositoryTest {
     fun `valid update is stored and survives a new DataStore instance`() =
         runTest {
             withRepository { repository ->
-                val result = repository.update { it.copy(schedule = it.schedule.copy(periodicHours = 6)) }
+                val result = repository.update { it.copy(schedule = it.schedule.copy(periodicMinutes = 360)) }
 
                 val applied = assertInstanceOf(SettingsUpdateResult.Applied::class.java, result)
-                assertEquals(6, applied.settings.schedule.periodicHours)
+                assertEquals(360, applied.settings.schedule.periodicMinutes)
                 assertEquals(
-                    6,
+                    360,
                     repository.settings
                         .first()
-                        .schedule.periodicHours,
+                        .schedule.periodicMinutes,
                 )
             }
             withRepository { repository ->
                 assertEquals(
-                    6,
+                    360,
                     repository.settings
                         .first()
-                        .schedule.periodicHours,
+                        .schedule.periodicMinutes,
+                )
+            }
+        }
+
+    @Test
+    fun `a file of an older version with periodicHours reads as minutes and the next update stores periodicMinutes`() =
+        runTest {
+            file.writeText("""{"schedule":{"periodicHours":3},"sources":{"minSessionMin":60}}""")
+
+            withRepository { repository ->
+                val settings = repository.settings.first()
+                assertEquals(180, settings.schedule.periodicMinutes)
+                assertEquals(60, settings.sources.minSessionMin)
+                // Reading does not rewrite the file.
+                assertTrue("periodicHours" in file.readText())
+
+                val result = repository.update { it.copy(sources = it.sources.copy(mergeGapMin = 10)) }
+                assertInstanceOf(SettingsUpdateResult.Applied::class.java, result)
+            }
+
+            val stored = Json.parseToJsonElement(file.readText()).jsonObject
+            assertEquals(
+                Json.parseToJsonElement("""{"sources":{"minSessionMin":60,"mergeGapMin":10},"schedule":{"periodicMinutes":180}}"""),
+                stored,
+            )
+            assertTrue(corruptions.isEmpty())
+            withRepository { repository ->
+                assertEquals(
+                    180,
+                    repository.settings
+                        .first()
+                        .schedule.periodicMinutes,
                 )
             }
         }
@@ -190,7 +222,12 @@ class SettingsRepositoryTest {
                 val bad = repository.importAndApply("""{"debug": {"logLevel": "TRACE"}}""")
                 assertInstanceOf(SettingsImportResult.Invalid::class.java, bad)
                 val outOfRange = repository.importAndApply("""{"schedule": {"periodicHours": 0}}""")
-                assertInstanceOf(SettingsImportResult.Invalid::class.java, outOfRange)
+                assertEquals(
+                    listOf("schedule.periodicMinutes"),
+                    assertInstanceOf(SettingsImportResult.Invalid::class.java, outOfRange).errors.map { it.path },
+                )
+                val notAllowed = repository.importAndApply("""{"schedule": {"periodicMinutes": 45}}""")
+                assertInstanceOf(SettingsImportResult.Invalid::class.java, notAllowed)
 
                 assertEquals(
                     LogLevel.WARN,
@@ -199,10 +236,10 @@ class SettingsRepositoryTest {
                         .debug.logLevel,
                 )
                 assertEquals(
-                    ScheduleSettings().periodicHours,
+                    ScheduleSettings().periodicMinutes,
                     repository.settings
                         .first()
-                        .schedule.periodicHours,
+                        .schedule.periodicMinutes,
                 )
             }
         }

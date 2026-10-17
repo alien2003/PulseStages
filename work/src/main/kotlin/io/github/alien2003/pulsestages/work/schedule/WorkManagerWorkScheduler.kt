@@ -51,7 +51,10 @@ class WorkManagerWorkScheduler
                     ExistingPeriodicWorkPolicy.UPDATE,
                     WorkRequests.periodic(schedule),
                 )
-                logger.i(TAG, "periodic check every ${schedule.periodicHours} h (battery not low: ${schedule.runOnlyWhenNotLowBattery})")
+                logger.i(
+                    TAG,
+                    "periodic check every ${schedule.periodicMinutes} min (battery not low: ${schedule.runOnlyWhenNotLowBattery})",
+                )
             }
             val zoneId = zone.current()
             val next = DailySchedule.nextRunMs(clock.millis(), schedule.dailyTimeMinutes, zoneId)

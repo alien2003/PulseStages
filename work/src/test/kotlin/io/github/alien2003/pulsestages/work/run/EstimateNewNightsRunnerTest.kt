@@ -7,6 +7,7 @@ import io.github.alien2003.pulsestages.data.hc.HealthPermissions
 import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository.Operation
 import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
 import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
+import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.addSyntheticNight
@@ -250,5 +251,36 @@ class EstimateNewNightsRunnerTest {
 
             val again = assertInstanceOf(WorkOutcome.Completed::class.java, h.runner().run(inBackground = true))
             assertTrue(!again.summary.personalModelUpdated, "not due again")
+        }
+
+    @Test
+    fun `an idle background run, population EM included, makes only the permission checks and one change-log read`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(0))
+            h.runner().run(inBackground = false)
+            h.clock.advanceBy(15 * MINUTE_MS)
+            h.repository.inBackground = true
+            h.repository.clearCalls()
+
+            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.runner().run(inBackground = true))
+
+            assertEquals(RunSummary(), outcome.summary)
+            assertEquals(listOf(Operation.GRANTED_PERMISSIONS, Operation.GRANTED_PERMISSIONS, Operation.CHANGES), h.repository.calls)
+        }
+
+    @Test
+    fun `a run the user asked for re-checks a recent night that a scheduled run 15 minutes after its check leaves alone`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(0))
+            val runner = h.runner()
+            runner.run(inBackground = false)
+            h.clock.advanceBy(15 * MINUTE_MS)
+            h.repository.clearCalls()
+
+            assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = false))
+            assertEquals(0, h.repository.callCount(Operation.READ_HEART_RATE), "a scheduled run keeps the hourly cadence")
+
+            assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = false, userRequested = true))
+            assertEquals(1, h.repository.callCount(Operation.READ_HEART_RATE), "checked again at once")
         }
 }

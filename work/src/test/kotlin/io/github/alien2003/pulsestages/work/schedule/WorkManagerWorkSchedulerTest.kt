@@ -195,14 +195,16 @@ class WorkManagerWorkSchedulerTest {
             assertEquals(periodic.generation, info(WorkRequests.Names.PERIODIC).generation)
             assertEquals(daily.generation, info(WorkRequests.Names.DAILY).generation)
 
-            world.scheduler.ensureScheduled(schedule.copy(periodicHours = 3, runOnlyWhenNotLowBattery = false))
+            world.scheduler.ensureScheduled(schedule.copy(periodicMinutes = 180, runOnlyWhenNotLowBattery = false))
             val updated = info(WorkRequests.Names.PERIODIC)
             assertEquals(periodic.id, updated.id)
             assertEquals(periodic.generation + 1, updated.generation)
             assertEquals(TimeUnit.HOURS.toMillis(3), updated.periodicityInfo?.repeatIntervalMillis)
             assertFalse(updated.constraints.requiresBatteryNotLow())
 
-            world.scheduler.ensureScheduled(schedule.copy(periodicHours = 3, runOnlyWhenNotLowBattery = false, dailyTimeMinutes = 21 * 60))
+            world.scheduler.ensureScheduled(
+                schedule.copy(periodicMinutes = 180, runOnlyWhenNotLowBattery = false, dailyTimeMinutes = 21 * 60),
+            )
             val evening = info(WorkRequests.Names.DAILY)
             assertEquals(daily.id, evening.id)
             assertEquals(DailySchedule.nextRunMs(world.harness.clock.millis(), 21 * 60, zone), evening.nextScheduleTimeMillis)
@@ -384,10 +386,41 @@ class WorkManagerWorkSchedulerTest {
             runCurrent()
             assertEquals(TimeUnit.HOURS.toMillis(1), info(WorkRequests.Names.PERIODIC).periodicityInfo?.repeatIntervalMillis)
 
-            world.harness.settings.set { it.copy(schedule = it.schedule.copy(periodicHours = 6)) }
+            world.harness.settings.set { it.copy(schedule = it.schedule.copy(periodicMinutes = 360)) }
             runCurrent()
 
             assertEquals(TimeUnit.HOURS.toMillis(6), info(WorkRequests.Names.PERIODIC).periodicityInfo?.repeatIntervalMillis)
+
+            world.harness.settings.set { it.copy(schedule = it.schedule.copy(periodicMinutes = 15)) }
+            runCurrent()
+
+            assertEquals(TimeUnit.MINUTES.toMillis(15), info(WorkRequests.Names.PERIODIC).periodicityInfo?.repeatIntervalMillis)
             job.cancel()
+        }
+
+    @Test
+    fun aPeriodicWorkWithTheHourBasedTagOfAnOlderVersionIsUpdatedInPlaceOnce() =
+        runTest {
+            val world = world()
+            val schedule = ScheduleSettings()
+            // As enqueued by v0.3.0: the same hourly period, under the tag of the hour-based setting.
+            workManager.enqueueUniquePeriodicWork(
+                WorkRequests.Names.PERIODIC,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                PeriodicWorkRequestBuilder<EstimateNewNightsWorker>(1, TimeUnit.HOURS)
+                    .addTag("schedule:periodic:1h:batteryNotLow=true")
+                    .build(),
+            )
+            val old = info(WorkRequests.Names.PERIODIC)
+
+            world.scheduler.ensureScheduled(schedule)
+
+            val updated = info(WorkRequests.Names.PERIODIC)
+            assertEquals(old.id, updated.id)
+            assertEquals(old.generation + 1, updated.generation)
+            assertTrue(WorkRequests.periodicTag(schedule) in updated.tags)
+            assertEquals(TimeUnit.HOURS.toMillis(1), updated.periodicityInfo?.repeatIntervalMillis)
+            world.scheduler.ensureScheduled(schedule)
+            assertEquals("matching works are left alone afterwards", updated.generation, info(WorkRequests.Names.PERIODIC).generation)
         }
 }

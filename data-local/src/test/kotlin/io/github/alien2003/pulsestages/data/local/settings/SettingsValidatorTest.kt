@@ -123,13 +123,31 @@ class SettingsValidatorTest {
     @Test
     fun `schedule ranges are inclusive and enforced`() {
         assertAll(
-            { assertValid(schedule { copy(dailyTimeMinutes = 0, periodicHours = 1) }) },
-            { assertValid(schedule { copy(dailyTimeMinutes = 1439, periodicHours = 24) }) },
+            { assertValid(schedule { copy(dailyTimeMinutes = 0, periodicMinutes = 15) }) },
+            { assertValid(schedule { copy(dailyTimeMinutes = 1439, periodicMinutes = 1440) }) },
             { assertRejected(schedule { copy(dailyTimeMinutes = -1) }, "schedule.dailyTimeMinutes") },
             { assertRejected(schedule { copy(dailyTimeMinutes = 1440) }, "schedule.dailyTimeMinutes") },
-            { assertRejected(schedule { copy(periodicHours = 0) }, "schedule.periodicHours") },
-            { assertRejected(schedule { copy(periodicHours = 25) }, "schedule.periodicHours") },
         )
+    }
+
+    @Test
+    fun `the check interval is 15 or 30 minutes or a whole number of hours up to 24`() {
+        assertEquals(listOf(15, 30) + (1..24).map { it * 60 }, SettingsLimits.periodicMinutes.toList(), "in display order")
+        assertAll(
+            { listOf(15, 30, 60, 120, 1440).forEach { assertValid(schedule { copy(periodicMinutes = it) }) } },
+            {
+                listOf(0, -60, 1, 45, 90, 1500, 2880).forEach {
+                    assertRejected(schedule { copy(periodicMinutes = it) }, "schedule.periodicMinutes", SettingsErrorCode.NOT_ALLOWED)
+                }
+            },
+        )
+        val error =
+            SettingsValidator
+                .validate(schedule { copy(periodicMinutes = 45) })
+                .errors
+                .single()
+        assertEquals("45", error.value)
+        assertTrue(error.constraint.startsWith("one of 15, 30, 60, 120, "), error.constraint)
     }
 
     @Test
@@ -415,7 +433,7 @@ class SettingsValidatorTest {
         val settings =
             defaults.copy(
                 sources = defaults.sources.copy(minSessionMin = 0, sourcePackages = listOf("bad")),
-                schedule = defaults.schedule.copy(periodicHours = 0),
+                schedule = defaults.schedule.copy(periodicMinutes = 0),
                 algo = defaults.algo.copy(preprocess = defaults.algo.preprocess.copy(epochSec = 7)),
             )
 
@@ -427,7 +445,7 @@ class SettingsValidatorTest {
                 "sources.sourcePackages[0]",
                 // "bad" was appended to sourcePriority by the repair step, so it is reported there too.
                 "sources.sourcePriority[1]",
-                "schedule.periodicHours",
+                "schedule.periodicMinutes",
                 "algo.preprocess.epochSec",
             ),
             errors.map { it.path },

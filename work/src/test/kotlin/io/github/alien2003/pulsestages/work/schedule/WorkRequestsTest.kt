@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.work.schedule
 import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.OutOfQuotaPolicy
+import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkRequest
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
@@ -48,20 +49,37 @@ class WorkRequestsTest {
     }
 
     @Test
-    fun `the periodic check runs every periodicHours with the battery-not-low constraint when enabled`() {
-        val request = WorkRequests.periodic(schedule.copy(periodicHours = 3))
+    fun `the periodic check runs every periodicMinutes with the battery-not-low constraint when enabled`() {
+        val request = WorkRequests.periodic(schedule.copy(periodicMinutes = 180))
 
         assertTrue(request.workSpec.isPeriodic)
         assertEquals(TimeUnit.HOURS.toMillis(3), request.workSpec.intervalDuration)
         assertTrue(request.workSpec.constraints.requiresBatteryNotLow())
         assertEquals(EstimateNewNightsWorker::class.java.name, request.workSpec.workerClassName)
         assertEquals(EstimateTrigger.PERIODIC, WorkerInputs.triggerOf(request.workSpec.input))
-        assertTrue(WorkRequests.periodicTag(schedule.copy(periodicHours = 3)) in request.tags)
+        assertEquals("schedule:periodic:180min:batteryNotLow=true", WorkRequests.periodicTag(schedule.copy(periodicMinutes = 180)))
+        assertTrue(WorkRequests.periodicTag(schedule.copy(periodicMinutes = 180)) in request.tags)
 
         val unconstrained = WorkRequests.periodic(schedule.copy(runOnlyWhenNotLowBattery = false))
         assertFalse(unconstrained.workSpec.constraints.requiresBatteryNotLow())
-        assertEquals(TimeUnit.HOURS.toMillis(1), unconstrained.workSpec.intervalDuration)
+        assertEquals(TimeUnit.HOURS.toMillis(1), unconstrained.workSpec.intervalDuration, "the default is hourly")
+        assertEquals("schedule:periodic:60min:batteryNotLow=true", WorkRequests.periodicTag(schedule))
         assertNotEquals(WorkRequests.periodicTag(schedule), WorkRequests.periodicTag(schedule.copy(runOnlyWhenNotLowBattery = false)))
+    }
+
+    @Test
+    fun `a 15-minute check uses WorkManager's minimum period and its own schedule tag`() {
+        val quarter = schedule.copy(periodicMinutes = 15)
+
+        val request = WorkRequests.periodic(quarter)
+
+        assertEquals(900_000L, request.workSpec.intervalDuration)
+        assertEquals(PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS, request.workSpec.intervalDuration)
+        assertEquals(900_000L, request.workSpec.flexDuration, "no flex window: the whole period")
+        assertEquals("schedule:periodic:15min:batteryNotLow=true", WorkRequests.periodicTag(quarter))
+        assertTrue(WorkRequests.periodicTag(quarter) in request.tags)
+        assertEquals(1_800_000L, WorkRequests.periodic(schedule.copy(periodicMinutes = 30)).workSpec.intervalDuration)
+        assertNotEquals(WorkRequests.periodicTag(quarter), WorkRequests.periodicTag(schedule.copy(periodicMinutes = 30)))
     }
 
     @Test

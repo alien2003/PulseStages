@@ -1,9 +1,14 @@
 package io.github.alien2003.pulsestages.ui.settings
 
+import io.github.alien2003.pulsestages.R
 import io.github.alien2003.pulsestages.algo.model.EstimatorType
 import io.github.alien2003.pulsestages.algo.params.TrainedDefaults
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
+import io.github.alien2003.pulsestages.data.local.settings.SettingsError
+import io.github.alien2003.pulsestages.data.local.settings.SettingsErrorCode
 import io.github.alien2003.pulsestages.data.local.settings.SettingsJson
+import io.github.alien2003.pulsestages.data.local.settings.SettingsLimits
+import io.github.alien2003.pulsestages.ui.common.UiText
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -58,6 +63,27 @@ class SettingsCatalogTest {
             val outside = SettingsChecks.validate(spec.write(defaults, range.last + 1)).map { it.path }
             assertTrue(spec.path in outside, "${spec.path}: ${range.last + 1} is accepted by the validator")
         }
+    }
+
+    @Test
+    fun `the check interval offers exactly the allowed minutes in order, each valid and labelled in minutes or hours`() {
+        val spec = SettingsCatalog.spec("schedule.periodicMinutes") as ChoiceSpec
+
+        assertEquals(ChoiceStyle.DROPDOWN, spec.style)
+        assertEquals(SettingsLimits.periodicMinutes.map { it.toString() }, spec.options.map { it.key })
+        assertEquals("60", spec.read(defaults))
+        spec.options.forEach { option ->
+            val written = spec.write(defaults, option.key)
+            assertEquals(option.key.toInt(), written.schedule.periodicMinutes)
+            assertEquals(emptyList<SettingsError>(), SettingsChecks.validate(written), option.key)
+        }
+        val labels = spec.options.associate { it.key to it.label }
+        assertEquals(UiText.of(R.string.format_value_unit, "15", UiText.of(R.string.unit_min)), labels["15"])
+        assertEquals(UiText.of(R.string.format_value_unit, "30", UiText.of(R.string.unit_min)), labels["30"])
+        assertEquals(UiText.of(R.string.format_value_unit, "1", UiText.of(R.string.unit_hours)), labels["60"])
+        assertEquals(UiText.of(R.string.format_value_unit, "24", UiText.of(R.string.unit_hours)), labels["1440"])
+        val notAnOption = SettingsChecks.validate(spec.write(defaults, "45")).single()
+        assertEquals("schedule.periodicMinutes" to SettingsErrorCode.NOT_ALLOWED, notAnOption.path to notAnOption.code)
     }
 
     /** A different value for every spec type (validity does not matter here, only which paths change). */

@@ -292,7 +292,7 @@ class SettingsViewModelTest {
                 vm.onEdit(SettingsEdit.Switch("write.awakeAsLight", true))
                 vm.onEdit(SettingsEdit.Choice("algo.estimator", "RULES"))
                 vm.onEdit(SettingsEdit.Choice("algo.preprocess.epochSec", "30"))
-                vm.onEdit(SettingsEdit.IntValue("schedule.periodicHours", 3))
+                vm.onEdit(SettingsEdit.Choice("schedule.periodicMinutes", "15"))
                 vm.onEdit(SettingsEdit.DoubleValue("algo.post.lowConfidenceThreshold", 0.5))
                 vm.onEdit(SettingsEdit.Time("schedule.dailyTimeMinutes", 7 * 60 + 30))
                 vm.onEdit(SettingsEdit.Range("algo.post.targetDeepMin", 0.12, 0.3))
@@ -300,7 +300,7 @@ class SettingsViewModelTest {
                 assertTrue(s.write.awakeAsLight)
                 assertEquals(EstimatorType.RULES, s.algo.estimator)
                 assertEquals(30, s.algo.preprocess.epochSec)
-                assertEquals(3, s.schedule.periodicHours)
+                assertEquals(15, s.schedule.periodicMinutes)
                 assertEquals(0.5, s.algo.post.lowConfidenceThreshold)
                 assertEquals(450, s.schedule.dailyTimeMinutes)
                 assertEquals(0.12 to 0.3, s.algo.post.targetDeepMin to s.algo.post.targetDeepMax)
@@ -348,7 +348,7 @@ class SettingsViewModelTest {
         @Test
         fun `reset asks for confirmation and then restores every default`() =
             runTest(main.dispatcher) {
-                repository.set { it.copy(sources = it.sources.copy(mergeGapMin = 10), schedule = it.schedule.copy(periodicHours = 6)) }
+                repository.set { it.copy(sources = it.sources.copy(mergeGapMin = 10), schedule = it.schedule.copy(periodicMinutes = 360)) }
                 val vm = viewModel()
                 vm.onEdit(SettingsEdit.Text("sources.minSessionMin", "5"))
                 vm.requestReset()
@@ -464,6 +464,18 @@ class SettingsViewModelTest {
             }
 
         @Test
+        fun `an export of an older version with the hour-based check interval imports it as minutes`() =
+            runTest(main.dispatcher) {
+                documents.documents[uri] =
+                    SettingsJson.encode(AppSettings()).replace("\"periodicMinutes\": 60", "\"periodicHours\": 3")
+                val vm = viewModel()
+                vm.importFrom(uri)
+                assertNull(vm.state.value.importErrors)
+                assertEquals(180, repository.current.schedule.periodicMinutes)
+                assertEquals("180", (SettingsCatalog.spec("schedule.periodicMinutes") as ChoiceSpec).read(vm.state.value.settings))
+            }
+
+        @Test
         fun `a file that is not settings JSON is rejected with its error`() =
             runTest(main.dispatcher) {
                 documents.documents[uri] = "{ not json"
@@ -488,13 +500,13 @@ class SettingsViewModelTest {
                     SettingsJson
                         .encode(AppSettings())
                         .replace("\"minSessionMin\": 90", "\"minSessionMin\": 5")
-                        .replace("\"periodicHours\": 1", "\"periodicHours\": 48")
+                        .replace("\"periodicMinutes\": 60", "\"periodicMinutes\": 45")
                 documents.documents[uri] = json
                 val vm = viewModel()
                 vm.importFrom(uri)
                 assertEquals(AppSettings(), repository.current)
                 assertEquals(
-                    listOf("sources.minSessionMin", "schedule.periodicHours"),
+                    listOf("sources.minSessionMin", "schedule.periodicMinutes"),
                     vm.state.value.importErrors
                         ?.map { it.path },
                 )
