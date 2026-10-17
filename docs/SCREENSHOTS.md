@@ -28,7 +28,7 @@ of the minified release APK, and `MergedManifestTest` checks that every build ha
   true hypnograms; Calibrate runs core-algo's `PersonalCalibrator` and keeps the personal model **in memory only**.
 - **These three screens read nothing from Health Connect and write nothing to it**, and store nothing in the app's
   database: Delete my session, Recompute and Calibrate only change the in-memory demo data.
-- **The rest of the app is not switched.** Background estimation (the hourly and daily runs) and the Home actions
+- **The rest of the app is not switched.** Background estimation (the periodic and daily runs) and the Home actions
   (Estimate new, Backfill, Recompute all, Delete my sessions) keep reading Health Connect and writing your real nights
   to it while demo mode is on; Home, Settings, Sources and Log keep showing the real state.
 

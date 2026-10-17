@@ -63,7 +63,7 @@ The strings come from the Jetpack helpers (`HealthPermissions` in `:data-hc`).
 | `android.permission.health.READ_RESPIRATORY_RATE` | optional | Optional respiratory-rate channel (`algo.features.useRespiratoryRate`). | The channel is not read. |
 | `android.permission.health.READ_HEART_RATE_VARIABILITY` | optional | Optional HRV (RMSSD) channel (`algo.features.useHrv`). | The channel is not read. |
 | `android.permission.health.READ_HEALTH_DATA_HISTORY` | special, feature-gated | Read other apps' data older than 30 days before PulseStages was first given access: the history backfill, the full-history scan of the Sources screen, the long ranges of Compare. | Health Connect silently omits older data. The backfill state is flagged `historyLimited`; the Sources screen scans the last 90 days. |
-| `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND` | special, feature-gated | Read other apps' data while the app is not in the foreground: the periodic (hourly by default) and daily runs. | Background runs read nothing and end as blocked (`BACKGROUND_PERMISSION_MISSING`, sync outcome `BACKGROUND_READ_BLOCKED`); runs started in the app run as a foreground service and still read. |
+| `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND` | special, feature-gated | Read other apps' data while the app is not in the foreground: the periodic check (every 15 min to 24 h, hourly by default) and the daily run. | Background runs read nothing and end as blocked (`BACKGROUND_PERMISSION_MISSING`, sync outcome `BACKGROUND_READ_BLOCKED`); runs started in the app run as a foreground service and still read. |
 
 Which optional channels are read (enabled **and** granted) is part of the params hash (`InputSelection`), so granting
 SpO2 later makes the nights estimated without it stale.
@@ -95,9 +95,12 @@ in the [user guide](user-guide.md).
   link of its permission screen. Without the alias Android 14+ does not grant health permissions, and Android 16
   revokes them. The screen ("PulseStages and your health data") lists what is read and written and how to delete it.
 - **Package visibility** (`<queries>`, no `QUERY_ALL_PACKAGES`): the Health Connect app
-  `com.google.android.apps.healthdata` (so `getSdkStatus` can see it on Android 11–13), OHealth, and every app that
-  declares one of the two rationale intents, i.e. every Health Connect client, so the Sources, Home and Compare
-  screens can show the label and icon of the apps that wrote the data.
+  `com.google.android.apps.healthdata` (so `getSdkStatus` can see it on Android 11–13), OHealth, Sleep as Android
+  (`com.urbandroid.sleep`), and every app that declares one of the two rationale intents, i.e. every Health Connect
+  client, so the Sources, Home and Compare screens can show the label and icon of the apps that wrote the data. Sleep
+  as Android is listed only so that the opt-in sync request can check that it and its `REQUEST_SYNC` receiver are
+  installed before it is sent ([8.3](#83-sleep-as-android)); the system delivers the broadcast itself without
+  visibility.
 - **No `INTERNET`.** The manifest removes it (`tools:node="remove"`) even if a library asks for it; the connect-client
   AAR itself merges no permission ([privacy.md §2](privacy.md#2-everything-stays-on-the-device)).
 
@@ -113,6 +116,9 @@ in the [user guide](user-guide.md).
 | `io.github.alien2003.pulsestages.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (declared and used by `androidx.core:core`) | A permission with protection level `signature` that `androidx.core` uses to keep receivers registered at runtime private to the app on Android versions without `RECEIVER_NOT_EXPORTED`. |
 
 These four come from the libraries' manifests and are merged into the APK; `app/build/outputs/logs/manifest-merger-release-report.txt` shows the origin of every entry.
+
+The sync request to Sleep as Android ([8.3](#83-sleep-as-android)) needs no permission: its receiver is exported and
+requires none.
 
 ## 3. Data read
 
@@ -322,6 +328,14 @@ back: `sourceUuids` identifies its earlier records of a night after a reinstall 
 `NewNightsSync` follows changes of the source sleep sessions through the Changes API instead of re-reading the whole
 history on every run.
 
+**Polling.** Health Connect cannot notify an app of new data ("your app can't get notified of new data",
+[sync data](https://developer.android.com/health-and-fitness/health-connect/sync-data)), so PulseStages asks for
+changes: the periodic work every `schedule.periodicMinutes` (Settings → "Schedule" → "Check for new nights every": 15
+or 30 min or a whole number of hours up to 24, 1 h by default), the daily run and "Estimate new"
+([architecture.md §6.1](architecture.md#61-works)). 15 min is WorkManager's minimum period
+(`PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS` = 900000). A check that finds no change costs one change-log read
+([7.2](#72-quotas)); the retry and the refresh of recent nights (below) stay about hourly with any shorter interval.
+
 **The token.** `getChangesToken(ChangesTokenRequest(recordTypes = {SleepSessionRecord}, dataOriginFilters = the
 enabled source packages))`. PulseStages' own package is never in the filter, so its own writes do not appear in the
 change log. The token is stored in the `sync_state` DataStore together with the exact package set it was created for
@@ -353,7 +367,8 @@ the same range.
 | `REREAD_MS` | 7 days | re-read window after a token reset |
 | `MAX_REREAD_MS` | 30 days | Health Connect keeps change logs for about 30 days |
 | `TOKEN_MAX_AGE_MS` | 25 days | tokens are documented as valid for 30 days; an older token is treated as expired |
-| `RETRY_RECENT_MS` | 36 hours | nights that ended this recently are retried (without an estimate) or refreshed (written) by every run; late arrivals are retried or refreshed for this long after they were first seen |
+| `RETRY_RECENT_MS` | 36 hours | nights that ended this recently are retried (without an estimate) or refreshed (written) by every run, at most every `MIN_RECHECK_GAP_MS`; late arrivals are retried or refreshed for this long after they were first seen |
+| `MIN_RECHECK_GAP_MS` | 55 min | a recent night is retried or refreshed no sooner than this after its last attempt, so a 15- or 30-minute check keeps the hourly cadence; 55 rather than 60 min so that an hourly run is never skipped by a few minutes of jitter. "Estimate new" ignores it |
 | `LATE_ARRIVAL_MAX_MS` | 30 days | nights first seen at most this long after they ended are retried or refreshed with growing gaps |
 | `MAX_REFRESH_NIGHTS_PER_RUN` | 8 | written nights whose input one run reads again; the rest are left to later runs ([7.2](#72-quotas)) |
 
@@ -371,7 +386,8 @@ would have hidden.
 session (for example when the watch syncs hours later) produce no change. After following the log (or re-reading),
 every run therefore:
 
-- retries the recent nights that could not be estimated yet (NOT_ESTIMATED, FAILED);
+- retries the recent nights of an enabled source that could not be estimated yet (NOT_ESTIMATED, FAILED); a night of
+  a source that was disabled is never found by the window read, so it is not retried;
 - refreshes the recent written nights: it reads their heart rate, steps and optional channels again with the same
   reads as an estimate and compares them with the fingerprint stored at the write (sample counts and SHA-256 digests).
   When the input is unchanged, nothing else happens. A changed input is estimated again, and the record is rewritten
@@ -380,10 +396,12 @@ every run therefore:
   for a while); a record deleted outside PulseStages is not written again. Nothing is refreshed under `NEVER`, and stale nights are left to a
   recompute.
 
-Both use the window of the constants above: nights that ended in the last 36 hours on every run, late arrivals with
-growing gaps; at most 8 written nights are refreshed per run
+Both use the window of the constants above: nights that ended in the last 36 hours on every run, but at most every
+55 min (`MIN_RECHECK_GAP_MS`), so about hourly also with a 15- or 30-minute check; late arrivals with growing gaps,
+about 1, 2, 4, 8, 16 and 32 h after they were first seen; at most 8 written nights are refreshed per run
 ([architecture.md §6.7](architecture.md#67-what-a-sync-does), [§3.6](architecture.md#36-refreshing-written-nights)).
-Heart rate that arrives later than that is used only by a recompute.
+"Estimate new" (`EstimateTrigger.NOW`, `userRequested`) re-checks every due night at once, also one checked a few
+minutes earlier. Heart rate that arrives later than that is used only by a recompute.
 
 ## 6. Deleting records
 
@@ -457,15 +475,27 @@ sessions of its window and, on its first write, PulseStages' own sessions around
 start with a single-record read and then reads the history one 7-day window at a time, so a backfill of a long history
 makes the most calls.
 
-Every sync also refreshes recent written nights ([5](#5-changes-api)). Per checked night it reads the heart rate and
-the steps (one call per page of up to 1000 records: usually one each, up to about three with dense heart rate and the
-24 h left padding) and each enabled and granted optional channel; per refresh run one read of the sleep sessions
-around the targets and, when an input changed, one read of PulseStages' own sessions around them; a rewrite adds the
-insert and its verification read. `MAX_REFRESH_NIGHTS_PER_RUN` = 8 keeps this under 100 read calls per run even in
-the worst case (8 nights with dense heart rate, three optional channels and a rewrite each: 8 × 9 + 2 + 8 = 82),
-far below the background quota of 1000 calls per 15 minutes, and about 2000 a day with 25 runs, below 8000; usually
-only the one or two sessions of the last 36 hours are due. A backfill that makes many recent nights due at
-once is spread over several runs.
+A check that finds nothing new (a valid token, no change, no recent night due) makes one call of the read quota:
+`getChanges`. Its other calls are not counted: `getSdkStatus` is answered in the client, and `getGrantedPermissions`
+(made once more by a background run, through `BackgroundRuleHealthRepository`) takes no quota; population EM reads
+nothing when it is not due. At the shortest interval, 15 min, that is 96 periodic checks and the daily run, about 97
+read calls a day.
+
+A sync also refreshes the recent written nights that are due ([5](#5-changes-api)). Per checked night it reads the
+heart rate and the steps (one call per page of up to 1000 records: usually one each, up to about three with dense
+heart rate and the 24 h left padding) and each enabled and granted optional channel; per refresh run one read of the
+sleep sessions around the targets and, when an input changed, one read of PulseStages' own sessions around them; a
+rewrite adds the insert and its verification read. `MAX_REFRESH_NIGHTS_PER_RUN` = 8 keeps this under 100 read calls
+per run even in the worst case (8 nights with dense heart rate, three optional channels and a rewrite each:
+8 × 9 + 2 + 8 = 82), far below the background quota of 1000 calls per 15 minutes. A recent night is retried or
+refreshed at most every 55 min (`MIN_RECHECK_GAP_MS`), so whatever the interval it is checked at most about 25 times a
+day (hourly, plus the daily run): about 2000 read calls a day in that worst case, plus the change-log reads of the
+checks (about 97 at 15 min), below 8000. Usually only the one or two sessions of the last 36 hours are due. A backfill
+that makes many recent nights due at once is spread over several runs.
+
+The Health Connect sync that "Ask Sleep as Android to sync" requests ([8.3](#83-sleep-as-android)) is Sleep as
+Android's own: the quota is counted per app (`RateLimiter` keeps its buckets per caller uid), so its reads (among them
+a 30-day heart-rate aggregate) and its writes count against Sleep as Android's quota, not PulseStages'.
 
 ### 7.3 Backoff
 
@@ -518,13 +548,15 @@ Sleep as Android (`com.urbandroid.sleep`) can import third-party sleep from Heal
 Connect, marked beta in its documentation; [its docs](https://sleep.urbandroid.org/docs/services/health_connect.html)).
 Its documentation does not say how it chooses between overlapping sessions of different apps. The import behaviour in
 the bullets below was observed with Sleep as Android 20261006 and confirmed on the development phone (Android 16,
-ColorOS 16); other versions may behave differently.
+ColorOS 16), except where a point says it is not yet confirmed; other versions may behave differently.
 
 - **When it imports.** Only when the user taps Settings → Services → "Sync now" (or the sync button of its Health
   Connect screen), when it saves a record (added, edited or saved automatically) and when its own tracking ends. "Sync
   now" syncs every enabled service its summary lists (for example "Health Connect, SleepCloud, SleepSync"). Its
   documentation says the integration then works in the background, but there is no periodic import for a user who
-  only views data in it.
+  only views data in it. A fourth trigger, the sync request of its Intent API that PulseStages can send
+  (`write.requestSleepAsAndroidSync`, below), was observed with Sleep as Android 20261006 but is not yet confirmed on
+  the development phone.
 - **The "Health Connect" row is a switch.** While the row in Settings → Services says "Connected", tapping it does not
   sync: it turns the integration off, and Sleep as Android then revokes all its Health Connect permissions (they
   disappear once its process ends). Turning the integration on again asks for the permissions again, and "Access past
@@ -543,17 +575,25 @@ ColorOS 16); other versions may behave differently.
   a refresh after late heart rate ([5](#5-changes-api)) or a recompute rewrites our record in Health Connect, not its
   copy. A night imported once stays as it was until the user deletes it in Sleep as Android and syncs again. Deleting
   a night in Sleep as Android removes nothing from Health Connect.
+- **Heart rate and SpO2 come later.** The times and stages of an imported record never change, but heart rate and
+  SpO2 do reach it: a sync attaches them only to the records Sleep as Android had before that sync, so a night gets
+  them on the sync after its import (confirmed on the development phone: a second "Sync now" attached heart rate to
+  PulseStages' nights). Values that reach Health Connect later are merged into the record on later syncs, as long as
+  it started in the last 30 days (not yet confirmed on the development phone).
 - **Read window.** "Sync now" reads Health Connect for the last 30 days and the automatic syncs the last 14 days; only
   the sync button of the Health Connect screen it opens when the integration is turned on reads up to 5 years back.
   Without Health Connect's history access ("Access past data" in Health Connect → "App permissions" → "Sleep" →
   "Additional access") it reads other apps' data only from the last 29 days ([3.4](#34-history)), so an older night
-  deleted there does not come back with "Sync now".
+  deleted there does not come back with "Sync now". The sync a request starts (below) reads the last 30 days, like
+  "Sync now" (not yet confirmed on the development phone).
 - **Stages.** On import, `STAGE_TYPE_AWAKE` (1), `STAGE_TYPE_LIGHT` (4), `STAGE_TYPE_DEEP` (5) and `STAGE_TYPE_REM` (6)
   become its awake, light, deep and REM; `STAGE_TYPE_UNKNOWN` (0) and `STAGE_TYPE_SLEEPING` (2) are dropped.
   - A record without light, deep or REM gets no hypnogram. Sleep as Android then shows only short awake bars from its
     own heart-rate-based awake detection, which is on by default
     ([awake detection](https://sleep.urbandroid.org/docs/sleep/awake_detection.html)): the thin stripes users see on
-    OHealth's nights. They are not stages written by PulseStages.
+    OHealth's nights. They are not stages written by PulseStages. On a record with our stages the same detection runs
+    once heart rate is attached, and the awake stretches it finds can cover parts of our stages (below; not yet
+    confirmed on the development phone).
   - When Sleep as Android imports our session (with `write.startBeforeSource`), a nap written with `SLEEP_WAKE` (the
     default nap output) shows as a time span without phases (only its awake parts, if any), and with
     `write.awakeAsLight` without awake parts either. `algo.napMode.outputPolicy` = `STAGES` ("Written for a nap" =
@@ -584,6 +624,71 @@ Sleep as Android already imported must be deleted there and synced again. `write
 sleep") remains for readers that show awakenings poorly; it changes the written data and the params hash, and Sleep as
 Android does not need it, because it imports AWAKE as awake. The user's steps are in the
 [user guide](user-guide.md#sleep-as-android).
+
+**`write.requestSleepAsAndroidSync`** (Settings → "Written sessions" → "Ask Sleep as Android to sync", off by default)
+lets PulseStages start that sync. After a run that wrote or rewrote at least one session (a periodic or daily check,
+"Estimate new", a backfill or a recompute, also one that stopped early after writing),
+`SleepAsAndroidSyncRequests.afterRun` sends Sleep as Android's public sync request once: the broadcast
+`Intent("com.urbandroid.sleep.REQUEST_SYNC").setPackage("com.urbandroid.sleep")` (`SleepAsAndroid.requestSyncIntent`)
+with no extras, data, component or flags, so it carries nothing about the user. Its
+[Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html) lists it among its broadcasts as "Request Backup
+Sync" ("Triggers CSV export and cloud backup") and asks for the package on every intent. `BroadcastSyncRequestSender`
+first looks up the receiver with `queryBroadcastReceivers` (hence the `<queries>` entry,
+[2.2](#22-manifest-declarations)) and sends nothing when Sleep as Android is not installed. Android reports nothing
+back, so a request counts as sent even when Sleep as Android does not get it: a stopped app (never opened, or
+force-stopped) receives no broadcasts, and PulseStages deliberately does not wake it (no
+`FLAG_INCLUDE_STOPPED_PACKAGES`). A run that wrote nothing sends nothing, and a failed request is logged and never
+fails the run.
+
+Observed with Sleep as Android 20261006, not yet confirmed on the development phone: its receiver
+(`RequestSyncReceiver`, exported, no permission) reads no extras, starts its backup and the syncs of its other enabled
+services at once and, about 10 s later and only when its Health Connect integration is on, a Health Connect sync like
+that of "Sync now": the last 30 days, imports with the cloud icon. Requests less than 10 s apart give one Health
+Connect sync, and one that arrives while a sync runs is skipped. Its documentation describes only the backup, so the
+Health Connect part may change in any version.
+
+**A follow-up for a new night.** Sleep as Android attaches heart rate and SpO2 only to the records it had before a
+sync (above), so a night imported in the sync of a first request gets them only from a second one. A run that wrote
+a new night (`written`: new or recomputed) therefore also schedules one follow-up request
+`SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS` = 10 min later: the one-time unique work `sleep-as-android-follow-up`
+(`SleepAsAndroidSyncWorker`, `ExistingWorkPolicy.REPLACE`, battery-not-low like the scheduled works), whose due time
+is kept in `sync_state` (`sleep_as_android_follow_up_due_at`). It is a work rather than a step of the next run because
+it then comes about 10 min after the import whatever the check interval (up to 24 h), needs no Health Connect access
+and survives process death. REPLACE keeps at most one pending; the due time is cleared before the request is sent, so
+a work that runs again sends nothing twice; the work sends nothing once the option is off, and a run with the option
+off cancels a pending one. A run that only rewrote nights (`rewritten`: a refresh after late heart rate) gets no
+follow-up: Sleep as Android imported those nights earlier, so the request's own sync attaches the new heart rate, and
+every further sync may add another set of heart-rate values (below). A pending follow-up that is due by then counts as
+sent by that request.
+
+**Side effects**, observed with Sleep as Android 20261006 and not yet confirmed on the development phone:
+
+- every request also runs Sleep as Android's backup (a local `sleep-export.zip` by default) and the syncs of its other
+  enabled services (Google Fit, Google Calendar, Samsung Health, SleepSync), as "Sync now" does: a new night causes
+  two of them, and every later rewrite one more;
+- its sync reads every app's heart rate of the last 30 days as 10-minute averages (`BPM_AVG`), from its own quota
+  ([7.2](#72-quotas));
+- it can write heart rate (`HeartRateRecord`, `RestingHeartRateRecord`) and SpO2 to Health Connect (origin
+  `com.urbandroid.sleep`) for the records of those 30 days that got no new values in the sync, mostly the nights it
+  tracked itself; PulseStages reads such heart rate only with "Heart rate and steps from" = "Any app"
+  (`sources.hrSources` = `ANY`);
+- heart rate on a record runs Sleep as Android's heart-rate awake detection (its Settings → Awake detection → "HR", 2
+  by default; 0 turns it off), which can add awake stretches over our stages; they stay on that record;
+- every sync probably adds another set of 10-minute heart-rate values to records that already have heart rate: the
+  averaging windows start at "now − 30 days" of each sync, and Sleep as Android skips a value only when its time and
+  value are the same (an inference, to be checked on the phone);
+- the nights it imports in this sync get the cloud icon and are never exported back to Health Connect as its own
+  sessions (unlike Backup → "Download from Health Connect"). Its log line "HealthConnect sessions found: total=…
+  ours=… others=…" (logcat tag `SleepAsAndroid`) counts its own sessions in Health Connect as `ours`; that number must
+  not grow after a request.
+
+The option changes nothing that is written and is not part of the params hash (`OutputOptions.hashExtra` leaves it
+out). It is meant for use with `write.startBeforeSource`: without that, the session Sleep as Android imports is the
+source's, without stages. PulseStages' log has "asked Sleep as Android to sync (written=N rewritten=M; follow-up in 10
+min)" and, 10 min later, "asked Sleep as Android to sync again: heart rate and SpO2 for the night it imported" (tag
+`SleepAsAndroid`); the message of a run the user started adds "Sleep as Android was asked to sync.", and the work
+output carries `sleepAsAndroidSyncRequested`. The user's steps are in the
+[user guide](user-guide.md#ask-sleep-as-android-to-sync).
 
 ## 9. Deleting PulseStages data
 
@@ -624,6 +729,9 @@ android17-release where PLAN.md says so): `TransactionManager.java`, `fitness/re
 [platform/packages/modules/HealthFitness](https://android.googlesource.com/platform/packages/modules/HealthFitness/).
 
 Sleep as Android: [Health Connect](https://sleep.urbandroid.org/docs/services/health_connect.html),
-[Awake detection](https://sleep.urbandroid.org/docs/sleep/awake_detection.html). Its import behaviour
-([8.3](#83-sleep-as-android)) is not described in its documentation; it was observed with Sleep as Android 20261006
-and confirmed on the development phone.
+[Awake detection](https://sleep.urbandroid.org/docs/sleep/awake_detection.html),
+[Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html) (the "Request Backup Sync" broadcast
+`com.urbandroid.sleep.REQUEST_SYNC`). Its import behaviour ([8.3](#83-sleep-as-android)) is not described in its
+documentation; it was observed with Sleep as Android 20261006 and confirmed on the development phone, except where
+8.3 says it is not yet confirmed. The Health Connect sync that its sync request starts is not described either: the
+Intent API mentions only the backup.

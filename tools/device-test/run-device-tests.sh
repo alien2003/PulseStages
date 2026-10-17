@@ -15,7 +15,7 @@
 #   - pulls the reports from /sdcard/Android/data/io.github.alien2003.pulsestages/files/e2e and removes that
 #     directory once the cleanup is confirmed;
 #   - opens PulseStages once at the end and returns to the home screen, so that WorkManager registers the app's
-#     hourly and daily runs again after the force-stops.
+#     periodic and daily runs again after the force-stops.
 # Every adb call is time-limited and reads no terminal input. The exit trap (EXIT; INT, TERM and HUP stop the current
 # step at once) always runs the cleanup step, retried after a pause when it cannot confirm, then the "after" snapshot
 # and the comparison when the run stopped early. INT, TERM and HUP are ignored while it cleans up.
@@ -669,12 +669,12 @@ remove_device_reports() {
 
 rearm_app() {
   ((REARM && INSTRUMENTED)) || return 0
-  log "opening PulseStages once so that WorkManager registers its hourly and daily runs again, then the home screen"
-  log "(as when you open it yourself: an hourly check that became due during the run may run right now)"
+  log "opening PulseStages once so that WorkManager registers its periodic and daily runs again, then the home screen"
+  log "(as when you open it yourself: a periodic check that became due during the run may run right now)"
   local output count=0 waited=0
   output="$(shell_t 60 am start -W -n "${APP_ID}/.MainActivity" 2>&1)" || output="Error: $output"
   if grep -q '^Error' <<<"$output"; then
-    LEFTOVERS+=("PulseStages could not be opened at the end: open it once on the phone, so that its hourly and daily runs are scheduled again")
+    LEFTOVERS+=("PulseStages could not be opened at the end: open it once on the phone, so that its periodic and daily runs are scheduled again")
     return 0
   fi
   sleep 5

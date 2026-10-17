@@ -513,12 +513,13 @@ The settings most people use:
 | "Merge gap" (Sources) | 30 min | Fragments of one night from one app with a shorter gap become one night; the gap is written as awake |
 | "History depth" (Sources) | 0 days | How far back the backfill goes; 0 = all available history |
 | "Daily run" (Schedule) | 09:00 | Approximate time of the daily run |
-| "Check for new nights every" (Schedule) | 1 h | Period of the background check |
+| "Check for new nights every" (Schedule) | 1 h | Period of the background check: "15 min", "30 min" or 1 to 24 hours. A check that finds nothing new costs almost nothing; recent nights are re-checked for late heart rate at most once an hour ([Automatic runs](#automatic-runs)) |
 | "Only when the battery is not low" (Schedule) | on | Automatic runs wait until the battery is not low |
 | "Session title" (Written sessions) | empty | Title of the written sessions; placeholders `{estimator}`, `{version}`, `{confidence}`; empty = "Sleep stages from heart rate (estimate)" in the phone's language |
 | "Existing sessions" (Written sessions) | "Skip up-to-date nights" | What runs do with nights that already have a session ([overwrite policy](#existing-sessions)) |
 | "Write awake as light sleep" (Written sessions) | off | For apps that show awakenings poorly; changes the written data |
 | "Sleep as Android compatibility" (Written sessions) | off | Starts each written session 1 second before the source session, for Sleep as Android, which imports only the session that starts first ([Sleep as Android compatibility](#sleep-as-android-compatibility)); changes the written data |
+| "Ask Sleep as Android to sync" (Written sessions) | off | After a night or nap is written or updated, asks Sleep as Android to sync with Health Connect, and once more about 10 minutes after a new one, so that it adds heart rate and SpO2 ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)); changes nothing that is written |
 | "Estimator" (Algorithm) | "Hybrid" | "Hybrid", "HMM" or "Rules" |
 | "Nap threshold" (Naps) | 180 min | Shorter sessions are naps; 0 = no naps |
 | "Written for a nap" (Naps) | "Asleep / awake" | "Asleep / awake" (only sleep and awakenings), "Stages" or "Nothing" ([Nights and naps](#nights-and-naps)) |
@@ -703,24 +704,29 @@ The technical details are in [architecture.md §3.2](architecture.md#32-building
 
 PulseStages uses Android's WorkManager for all background work:
 
-- **Hourly check** (every "Check for new nights every", 1 h by default). It asks Health Connect's Changes API for new,
-  changed or deleted sleep sessions of the enabled sources. On the first run, after a source was enabled or
-  disabled, when Health Connect reports the change token as expired, or when the token is older than 25 days, it
-  re-reads the last 7 days instead (back to the last successful check, at most 30 days).
+- **Periodic check** (every "Check for new nights every": "15 min", "30 min" or 1 to 24 hours, 1 h by default). Health
+  Connect cannot tell an app that new data arrived, so PulseStages asks: the check asks Health Connect's Changes API
+  for new, changed or deleted sleep sessions of the enabled sources. 15 minutes is the shortest period Android's
+  WorkManager allows. A check that finds nothing new makes one request to Health Connect, so a short interval costs
+  little; it mostly means more background wake-ups
+  ([Battery and background restrictions](#battery-and-background-restrictions)). On the first run, after a source was
+  enabled or disabled, when Health Connect reports the change token as expired, or when the token is older than 25
+  days, it re-reads the last 7 days instead (back to the last successful check, at most 30 days).
 - **Daily run** at "Daily run" (09:00 local time by default). The time is approximate: Android may delay background
   work.
 - **Battery.** With "Only when the battery is not low" (on by default) both wait until the battery is not low.
 - **Late heart rate.** The heart rate often reaches Health Connect hours after the sleep session (when the watch
   syncs), and Health Connect reports only new, changed and deleted sleep sessions. Every run therefore looks at recent
   sessions again after the check:
-  - sessions that could not be estimated yet ("Not estimated", "Failed") are tried again;
+  - sessions that could not be estimated yet ("Not estimated", "Failed") are tried again, if their app is still
+    enabled on the [Sources](#sources) screen;
   - nights and naps it already wrote are checked: their heart rate, steps and optional data are read again, and when
     they changed, the session is estimated again and updated.
 
-  Sessions that ended in the last 36 hours are looked at on every run. Sessions that arrived late (up to 30 days after
-  they ended) are looked at for 36 hours after they first appeared, with growing gaps (about 1, 2, 4, 8, 16 and 32
-  hours after, with the hourly check). At most 8 written sessions are checked per run; the others wait for the next
-  runs.
+  Sessions that ended in the last 36 hours are looked at on every run, but at most once every 55 minutes, so about
+  once an hour also with a check every 15 or 30 minutes. Sessions that arrived late (up to 30 days after they ended)
+  are looked at for 36 hours after they first appeared, with growing gaps (about 1, 2, 4, 8, 16 and 32 hours after).
+  At most 8 written sessions are checked per run; the others wait for the next runs.
 - **Updates of written sessions.** A written session is rewritten only when it would change: its start, its stages, its
   title or its notes, which hold the coverage, the confidence and the number of heart-rate samples. It keeps its record
   key and gets the next version, like a recompute, and the night detail says "Updated automatically" and why
@@ -736,8 +742,11 @@ PulseStages uses Android's WorkManager for all background work:
 - **Background access.** Automatic runs read only with "Allow background" granted
   ([Permissions](#permissions)); "Last run" shows "no background access" otherwise.
 - **"Estimate new"** runs the same check at once, as a foreground service with the notification "Estimating new
-  nights", so it works without background access. When it updated written sessions, its message ends with "… nights
-  updated with late data."
+  nights", so it works without background access. It also looks at every recent session that is due, even one looked
+  at a few minutes earlier. When it updated written sessions, its message says "… nights updated with late data."
+- **Sleep as Android.** With "Ask Sleep as Android to sync" on, every run that wrote or updated a session (including
+  a backfill or a recompute) asks Sleep as Android to sync, and a new session gets a second request about 10 minutes
+  later ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)).
 - **Errors.** Health Connect rate-limit and transient errors are retried later with a growing delay (from 30 seconds,
   doubling up to 5 hours). A failure on one night is logged and does not stop the others.
 
@@ -749,10 +758,11 @@ up to date, and they never rewrite stale ones on their own (with the default "Ex
 ### What "stale" means
 
 A night is **stale** when it was estimated with another algorithm version or with other parameters than the current
-ones. PulseStages stores a version and a parameters hash with every session it writes; the hash covers every
-algorithm setting, the bundled model, the personal model, "Heart rate and steps from", which optional channels are
-read, "Write awake as light sleep" and "Sleep as Android compatibility" (only while it is on, so nights written
-without it keep their hash). The title and the schedule are not part of it. Things that make nights stale:
+ones. PulseStages stores a version and a parameters hash with every session it writes; the hash covers every algorithm
+setting, the bundled model, the personal model, "Heart rate and steps from", which optional channels are read, "Write
+awake as light sleep" and "Sleep as Android compatibility" (only while it is on, so nights written without it keep
+their hash). The title, the schedule and "Ask Sleep as Android to sync" are not part of it. Things that make nights
+stale:
 
 - a change of an algorithm setting (including the "Naps" groups and "Features" → "Optional channels");
 - turning "Write awake as light sleep" or "Sleep as Android compatibility" on or off;
@@ -914,9 +924,11 @@ documentation marks the integration beta and describes it as two-way (it also ex
 Connect); it does not say how Sleep as Android chooses between overlapping sessions of different apps
 ([Sleep as Android docs](https://sleep.urbandroid.org/docs/services/health_connect.html)). The import behaviour under
 [How Sleep as Android imports](#how-sleep-as-android-imports) was observed with Sleep as Android 20261006 and confirmed
-on the development phone (Android 16, ColorOS 16); other versions may behave differently. With
-[Sleep as Android compatibility](#sleep-as-android-compatibility) it imports PulseStages' sessions with their stages
-for nights it has not imported yet (confirmed on the development phone with Sleep as Android 20261006).
+on the development phone (Android 16, ColorOS 16), except where a point says it is not yet confirmed; other versions
+may behave differently. With [Sleep as Android compatibility](#sleep-as-android-compatibility) it imports
+PulseStages' sessions with their stages for nights it has not imported yet (confirmed on the development phone with
+Sleep as Android 20261006), and [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync) lets PulseStages start
+that sync after it has written a night.
 
 ### How Sleep as Android imports
 
@@ -927,6 +939,7 @@ for nights it has not imported yet (confirmed on the development phone with Slee
   SleepSync") and reads Health Connect for the last 30 days; the automatic syncs read the last 14 days. Only the sync
   button of the Health Connect screen it opens when you turn the integration on reads further back (up to 5 years).
   Without Health Connect's history access ("Access past data") it reads other apps' data only from the last 29 days.
+  PulseStages can also ask it to sync ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)).
 - **One session per night: the one that starts first.** It reads the sleep sessions of all apps, orders them by start
   time and keeps only the first of every group of overlapping sessions; sessions that merely touch (one ends where the
   next starts) count as overlapping. The others are dropped without a message. Health Connect's
@@ -940,6 +953,11 @@ for nights it has not imported yet (confirmed on the development phone with Slee
   already has, including the records it imported earlier (shown with a cloud icon), and it never picks up later changes
   of an imported record, such as PulseStages' [automatic update](#automatic-runs) after late heart rate or a recompute.
   A night stays as it was imported until you delete it in Sleep as Android and sync again.
+- **Heart rate and SpO2 come with the next sync.** Only these are added to a night later: a sync adds them only to
+  the nights Sleep as Android already had before it, so a night it has just imported gets them on the next sync
+  (confirmed on the development phone: a second "Sync now" added heart rate to PulseStages' nights). Heart rate that
+  reaches Health Connect later is added to the night on later syncs while the night is less than 30 days old (not yet
+  confirmed on the development phone).
 - **Stages.** It imports Health Connect's awake, light, deep and REM stages as its own awake, light, deep and REM, and
   drops "unknown" and the generic "sleeping" stage. A night's "No data" spans, written as unknown by default, therefore
   have no phase there, and a nap written as "Asleep / awake" (the default for naps) shows as a time span without
@@ -950,7 +968,9 @@ for nights it has not imported yet (confirmed on the development phone with Slee
 - **Thin stripes instead of phases.** A record without light, deep or REM sleep gets no hypnogram in Sleep as Android.
   It then shows only short awake bars from its own heart-rate-based awake detection, which is on by default
   ([awake detection](https://sleep.urbandroid.org/docs/sleep/awake_detection.html)). These thin stripes are not
-  PulseStages' stages.
+  PulseStages' stages. Once heart rate is added to a night with PulseStages' stages, the same detection can put awake
+  stretches over those stages (observed with Sleep as Android 20261006, not yet confirmed on the development phone);
+  Sleep as Android → Settings → Awake detection → "HR" sets how sensitive it is (0 turns it off).
 - **Deleting a night in Sleep as Android** removes only its own record; nothing is deleted from Health Connect.
 
 On the development phone, without "Sleep as Android compatibility", Sleep as Android showed OHealth's stage-less
@@ -984,6 +1004,54 @@ Nights Sleep as Android has already imported must be deleted there and synced ag
 - **"Never overwrite".** With "Existing sessions" = "Never overwrite" existing sessions are never rewritten; only
   nights written afterwards start earlier.
 
+### Ask Sleep as Android to sync
+
+Settings → "Written sessions" → "Ask Sleep as Android to sync" (off by default): "After a night or nap is written or
+updated, asks Sleep as Android to sync with Health Connect, and once more about 10 minutes after a new one, so that it
+adds heart rate and SpO2. Works with “Sleep as Android compatibility”. Each request also runs Sleep as Android's
+backup and its other syncs."
+
+- **What it does.** Sleep as Android has no periodic import, and a night it imports gets its heart rate and SpO2 only
+  on the following sync. With this setting, every PulseStages run that wrote or updated a session (the automatic
+  checks, "Estimate new", a backfill, a recompute) sends Sleep as Android its public sync request, which its
+  documentation lists as "Request Backup Sync" ([Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html)).
+  After a new night PulseStages sends it once more about 10 minutes later, so that the night gets its heart rate and
+  SpO2. An update after late heart rate gets only the one request: Sleep as Android already has that night and adds
+  the new heart rate in that sync.
+- **What is sent.** Only the request: no night, no heart rate, no other data
+  ([privacy.md §2](privacy.md#2-everything-stays-on-the-device)). It is sent only when Sleep as Android is installed,
+  and a run that wrote nothing sends nothing.
+- **Before you turn it on.** Turn on Sleep as Android's Health Connect integration (Settings → Services → "Health
+  Connect") and, in PulseStages, "Sleep as Android compatibility" ([Recommended setup](#recommended-setup), steps 1 to
+  4): without it Sleep as Android imports the watch app's session without stages and keeps it. Open Sleep as Android
+  at least once after installing it: Android delivers nothing to an app that was never opened or was force-stopped,
+  and PulseStages cannot tell. Sleep as Android must also be allowed to run in the background
+  ([Battery and background restrictions](#battery-and-background-restrictions)).
+- **What you see.** A new night appears in Sleep as Android shortly after PulseStages wrote it (Sleep as Android
+  starts its Health Connect sync about 10 seconds after the request), and its heart rate (and SpO2, if the watch
+  writes it) about 10 minutes later. The message of a run you started adds "Sleep as Android was asked to sync.", and
+  PulseStages' [Log](#log) has "asked Sleep as Android to sync (…)" and, for the second request, "asked Sleep as
+  Android to sync again: heart rate and SpO2 for the night it imported".
+- **Side effects.** Every request runs a full sync of Sleep as Android, as "Sync now" does: also its backup (a local
+  backup file by default) and its other enabled services (for example Google Fit, Samsung Health or SleepSync). With
+  heart rate on a night, its heart-rate awake detection can put awake stretches over PulseStages' stages (Sleep as
+  Android → Settings → Awake detection → "HR"; 0 turns it off). Each sync probably adds another set of 10-minute
+  heart-rate values to the nights that already have heart rate. Sleep as Android may also write heart rate and SpO2
+  of the nights it tracked itself to Health Connect. Its sync counts against its own Health Connect quota, not
+  PulseStages'.
+- **What is confirmed.** On the development phone: a second sync adds heart rate to the nights Sleep as Android
+  imported. Observed with Sleep as Android 20261006 but not yet confirmed on the development phone: that the request
+  starts its Health Connect sync, and the side effects above. Its documentation describes the request only as a
+  backup sync, so the Health Connect part may change in any version.
+- **How to check.** A night imported this way has the cloud icon, as after "Sync now", and gets a heart-rate chart
+  after the second request. Such nights are never exported back to Health Connect as Sleep as Android's own sessions.
+  With adb, Sleep as Android's log (`adb logcat -s SleepAsAndroid`) has the line "HealthConnect sessions found:
+  total=… ours=… others=…" for every sync; "ours", the number of its own sessions in Health Connect, must not grow
+  after a request.
+- **Stale nights.** The setting changes nothing that is written and is not part of the
+  [parameters hash](#what-stale-means): turning it on or off makes no night stale. Once it is off, nothing more is
+  sent, not even a pending second request.
+
 ### Recommended setup
 
 1. In PulseStages, turn on Settings → "Written sessions" → "Sleep as Android compatibility".
@@ -998,16 +1066,19 @@ Nights Sleep as Android has already imported must be deleted there and synced ag
 4. In Sleep as Android → Settings → Services, tap "Sync now" (its summary lists the enabled services, for example
    "Health Connect, SleepCloud, SleepSync"). It imports PulseStages' sessions of the deleted nights with their stages
    (confirmed on the development phone with Sleep as Android 20261006 through the sync button of its Health Connect
-   screen; "Sync now" runs the same import for the last 30 days). **Do not tap the "Health Connect" row** on that
-   screen while it says "Connected": the row is a switch, and tapping it turns the integration off. Sleep as Android
-   then revokes all its Health Connect permissions (they disappear once its process ends); turning the integration on
-   again asks for them again, and "Access past data" must then be switched on again in Health Connect →
-   "App permissions" → "Sleep" → "Additional access".
+   screen; "Sync now" runs the same import for the last 30 days). Their heart rate and SpO2 come with the next sync:
+   tap "Sync now" again a few minutes later (confirmed on the development phone). **Do not tap the "Health Connect"
+   row** on that screen while it says "Connected": the row is a switch, and tapping it turns the integration off.
+   Sleep as Android then revokes all its Health Connect permissions (they disappear once its process ends); turning
+   the integration on again asks for them again, and "Access past data" must then be switched on again in Health
+   Connect → "App permissions" → "Sleep" → "Additional access".
 5. For new nights, let Sleep as Android sync only after PulseStages has written the night (the night is "Estimated" in
    the Nights tab; "Estimate new" on Home writes new nights at once). A sync before that imports the watch app's
    session, and Sleep as Android keeps it for good: steps 3 and 4 are then needed again for that night. Remember that
    Sleep as Android also syncs when it saves a record and when its own tracking ends. Later versions of a night, such
-   as an automatic update after late heart rate, reach Sleep as Android only through steps 3 and 4 as well.
+   as an automatic update after late heart rate, reach Sleep as Android only through steps 3 and 4 as well. To let
+   PulseStages start the sync right after it has written a night, turn on
+   [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync); Sleep as Android's own syncs still happen.
 6. Keep Sleep as Android disabled on PulseStages' [Sources](#sources) screen (only OHealth is enabled by default)
    unless you also track sleep with Sleep as Android. Sessions it writes appear in the Sources list, and because they
    carry stages, an enabled and higher-priority Sleep as Android session would replace PulseStages' estimate for that
@@ -1047,8 +1118,15 @@ Automatic runs depend on Android letting PulseStages run in the background.
   ColorOS, on OPPO phones like the one PulseStages was developed on, has its own battery management with per-app
   options for background activity. The menu names differ between ColorOS versions and were not verified for this
   guide; look in the battery section of PulseStages' app info for options that allow background activity.
+- **The check interval.** "Check for new nights every" = "15 min" or "30 min" wakes PulseStages up to four times as
+  often as the default 1 h. A check that finds nothing new is short and makes one request to Health Connect, but every
+  wake-up costs a little battery, and Android may delay frequent background work of an "Optimized" app. Late heart
+  rate is looked for about once an hour whatever the interval ([Automatic runs](#automatic-runs)), so a shorter
+  interval mainly brings new nights sooner.
 - **The watch app.** The same applies to OHealth: if it cannot sync to Health Connect in the background, PulseStages
   has nothing new to read.
+- **Sleep as Android.** With [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync), its sync runs in Sleep as
+  Android's own background work, so the same applies to Sleep as Android.
 
 Without "Allow background", automatic runs never read, whatever the battery settings; "Estimate new" still works while
 the app is open.
@@ -1097,6 +1175,9 @@ the app is open.
 | A nap shows in Sleep as Android as a time span without phases | "Written for a nap" is "Asleep / awake", and Sleep as Android drops Health Connect's generic "sleeping" stage, so only the awake parts, if any, are left (with "Write awake as light sleep" not even those); or, without "Sleep as Android compatibility", it imported the watch app's nap session, which has no stages | Expected. To see nap phases, set "Written for a nap" to "Stages" (not validated) and turn on "Sleep as Android compatibility", recompute, then delete the nap in Sleep as Android (cloud icon; only naps of the last 29 days come back) and tap "Sync now" ([Recommended setup](#recommended-setup), steps 3 and 4). |
 | Sleep as Android shows a night starting one minute earlier than the watch app (3:03 instead of 3:04) | With "Sleep as Android compatibility" the session starts 1 second before the watch app's (3:03:59), and Sleep as Android shows whole minutes | Expected ([Sleep as Android compatibility](#sleep-as-android-compatibility)). |
 | Sleep as Android imports nothing any more, and Health Connect lists none of its permissions | The "Health Connect" row in its Settings → Services was tapped while it said "Connected": the row is a switch, so the integration was turned off and Sleep as Android revoked all its Health Connect permissions | Turn "Health Connect" on again there and grant the permissions, switch on "Access past data" again in Health Connect → "App permissions" → "Sleep" → "Additional access", and sync with "Sync now" from then on ([Recommended setup](#recommended-setup)). |
+| Sleep as Android does not import new nights by itself although "Ask Sleep as Android to sync" is on | Sleep as Android's Health Connect integration is off; Sleep as Android was not opened since it was installed, or it was force-stopped (Android then delivers no request to it); a battery restriction of either app; or no PulseStages run wrote a night yet | Open Sleep as Android once and check that Settings → Services lists "Health Connect" as connected (do not tap that row); allow both apps to run in the background ([Battery and background restrictions](#battery-and-background-restrictions)). PulseStages' [Log](#log) has "asked Sleep as Android to sync (…)" after every run that wrote. Meanwhile tap "Sync now" in Sleep as Android. |
+| A night in Sleep as Android has stages but no heart rate | Sleep as Android adds heart rate only on the sync after the one that imported the night (or Health Connect has no heart rate of that night) | Tap "Sync now" there again; with [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync) this happens by itself about 10 minutes after the night was written. |
+| Sleep as Android shows awake stretches over PulseStages' stages once a night has heart rate | Probably its own heart-rate awake detection, which runs when heart rate is added to a night (not yet confirmed on the development phone) | PulseStages' Nights tab shows the stages as written. To avoid it, lower or turn off Sleep as Android → Settings → Awake detection → "HR". |
 | The release APK does not install over an installed version | The installed build is a debug build (or a self-built one) with another signing key | Uninstall first ([Release or debug APK](#release-or-debug-apk)). |
 | Obtainium asks to pick an APK, offers the `-debug` APK, or refuses an update because of the signing certificate | PulseStages was added to Obtainium without the APK filter, or the installed build is a debug build | Set the filter, or uninstall the debug build first ([Install and update with Obtainium](#install-and-update-with-obtainium)). |
 | "No app on this device can open this." | No app handles the requested screen (Play Store, Health Connect settings, file picker) | Open Health Connect or the Play Store manually. |
@@ -1113,7 +1194,8 @@ with a sleep lab on average, with large differences between people. Do not use t
 Connect does not let an app change or delete other apps' data.
 
 **Does it send my data anywhere?** No. It has no internet permission; all processing happens on the phone
-([privacy.md](privacy.md)).
+([privacy.md](privacy.md)). With "Ask Sleep as Android to sync" on, it sends Sleep as Android a sync request that
+carries no data.
 
 **Why are there two sleep sessions for every night?** PulseStages cannot add stages to OHealth's record, so it writes
 its own next to it. Set the priority in Health Connect so totals use the staged one
@@ -1125,6 +1207,11 @@ thin stripes are its own awake detection. Turn the setting on, recompute, delete
 Sleep as Android (only records with the cloud icon; older nights do not come back) and tap Settings → Services →
 "Sync now" there ([Recommended setup](#recommended-setup)); it then imports PulseStages' sessions of those nights with
 their stages.
+
+**Does PulseStages tell Sleep as Android when a night is ready?** Only with "Ask Sleep as Android to sync" (off by
+default): then every run that wrote a night asks Sleep as Android to sync, and asks again about 10 minutes later so
+that the night also gets its heart rate and SpO2 ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)).
+Turn on "Sleep as Android compatibility" as well, or Sleep as Android imports the watch app's session without stages.
 
 **Can I use another watch?** Yes, if its app writes sleep sessions and heart rate to Health Connect: enable it on the
 Sources screen. The model was trained on Apple Watch heart rate thinned to 2 minutes; other watches were not

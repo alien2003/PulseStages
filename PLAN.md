@@ -206,17 +206,18 @@ from memory.
   - **When.** The window and back-off of the retry of nights without an estimate: nights that ended in the last 36 h
     (`RETRY_RECENT_MS`) on every run; late arrivals (first seen in the last 36 h, at most 30 days
     (`LATE_ARRIVAL_MAX_MS`) after they ended) when the time since the last write or check is at least the time between
-    the first sight and that one, about 1, 2, 4, 8, 16 and 32 h after first seen with hourly syncs. Nights written or
-    checked earlier in the same run are left out.
+    the first sight and that one, about 1, 2, 4, 8, 16 and 32 h after first seen with hourly or shorter check
+    intervals; never sooner than 55 min after the last attempt (`MIN_RECHECK_GAP_MS`, see the check interval below).
+    Nights written or checked earlier in the same run are left out.
   - **At most 8 nights per run** (`MAX_REFRESH_NIGHTS_PER_RUN`): recently ended nights first, then the late arrivals,
-    each group checked-longest-ago first (then newest), so the limit rotates through all due nights; the rest are logged
-    and left to later runs. A checked night costs its heart-rate
-    and step reads (one call per page of 1000 records: usually one each, about three with dense heart rate and the 24 h
-    left padding) plus one per enabled optional channel; a rewrite adds an insert and a verification read; a refresh run
-    adds one sleep-session read and, when an input changed, one read of our own sessions. Worst case 8 × (3 + 3 + 3) +
-    2 + 8 = 82 read calls per run, against the background quota of 1000 per 15 min and 8000 per day (§4; 25 runs a day
-    ≈ 2000). A backfill that makes many recent nights due at once is spread over several runs. A quota error stops the
-    run like any other step (`QUOTA_EXCEEDED`, WorkManager retries).
+    each group checked-longest-ago first (then newest), so the limit rotates through all due nights; the rest are
+    logged and left to later runs. A checked night costs its heart-rate and step reads (one call per page of 1000
+    records: usually one each, about three with dense heart rate and the 24 h left padding) plus one per enabled
+    optional channel; a rewrite adds an insert and a verification read; a refresh run adds one sleep-session read and,
+    when an input changed, one read of our own sessions. Worst case 8 × (3 + 3 + 3) + 2 + 8 = 82 read calls per run,
+    against the background quota of 1000 per 15 min and 8000 per day (§4; a night is checked at most about 25 times a
+    day whatever the check interval ≈ 2000). A backfill that makes many recent nights due at once is spread over
+    several runs. A quota error stops the run like any other step (`QUOTA_EXCEEDED`, WorkManager retries).
   - **Never refreshed.** Nothing under `NEVER` (not even read). Stale nights (only the current `ALGO_VERSION` and params
     hash are targets; stale ones wait for an explicit recompute, as everywhere). DELETED, SUPERSEDED, SOURCE_DELETED and
     NOT_ESTIMATED rows, so no nap skipped by `SKIP`. A target whose source got its own stages or became a lower-priority
@@ -280,7 +281,63 @@ from memory.
   - **Limits, documented rather than worked around.** A session of another app that starts even earlier still wins.
     Nights Sleep as Android already imported stay until the user deletes them there and syncs again, and later
     versions of a record (refresh, recompute) never reach it, so the user guide tells users to sync Sleep as Android
-    only after the night was written.
+    only after the night was written (or to let PulseStages ask for that sync, below).
+- **Check interval in minutes (`schedule.periodicMinutes`, default 60).** Health Connect cannot notify an app of new
+  data ("your app can't get notified of new data", its sync-data guide), so new nights reach PulseStages only by
+  polling the Changes API, and an hour was the shortest wait.
+  - **Allowed values.** 15 and 30 min and every whole hour up to 24 (`SettingsLimits.periodicMinutes`, a dropdown):
+    15 min is WorkManager's minimum period (`PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS` = 900000, checked in
+    work-runtime 2.12.0); every value of the hour-based setting stays valid.
+  - **Renamed key, read migration.** The unit is part of the key, so the key changed instead of the meaning of the
+    old one. `ScheduleSettingsSerializer` reads `schedule.periodicHours` on every decode (DataStore file, import):
+    whole hours, also a quoted number as the old decoder accepted, become minutes; `periodicMinutes` wins when both
+    are present; any other value is moved over unchanged, so it is rejected as before. Only the new key is written.
+    No DataStore migration: a stored file keeps the old key until the next settings write, so the read migration
+    stays for good. It is the one sanctioned exception to "only add keys" (`AppSettings` KDoc).
+  - **The late-data work stays hourly.** A check that finds nothing makes one call of the read quota (`getChanges`;
+    `getSdkStatus` is answered in the client and `getGrantedPermissions` takes no quota): `FakeHealthRepository`'s
+    call log of such a run is `[GRANTED_PERMISSIONS, CHANGES]` in the foreground, one more `GRANTED_PERMISSIONS` in
+    the background (`ShortCheckIntervalTest`). The retry and the refresh of recent nights, which ran on every run,
+    now wait at least `NewNightsSync.MIN_RECHECK_GAP_MS` = 55 min after a night's last attempt (55 rather than 60 so
+    that jitter never skips an hourly run). At 15 min that adds about 97 change-log reads a day and leaves the worst
+    case of the refresh at about 2000 read calls a day. "Estimate new" (`userRequested`) ignores the gap: the user
+    asked for it.
+  - **Disabled sources.** The retry skips nights whose source is no longer enabled: the window read never finds
+    them, so they never moved their last attempt and cost a sleep read on every run.
+  - **Known limit.** An attempt that records nothing (a quota, permission or availability stop, a failed read) does
+    not move the night's last attempt, so the night is tried again on the next run, every 15 min at the shortest
+    interval; the 36 h window and the 8 nights per run bound it.
+- **Sync request to Sleep as Android (`write.requestSleepAsAndroidSync`, off by default).** Sleep as Android has no
+  periodic import, and it attaches heart rate and SpO2 only to the records it had before a sync (§4), so with
+  `write.startBeforeSource` a new night appeared there only after the user synced, and without heart rate until a
+  second sync (confirmed on the development phone).
+  - **The public broadcast.** Its Intent API documents `com.urbandroid.sleep.REQUEST_SYNC` ("Request Backup Sync",
+    the package must be set); observed with Sleep as Android 20261006, it also starts a Health Connect sync of the
+    last 30 days 10 s later when the integration is on (undocumented, so it may change). The intent is
+    `Intent(ACTION).setPackage(PACKAGE)`: explicit for the Android 8 limits on manifest receivers; no extras, data,
+    component or flags, so it carries nothing about the user; no `FLAG_INCLUDE_STOPPED_PACKAGES`, so a stopped Sleep
+    as Android is not woken. `queryBroadcastReceivers` first checks that the receiver exists, which needs package
+    visibility (`<queries>` `com.urbandroid.sleep`); the delivery itself does not (the system resolves an explicit
+    broadcast).
+  - **When.** Once per run that wrote or rewrote a session (sync, backfill, recompute), from the raw counters before
+    they become a `WorkOutcome`, so writes before a quota stop count; never for a run that wrote nothing.
+  - **A follow-up after a new write.** One more request `FOLLOW_UP_DELAY_MS` = 10 min later: Sleep as Android starts
+    its sync 10 s after a request, and the follow-up waits well past that first sync, which reads 30 days of heart
+    rate. It is the one-time unique work `sleep-as-android-follow-up` (REPLACE) with its due time in `SyncStateStore`
+    rather than a step of the next run, which may be up to 24 h away and needs Health Connect access; the work
+    survives process death, the due time is cleared before the send so a re-run sends nothing twice, and the option
+    is checked when it runs. `SleepAsAndroidFollowUps` is its own interface, not part of `WorkScheduler`:
+    `WorkManagerWorkScheduler` depends on `BackfillRunner`, which depends on the requests.
+  - **No follow-up after a rewrite only.** A refresh after late heart rate rewrites a night Sleep as Android imported
+    earlier, so the request's own sync attaches the new heart rate; a second one would only add another set of
+    heart-rate values (an inference, below). A follow-up that is due by then is taken as sent.
+  - **Opt-in, outside the params hash.** Every request also runs Sleep as Android's backup and its other enabled
+    syncs, spends its Health Connect quota, can make its heart-rate awake detection add awake stretches over our
+    stages, and can make it write heart rate and SpO2 of its own nights to Health Connect; observed with Sleep as
+    Android 20261006, not yet confirmed on the development phone. Nothing written changes, so the option is not part
+    of the params hash.
+  - **Best effort.** Every failure is logged as a warning and counts as not sent; it never fails the run. Android
+    reports nothing back, so a request to a stopped Sleep as Android counts as sent.
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 
@@ -385,7 +442,30 @@ property.
     imported our sessions of the nights it held no record of (deleted there before the sync), with the cloud icon:
     nights with a full hypnogram and the same phase shares as PulseStages (one night 11 % deep, 20 % REM, 64 % light,
     5 % awake in both apps), `SLEEP_WAKE` naps as a time span without phases. It shows whole minutes, so a session
-    starting at 3:03:59 shows 3:03, one minute before the watch app's 3:04.
+    starting at 3:03:59 shows 3:03, one minute before the watch app's 3:04;
+  - a sync reads its own records of the last 30 days, imports new sessions, and then attaches heart rate and SpO2
+    only to the records it read before the import, so a night imported in a sync gets them on the next one
+    (2026-10-17: a second "Sync now" attached heart rate to PulseStages' nights).
+- Sleep as Android, observed with 20261006 but not yet confirmed on the development phone:
+  - its exported receiver `RequestSyncReceiver` (no permission) for `com.urbandroid.sleep.REQUEST_SYNC`, the "Request
+    Backup Sync" of its [Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html), reads no extras, starts
+    its backup (a local `sleep-export.zip` by default) and the syncs of its other enabled services (Google Fit, Google
+    Calendar, Samsung Health, SleepSync) and, 10 s later and only with its Health Connect integration on, a Health
+    Connect sync of the last 30 days whose imports get the cloud tag and are never exported back as its own sessions;
+    requests within 10 s give one sync, and one that arrives while a sync runs is skipped;
+  - heart rate is read as 10-minute `BPM_AVG` aggregates of every app, each stamped with its bucket start, and a value
+    is skipped only when its time and value are already there; the buckets start at "now − 30 days" of each sync, so
+    repeated syncs probably add further values to nights that already have heart rate (an inference); values that
+    reach Health Connect later are merged into an imported night;
+  - for records of the window that got no new values in a sync (mostly its own tracked nights) it writes heart rate
+    (`HeartRateRecord`, `RestingHeartRateRecord`) and SpO2 to Health Connect, origin `com.urbandroid.sleep`, without
+    a `clientRecordId`;
+  - heart rate on a record runs its heart-rate awake detection (Settings → Awake detection → "HR", 2 by default),
+    which can add awake stretches over our stages.
+- Broadcasts (AOSP): an explicit broadcast is resolved with the system's identity, so package visibility does not
+  filter its delivery, while `queryBroadcastReceivers` and `getPackageInfo` are filtered; a stopped app receives no
+  broadcasts unless the sender adds `FLAG_INCLUDE_STOPPED_PACKAGES`. Health Connect keeps its quota per app
+  (`RateLimiter` keys its buckets by the caller's uid), so Sleep as Android's sync spends its own quota.
 
 Doc inconsistencies found (code follows the sources): the sleep-guide sample uses the internal `Metadata(...)`
 constructor; pagination samples loop on `!= null`; some pages put `<uses-permission>` inside `<application>`.
@@ -414,3 +494,6 @@ Attribution notice for produced works (ODC-By §4.3) is in README and in the app
 - How OHealth delimits a nap session (start and end of a daytime nap) is undocumented; nap estimates depend on it.
 - No open dataset has labelled naps with heart rate, and none has labelled heart-rate sessions at daytime clock times;
   a nap stage model that could be written by default needs such data (ALGORITHM.md §13.13).
+- Whether the sync request starts Sleep as Android's Health Connect sync on the phone, and whether repeated syncs add
+  heart-rate values to a night (two syncs back to back: its log line "Record - added N HR" non-zero both times for
+  the same night).

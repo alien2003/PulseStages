@@ -36,16 +36,17 @@ heart rate to Health Connect; the default source is OHealth, the app of OPPO wat
    → "Manage data" → "Data sources and priority", put PulseStages above the watch app for sleep, so that apps using
    Health Connect's sleep totals get the stages (if it is not listed yet, check again after the first estimate). If you
    view your sleep in Sleep as Android, which imports only the session that starts first, see Settings → "Written
-   sessions" → "Sleep as Android compatibility" and the [user guide](docs/user-guide.md#sleep-as-android).
+   sessions" → "Sleep as Android compatibility" and "Ask Sleep as Android to sync", and the
+   [user guide](docs/user-guide.md#sleep-as-android).
 
-**Using it.** It runs by itself: an hourly check for new nights and a daily run. Results appear in the Nights tab and
-in Health Connect, next to the watch app's own session; "Estimate new" on Home runs it right away. Naps are written to
-Health Connect as asleep / awake only by default. **Accuracy:** for nights, fair agreement with a sleep lab (Cohen's κ
-about 0.32–0.34), varying strongly between people; nap stages are not validated
-([How accurate it is](#how-accurate-it-is)). **Updates:** the app has no update check; Obtainium installs new
-releases for you, or install a newer `PulseStages-<version>.apk` over the installed release yourself. Your data and
-permissions are kept. Everything else is in the [Quick start](#quick-start) below and the
-[user guide](docs/user-guide.md).
+**Using it.** It runs by itself: a check for new nights every hour (or every 15 or 30 minutes, Settings → "Schedule")
+and a daily run. Results appear in the Nights tab and in Health Connect, next to the watch app's own session;
+"Estimate new" on Home runs it right away. Naps are written to Health Connect as asleep / awake only by default.
+**Accuracy:** for nights, fair agreement with a sleep lab (Cohen's κ about 0.32–0.34), varying strongly between
+people; nap stages are not validated ([How accurate it is](#how-accurate-it-is)). **Updates:** the app has no update
+check; Obtainium installs new releases for you, or install a newer `PulseStages-<version>.apk` over the installed
+release yourself. Your data and permissions are kept. Everything else is in the [Quick start](#quick-start) below and
+the [user guide](docs/user-guide.md).
 
 ---
 
@@ -165,7 +166,8 @@ differently.
    then "Allow history" (older nights) and "Allow background" (automatic runs). On Android 13 and later, "Allow
    notifications" shows the progress of long runs.
 5. **First estimate.** Tap "Estimate new" on the Home tab, then open the Nights tab. The first run reads the sleep
-   sessions of the last 7 days. New nights are processed automatically from then on (every hour and once a day).
+   sessions of the last 7 days. New nights are processed automatically from then on (every hour by default, and once a
+   day).
 6. **Priority in Health Connect.** In Health Connect → "Permissions and data" → "Manage data" → "Data sources and
    priority", put PulseStages above OHealth for sleep, so that readers that use Health Connect's sleep totals take the
    staged session. If PulseStages is not in the list yet, check again after its first session was written.
@@ -201,13 +203,15 @@ already in Health Connect keep their stages until they are recomputed. The
   algorithm version and a hash of every parameter in its notes; the source data are never modified.
 - **Sleep as Android compatibility** (off by default): PulseStages' session starts 1 second before the watch app's,
   for Sleep as Android, which imports only the first of overlapping sessions
-  ([user guide](docs/user-guide.md#sleep-as-android)).
+  ([user guide](docs/user-guide.md#sleep-as-android)), and **Ask Sleep as Android to sync** (off by default): after
+  writing a night PulseStages asks Sleep as Android to sync, and once more 10 minutes later so that the night also
+  gets its heart rate ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync)).
 - **Idempotent writes**: one output per night, keyed by the source sessions and rewritten under the same key on
   recompute, verified by reading it back; fragments of a night are merged, and deleted sources remove the output.
 - **Selectable sources** with a priority order: OHealth by default, any app that writes sleep sessions to Health
   Connect can be enabled.
-- **Automatic runs** (hourly check through Health Connect's Changes API and a daily run), a resumable **history
-  backfill**, and **recompute** of stale nights after a settings or app update.
+- **Automatic runs** (a check through Health Connect's Changes API every hour, or every 15 or 30 minutes, and a daily
+  run), a resumable **history backfill**, and **recompute** of stale nights after a settings or app update.
 - **Nights list and night detail**: hypnogram as written, heart-rate curve, per-epoch probabilities and features,
   warnings, a comparison with the RULES estimator, CSV export; nap badge and an All / Nights / Naps filter; list and
   detail side by side on a foldable's inner screen.
@@ -267,7 +271,10 @@ already in Health Connect keep their stages until they are recomputed. The
   imports it with its stages for nights it has not imported yet; nights it already imported must be recomputed, deleted
   there and synced again (last 29 days only). A nap written as asleep / awake shows there as a time span without phases
   (both confirmed on the development phone with Sleep as Android 20261006,
-  [user guide](docs/user-guide.md#sleep-as-android)).
+  [user guide](docs/user-guide.md#sleep-as-android)). "Ask Sleep as Android to sync" (off by default) sends Sleep as
+  Android its documented sync request after a write; a second sync attaches heart rate to the nights it imported
+  (confirmed on the development phone), while the Health Connect sync that the request starts and its side effects
+  were observed with Sleep as Android 20261006 but are not yet confirmed on the development phone.
 - **Not verified yet.** Whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the
   behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).

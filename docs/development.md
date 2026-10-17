@@ -147,7 +147,7 @@ a phone.
 | `:algo-cli` | Kotlin/JVM application | Command-line front end of `:core-algo` (`features`, `evaluate`, `estimate`, `synthesize`, `feature-names`, `stages`), used by `tools/train` ([INTERCHANGE.md §2](INTERCHANGE.md#2-algo-cli-commands)) |
 | `:data-local` | Android library | Room ledger, DataStore settings and sync state, internal logger |
 | `:data-hc` | Android library | Health Connect repository, night pipeline, Changes-API sync, backfill, eraser, source scanner, use cases. Test fixtures: `FakeHealthRepository`, an in-memory ledger and other test doubles |
-| `:work` | Android library | WorkManager workers, scheduling, notifications |
+| `:work` | Android library | WorkManager workers, scheduling, notifications, the opt-in sync request to Sleep as Android |
 | `:app` | Android application | Compose Material 3 UI, Hilt graph, navigation, manifest, permission rationale activity, debug-only demo mode |
 | `tools/train/` | Python | Dataset download, OHealth emulation, training, leave-one-subject-out validation |
 
@@ -226,7 +226,7 @@ not enforced there.
 
   | Test | What it checks |
   |---|---|
-  | `MergedManifestTest` | The merged debug and release manifests: no `INTERNET`, the declared health permissions, the rationale activity and its Android 14+ alias, the `dataSync` foreground service, the private FileProvider, package visibility without `QUERY_ALL_PACKAGES`, exactly one launcher icon |
+  | `MergedManifestTest` | The merged debug and release manifests: no `INTERNET`, the declared health permissions, the rationale activity and its Android 14+ alias, the `dataSync` foreground service, the private FileProvider, package visibility (Sleep as Android included) without `QUERY_ALL_PACKAGES`, exactly one launcher icon |
   | `ReleaseApkTest` | The minified release APK holds no demo class (R8 mapping) and no demo resource or text (aapt2 dump) |
   | `RealAppGraphTest` | The production Hilt graph, the startup schedule and `HiltWorkerFactory` creating every worker |
   | `EndToEndWiringTest` | The ViewModels through the real graph with only Health Connect replaced by the in-memory fake |

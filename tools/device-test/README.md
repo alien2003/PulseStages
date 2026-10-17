@@ -52,9 +52,10 @@ the later steps do not need of the run's read budget (a hard cap), and covers on
    before, each once, with the same clientRecordId and clientRecordVersion + 1, at most 8 per run, with the input
    update as the ledger's reason, deleting nothing; the same sync again must not rewrite those nights (their input did
    not change since). Every ledger row was created during the test, and the sync checks a night again only after as
-   long as it waited before, so the scenario moves the isolated pipeline's clock forward before each sync (by the age
-   of the oldest written row, at most to 35 hours after that row was created) to make the written nights of the last
-   30 days due again, as at a later hourly sync. Under `overwritePolicy` NEVER nothing may be refreshed;
+   long as it waited before and never within 55 minutes of its last check (`NewNightsSync.MIN_RECHECK_GAP_MS`), so the
+   scenario moves the isolated pipeline's clock forward before each sync (by the age of the oldest written row and at
+   least by that gap, at most to 35 hours after that row was created) to make the written nights of the last 30 days
+   due again, as at a later hourly sync. Under `overwritePolicy` NEVER nothing may be refreshed;
 4. "recompute all": every written night rewritten exactly once, with clientRecordVersion + 1;
 5. the history again with the default settings;
 6. policies on the most recent weeks: naps SKIP, STAGES and SLEEP_WAKE (the default since the realistic-nap
@@ -181,12 +182,13 @@ enqueue, cancel or run by the suite.
   when the installation was interrupted or finished late).
 - Android force-stops the app whenever an instrumentation starts and ends; that cancels PulseStages' scheduled jobs, so
   the runner opens PulseStages once at the end and returns to the home screen: its real WorkManager then registers the
-  hourly and daily runs again, as whenever you open the app, and an hourly check that became due during the run may
-  run right then (in the app's normal process, after the "after" snapshot). The runner checks that the jobs are back.
+  periodic and daily runs again, as whenever you open the app, and a periodic check that became due during the run may
+  run right then (in the app's normal process, after the "after" snapshot); with "Ask Sleep as Android to sync" on, a
+  night that check writes also makes it ask Sleep as Android to sync. The runner checks that the jobs are back.
   `--no-rearm` skips this; then open the app once yourself.
 - In every test process the app's start-up code runs as at any start of the app; it schedules its periodic and daily
   work into that process's in-memory WorkManager and, at the default log level, writes two lines to the app's internal
-  log ("periodic check every … h", "daily run at … min after midnight"). During the UI tour the app's screens log what
+  log ("periodic check every … min", "daily run at … min after midnight"). During the UI tour the app's screens log what
   they always log. The log keeps its newest 10000 lines, so when it is full the oldest lines make room for these.
 - "Stay awake while charging" is set for USB during the run and restored to its original value on exit. The original
   is also written to `tools/device-test/out/.stay-on-original-<serial>` first; if a run could not restore it, the next
