@@ -12,7 +12,7 @@
     <string name="set_sch_daily_time_title">Ежедневный запуск</string>
     <string name="set_sch_daily_time_hint">Время ежедневного запуска (примерно: Android может откладывать фоновые задачи).</string>
     <string name="set_sch_periodic_title">Проверять новые ночи каждые</string>
-    <string name="set_sch_periodic_hint">Как часто фоновая задача спрашивает у Health Connect новые сессии сна. Проверка, не нашедшая ничего нового, почти ничего не стоит; недавние ночи перепроверяются на поздний пульс примерно раз в час.</string>
+    <string name="set_sch_periodic_hint">Как часто фоновая задача спрашивает у Health Connect новые сессии сна. Проверка, не нашедшая ничего нового, почти ничего не стоит; недавние ночи перепроверяются на поздний пульс не чаще чем примерно раз в час, а при более длинном интервале — при каждой проверке.</string>
     <string name="set_sch_not_low_battery_title">Только при нормальном заряде</string>
     <string name="set_sch_not_low_battery_hint">Фоновые запуски ждут, пока заряд батареи не станет нормальным.</string>
     <string name="set_wr_title_template_title">Заголовок сессии</string>

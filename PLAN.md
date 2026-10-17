@@ -192,8 +192,9 @@ from memory.
   follows `SleepSessionRecord` only. Only nights without an estimate were retried, so a night written from part of its
   heart rate (RULES at coverage 0.4–0.6, or ≥ 0.6 with heart rate missing) stayed so until the user recomputed it; a
   real short session had 46 heart-rate samples at its first estimate and 57 a day later, and its record was not
-  updated. Every sync now refreshes recent written nights after the retry (`NewNightsSync.refreshWritten`,
-  `NightPipeline.refresh`, `NightRun.refresh`; docs/architecture.md §3.6):
+  updated. The late-data pass of a sync (at most every 55 min, see When below) now refreshes recent written nights
+  after the retry (`NewNightsSync.refreshWritten`, `NightPipeline.refresh`, `NightRun.refresh`; docs/architecture.md
+  §3.6):
   - **What is fingerprinted.** Every write stores the fingerprint of the input it was estimated from
     (`estimated_nights.inputFingerprint`, `InputFingerprint`) and `inputCheckedAt`: for heart rate, steps, SpO2,
     respiratory rate and HRV the sample count and the SHA-256 of the samples sorted canonically (so the order in which
@@ -440,7 +441,7 @@ property.
   - it syncs only on a tap on Settings → Services → "Sync now" (every enabled service, Health Connect for the last
     30 days) or on the sync button of its Health Connect screen, opened when the integration is turned on (up to
     5 years back), when it saves a record (added, edited or saved automatically) and when its own tracking ends (both
-    through the same REQUEST_SYNC request PulseStages can send, so they read the last 30 days as well; from its code,
+    through the same REQUEST_SYNC request PulseStages can send, so they read the last 30 days as well;
     not yet confirmed on the development phone); no periodic import for a user who only views data in it. Without
     history access ("Access past data") other apps' data older than 29 days is not read;
   - the "Health Connect" row in Settings → Services is a switch: tapping it while it says "Connected" turns the

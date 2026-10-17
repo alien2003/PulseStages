@@ -513,7 +513,7 @@ The settings most people use:
 | "Merge gap" (Sources) | 30 min | Fragments of one night from one app with a shorter gap become one night; the gap is written as awake |
 | "History depth" (Sources) | 0 days | How far back the backfill goes; 0 = all available history |
 | "Daily run" (Schedule) | 09:00 | Approximate time of the daily run |
-| "Check for new nights every" (Schedule) | 1 h | Period of the background check: "15 min", "30 min" or 1 to 24 hours. A check that finds nothing new costs almost nothing; recent nights are re-checked for late heart rate about once an hour ([Automatic runs](#automatic-runs)) |
+| "Check for new nights every" (Schedule) | 1 h | Period of the background check: "15 min", "30 min" or 1 to 24 hours. A check that finds nothing new costs almost nothing; recent nights are re-checked for late heart rate at most about once an hour, with a longer interval at every check ([Automatic runs](#automatic-runs)) |
 | "Only when the battery is not low" (Schedule) | on | Automatic runs wait until the battery is not low |
 | "Session title" (Written sessions) | empty | Title of the written sessions; placeholders `{estimator}`, `{version}`, `{confidence}`; empty = "Sleep stages from heart rate (estimate)" in the phone's language |
 | "Existing sessions" (Written sessions) | "Skip up-to-date nights" | What runs do with nights that already have a session ([overwrite policy](#existing-sessions)) |
@@ -940,7 +940,7 @@ that sync after it has written a night.
   says the integration then works in the background, but there is no periodic import: if you only view your sleep in
   it, tap "Sync now". That button syncs every service its summary lists (for example "Health Connect, SleepCloud,
   SleepSync") and reads Health Connect for the last 30 days, as do the syncs it starts itself after saving a record
-  or when its tracking ends (from its code, not yet confirmed on the development phone). Only the sync button of the
+  or when its tracking ends (observed with Sleep as Android 20261006, not yet confirmed on the development phone). Only the sync button of the
   Health Connect screen it opens when you turn the integration on reads further back (up to 5 years).
   Without Health Connect's history access ("Access past data") it reads other apps' data only from the last 29 days.
   PulseStages can also ask it to sync ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)).
@@ -957,7 +957,8 @@ that sync after it has written a night.
   already has, including the records it imported earlier (shown with a cloud icon), and it never picks up later changes
   of an imported record, such as PulseStages' [automatic update](#automatic-runs) after late heart rate or a recompute.
   A night stays as it was imported until you delete it in Sleep as Android and sync again.
-- **Heart rate and SpO2 come with the next sync.** Only these are added to a night later: a sync adds them only to
+- **Heart rate and SpO2 come with the next sync.** Only these come from Health Connect later (its own awake detection
+  can then add awake stretches, below): a sync adds them only to
   the nights Sleep as Android already had before it, so a night it has just imported gets them on the next sync
   (confirmed on the development phone: a second "Sync now" added heart rate to PulseStages' nights). Heart rate that
   reaches Health Connect later is added to the night on later syncs while the night is less than 30 days old (not yet
@@ -1022,7 +1023,9 @@ also runs Sleep as Android's backup and its other syncs."
   documentation lists as "Request Backup Sync" ([Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html)).
   After a new or recomputed night PulseStages sends it once more about 10 minutes later, so that the night gets its
   heart rate and SpO2. An update after late heart rate gets only the one request: Sleep as Android already has that
-  night and adds the new heart rate in that sync, but it keeps the stages it imported first (below). A run that wrote
+  night and adds the new heart rate in that sync, but it keeps the stages it imported first (below). If it does not
+  have the night yet (the setting was turned on after the night was written, or the night was deleted there), it
+  imports it in that sync and adds its heart rate at the next request. A run that wrote
   and then stopped (Health Connect's rate limit, a refused access, another Health Connect error, or Android stopping
   it) still sends the request; only when Android kills PulseStages' process is it lost, and then the next request
   covers that night, because Sleep as Android's sync reads the last 30 days.
@@ -1085,7 +1088,7 @@ also runs Sleep as Android's backup and its other syncs."
    "Health Connect, SleepCloud, SleepSync"). It imports PulseStages' sessions of the deleted nights with their stages
    (confirmed on the development phone with Sleep as Android 20261006 through the sync button of its Health Connect
    screen; "Sync now" runs the same import for the last 30 days). Their heart rate and SpO2 come with the next sync:
-   tap "Sync now" again a few minutes later (confirmed on the development phone). **Do not tap the "Health Connect"
+   tap "Sync now" again a few minutes later (confirmed on the development phone for heart rate). **Do not tap the "Health Connect"
    row** on that screen while it says "Connected": the row is a switch, and tapping it turns the integration off.
    Sleep as Android then revokes all its Health Connect permissions (they disappear once its process ends); turning
    the integration on again asks for them again, and "Access past data" must then be switched on again in Health
@@ -1139,8 +1142,8 @@ Automatic runs depend on Android letting PulseStages run in the background.
 - **The check interval.** "Check for new nights every" = "15 min" or "30 min" wakes PulseStages up to four times as
   often as the default 1 h. A check that finds nothing new is short and makes one request to Health Connect, but every
   wake-up costs a little battery, and Android may delay frequent background work of an "Optimized" app. Late heart
-  rate is looked for about once an hour whatever the interval ([Automatic runs](#automatic-runs)), so a shorter
-  interval mainly brings new nights sooner.
+  rate is still looked for at most about once an hour ([Automatic runs](#automatic-runs)), so a shorter interval
+  mainly brings new nights sooner.
 - **The watch app.** The same applies to OHealth: if it cannot sync to Health Connect in the background, PulseStages
   has nothing new to read.
 - **Sleep as Android.** With [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync), its sync runs in Sleep as

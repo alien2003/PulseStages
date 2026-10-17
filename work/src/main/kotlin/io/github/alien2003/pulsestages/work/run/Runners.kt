@@ -271,9 +271,9 @@ class RecomputeRunner
  * Runs [work] with a fresh [WriteCount] and asks Sleep as Android to sync ([SleepAsAndroidSyncRequests.afterRun]) for
  * the sessions it wrote, exactly once per run: after [work] returned (whether a request was sent goes into the summary
  * of a completed outcome), and also when [work] threw, whatever it threw (a Health Connect error, any other exception
- * or a cancellation): the sessions written before it are in Health Connect. That request is not cancellable and comes
- * before the exception goes on. A process death still loses it; the next request, whose sync reads the last 30 days,
- * covers such sessions too.
+ * or a cancellation): the sessions written before it are in Health Connect. The request is not cancellable in either
+ * case, so a stop that arrives after [work] returned still sends it; after a throw it comes before the exception goes
+ * on. A process death still loses it; the next request, whose sync reads the last 30 days, covers such sessions too.
  */
 @Suppress("TooGenericExceptionCaught") // Every Throwable is rethrown: the catch only adds the request for the writes before it.
 private suspend fun SleepAsAndroidSyncRequests.requestSyncAfter(work: suspend (WriteCount) -> WorkOutcome): WorkOutcome {
@@ -285,7 +285,7 @@ private suspend fun SleepAsAndroidSyncRequests.requestSyncAfter(work: suspend (W
             withContext(NonCancellable) { afterRun(writes.written, writes.rewritten) }
             throw e
         }
-    val requested = afterRun(writes.written, writes.rewritten)
+    val requested = withContext(NonCancellable) { afterRun(writes.written, writes.rewritten) }
     return if (outcome is WorkOutcome.Completed) {
         outcome.copy(summary = outcome.summary.copy(sleepAsAndroidSyncRequested = requested))
     } else {

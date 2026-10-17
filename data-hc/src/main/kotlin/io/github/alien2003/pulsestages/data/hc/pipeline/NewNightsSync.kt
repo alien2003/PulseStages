@@ -183,9 +183,12 @@ class NewNightsSync
          * The late-data pass of a run that started at [runStartMs]: [retryUnfinished], then [refreshWritten]. It runs when
          * [userRequested], when no pass has completed yet, or when the last one was at least [MIN_RECHECK_GAP_MS] ago; a
          * stored time after [runStartMs] (the clock was set back) does not hold it off either. A pass in which neither part
-         * stopped early is stored as complete; one that stopped early, or ended with an exception, is tried again by the
-         * next run. Because the whole pass is gated, a night whose attempt records nothing (its source now has its own
-         * stages, or a written night can no longer be estimated) is still read only once per pass.
+         * stopped early is stored as complete; one that stopped early (a quota error, a refused access) or ended with an
+         * exception (for example a Health Connect error of the retry's window read) is tried again by the next run. A
+         * transient or invalid read of the refresh's window ends only the refresh ([refreshStopped]) and the pass counts
+         * as complete, so it is left to the next pass. Because the whole pass is gated, a night whose attempt records
+         * nothing (its source now has its own stages, or a written night can no longer be estimated) is still read only
+         * once per pass.
          */
         private suspend fun lateDataPass(
             settings: AppSettings,
@@ -296,7 +299,8 @@ class NewNightsSync
         /**
          * A Health Connect error outside the per-night isolation of the refresh (the read of its window): only the refresh
          * stops, and the run keeps the report of what it did before. A quota error or a refused access stops the run as
-         * anywhere else; a transient or invalid read is logged and left to the next run.
+         * anywhere else; a transient or invalid read is logged and left to the next late-data pass (this pass still
+         * counts as complete, so about 55 minutes later with a shorter check interval).
          */
         private suspend fun refreshStopped(e: HealthDataException): PipelineReport {
             logger.w(TAG, "refresh of written nights stopped: ${e.message}", throwable = e)

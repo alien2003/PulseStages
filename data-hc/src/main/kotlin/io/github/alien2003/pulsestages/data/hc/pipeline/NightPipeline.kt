@@ -158,14 +158,13 @@ class NightPipeline
             writes: WriteCount,
             shouldStop: () -> Boolean,
         ): PipelineReport {
-            val run = NightRun(deps, spec, nights.candidates)
+            val run = NightRun(deps, spec, nights.candidates, writes)
             var report = PipelineReport(found = nights.nightCount, skipped = nights.skipped.size)
             val remaining = nights.candidates.iterator()
             var stopped = false
             while (!stopped && remaining.hasNext()) {
                 currentCoroutineContext().ensureActive()
                 val step = if (shouldStop()) Step.Cancelled else run.step(remaining.next())
-                writes.add(step)
                 report = report.add(step, run.takeSuperseded())
                 stopped = step.stopsRun
             }

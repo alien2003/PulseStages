@@ -671,7 +671,7 @@ class RefreshWrittenNightsTest {
             h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.Transient("binder died"), afterCalls = 1)
             val transient = h.sync.run(inBackground = false)
 
-            assertEquals(SyncOutcome.SUCCESS, transient.outcome, "a transient refresh failure is left to the next run")
+            assertEquals(SyncOutcome.SUCCESS, transient.outcome, "a transient refresh failure is left to the next late-data pass")
             assertEquals(1, transient.pipeline.estimated)
             assertTrue(h.logger.lines.any { it.message.startsWith("refresh of written nights stopped") })
         }

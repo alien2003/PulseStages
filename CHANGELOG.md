@@ -47,7 +47,7 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   as 1 h. The periodic work is enqueued again once after the update (its schedule tag is now
   `schedule:periodic:<minutes>min:…`), and its log line says "periodic check every … min". Home's "New nights" no
   longer says "every hour" ([settings reference](docs/settings-reference.md#schedule)).
-- **Recent nights are re-checked about once an hour.** The retry of recent nights without an estimate and the
+- **Recent nights are re-checked at most about once an hour.** The retry of recent nights without an estimate and the
   refresh of written nights after late heart rate form one late-data pass, which runs at most every 55 minutes
   (`NewNightsSync.MIN_RECHECK_GAP_MS`), measured from the start of the run whose pass last completed (kept in the sync
   state, `late_data_pass_at`). So it stays about hourly with a 15- or 30-minute check, also for a night whose check
@@ -65,7 +65,7 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 - **Sleep as Android's read window in the documentation.** The syncs it starts itself, after saving a record and when
   its tracking ends, read Health Connect for the last 30 days like "Sync now", not 14 days as the 0.3.0 notes said
-  (from its code, not yet confirmed on the development phone): they send the same sync request that "Ask Sleep as
+  (observed with Sleep as Android 20261006, not yet confirmed on the development phone): they send the same sync request that "Ask Sleep as
   Android to sync" sends ([health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android),
   [user guide](docs/user-guide.md#how-sleep-as-android-imports)).
 

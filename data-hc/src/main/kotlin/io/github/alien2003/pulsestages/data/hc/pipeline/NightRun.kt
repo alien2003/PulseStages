@@ -154,6 +154,7 @@ internal class NightRun(
     deps: PipelineDeps,
     spec: RunSpec,
     private val candidates: List<NightCandidate>,
+    private val writes: WriteCount = WriteCount(),
 ) {
     private val settings = spec.settings
     private val trigger = spec.trigger
@@ -449,7 +450,7 @@ internal class NightRun(
 
             else -> {
                 logger.i(TAG, "updated: ${update.describe()}", nightKey = key)
-                write(candidate, existing, related, estimate, Rewrite(fingerprint, update.reason(), planned))
+                write(candidate, existing, related, estimate, Rewrite(fingerprint, update.reason(), planned, refresh = true))
                 NightResult.REFRESHED
             }
         }
@@ -547,7 +548,7 @@ internal class NightRun(
             is EstimationOutcome.Estimated -> {
                 val planned = plan(candidate, outcome.estimate)
                 val fingerprint = InputFingerprint.of(input, InputSelection.of(settings, granted))
-                write(candidate, existing, related, outcome.estimate, Rewrite(fingerprint, reason = null, planned))
+                write(candidate, existing, related, outcome.estimate, Rewrite(fingerprint, reason = null, planned, refresh = false))
             }
 
             is EstimationOutcome.NotEstimated -> {
@@ -694,6 +695,8 @@ internal class NightRun(
         val recomputeCount = nextRecomputeCount(candidate, existing)
         val version = ALGO_VERSION * VERSION_FACTOR + recomputeCount
         val result = repository.writeEstimatedSession(sessionWrite(candidate, planned, version))
+        // Counted at once: the session is in Health Connect even when a later step of this night fails.
+        if (rewrite.refresh) writes.countRewritten() else writes.countWritten()
 
         val now = clock.millis()
         ledger.nights.recordNight(
@@ -1092,12 +1095,14 @@ internal class NightRun(
 
     /**
      * How [write] stores a night: the input [fingerprint] of the estimate, the `statusReason` ([reason]: null for a
-     * regular write, the [InputUpdate] of a refresh) and the [planned] record.
+     * regular write, the [InputUpdate] of a refresh), the [planned] record, and whether it is a [refresh] (counted in
+     * [WriteCount.rewritten] instead of [WriteCount.written]).
      */
     private class Rewrite(
         val fingerprint: String,
         val reason: String?,
         val planned: PlannedRecord,
+        val refresh: Boolean,
     )
 
     /** Constants. */
