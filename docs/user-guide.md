@@ -1065,9 +1065,12 @@ also runs Sleep as Android's backup and its other syncs."
   "Disabled" turns it off). Each sync probably adds another set of 10-minute heart-rate values to the nights that
   already have heart rate. Sleep as Android may also write heart rate and SpO2 of the nights it tracked itself to
   Health Connect. Its sync counts against its own Health Connect quota, not PulseStages'.
-- **What is confirmed.** On the development phone: a second sync adds heart rate to the nights Sleep as Android
-  imported. Observed with Sleep as Android 20261006 but not yet confirmed on the development phone: that the request
-  starts its Health Connect sync, and the side effects above. Its documentation describes the request only as a
+- **What is confirmed.** On the development phone (2026-10-17): Sleep as Android takes the request at once, runs its
+  backup and its other syncs, starts its Health Connect sync of the last 30 days 10 seconds later and again after the
+  second request, and the number of its own sessions in Health Connect does not grow; a second sync adds heart rate to
+  the nights it imported, and the tested night shows its heart rate there. Its log also shows each sync offering heart
+  rate again for nights that already have it. Observed with Sleep as Android 20261006 but not yet confirmed on the
+  development phone: the other side effects above. Its documentation describes the request only as a
   backup sync, so the Health Connect part may change in any version.
 - **How to check.** A night imported this way has the cloud icon, as after "Sync now", and gets a heart-rate chart
   after the second request. Such nights are never exported back to Health Connect as Sleep as Android's own sessions.

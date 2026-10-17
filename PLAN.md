@@ -349,7 +349,7 @@ from memory.
     it, whose request imports it again).
   - **No follow-up after a rewrite only.** A refresh after late heart rate rewrites a night Sleep as Android imported
     earlier, so the request's own sync attaches the new heart rate; a second one would only add another set of
-    heart-rate values (an inference, below). A follow-up that is due by then is taken as sent.
+    heart-rate values (below). A follow-up that is due by then is taken as sent.
   - **On by default, outside the params hash.** Opt-in at first; the project owner chose on by default on
     2026-10-17. That is acceptable because it has no effect without Sleep as Android (the sender checks for its
     receiver and sends nothing when it is missing) and the request carries no data, while without it a night reaches
@@ -473,7 +473,10 @@ property.
   - a sync reads its own records of the last 30 days, imports new sessions, and then attaches heart rate and SpO2
     only to the records it read before the import, so a night imported in a sync gets them on the next one
     (2026-10-17: a second "Sync now" attached heart rate to PulseStages' nights).
-- Sleep as Android, observed with 20261006 but not yet confirmed on the development phone:
+- Sleep as Android, observed with 20261006. Confirmed on the development phone on 2026-10-17 (test build
+  0.4.0-alpha.1, a "Recompute" of one night): the request reached it within about 60 ms, it ran its backup and SleepSync
+  at once and the 30-day Health Connect sync 10 s later, the follow-up did the same 10 min later, `ours` stayed 13, and
+  the night shows heart rate there. Not yet confirmed on the development phone:
   - its exported receiver `RequestSyncReceiver` (no permission) for `com.urbandroid.sleep.REQUEST_SYNC`, the "Request
     Backup Sync" of its [Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html), reads no extras, starts
     its backup (a local `sleep-export.zip` by default; "Sync now" does not write it) and the syncs of its other
@@ -483,7 +486,9 @@ property.
     skipped;
   - heart rate is read as 10-minute `BPM_AVG` aggregates of every app, each stamped with its bucket start, and a value
     is skipped only when its time and value are already there; the buckets start at "now − 30 days" of each sync, so
-    repeated syncs probably add further values to nights that already have heart rate (an inference); values that
+    repeated syncs probably add further values to nights that already have heart rate (its log on the phone showed both
+    syncs offering new values, also for a night that already had heart rate, and the follow-up offering the request's
+    values again; whether they are stored every time was not visible); values that
     reach Health Connect later are merged into an imported night;
   - for records of the window that got no new values in a sync (mostly its own tracked nights) it writes heart rate
     (`HeartRateRecord`, `RestingHeartRateRecord`) and SpO2 to Health Connect, origin `com.urbandroid.sleep`, without

@@ -566,8 +566,8 @@ ColorOS 16), except where a point says it is not yet confirmed; other versions m
   documentation says the integration then works in the background, but there is no periodic import for a user who
   only views data in it. Its syncs after saving a record and after its tracking send the public sync request of its
   Intent API (`com.urbandroid.sleep.REQUEST_SYNC`), the same request PulseStages can send
-  (`write.requestSleepAsAndroidSync`, below); that a request from PulseStages starts the sync was observed with Sleep
-  as Android 20261006 but is not yet confirmed on the development phone.
+  (`write.requestSleepAsAndroidSync`, below); a request from PulseStages starts that sync (confirmed on the
+  development phone, below).
 - **The "Health Connect" row is a switch.** While the row in Settings → Services says "Connected", tapping it does not
   sync: it turns the integration off, and Sleep as Android then revokes all its Health Connect permissions (they
   disappear once its process ends). Turning the integration on again asks for the permissions again, and "Access past
@@ -655,13 +655,16 @@ its own and the request still counts as sent. Every session is counted as it is 
 [architecture.md §6.7](architecture.md#67-what-a-sync-does)), so only a process death loses the request; the next
 request's sync, which reads the last 30 days, then covers that night too.
 
-Observed with Sleep as Android 20261006, not yet confirmed on the development phone: its receiver
-(`RequestSyncReceiver`, exported, no permission) reads no extras, schedules its backup and the syncs of its other
-enabled services (a job that runs as soon as a network is available; requests made while there is none give one such
-run) and, about 10 s later and only when its Health Connect integration is on, a Health Connect sync like that of
-"Sync now", which needs no network: the last 30 days, imports with the cloud icon. Requests less than 10 s apart give one Health
-Connect sync, and one that arrives while a sync runs is skipped. Its documentation describes only the backup, so the
-Health Connect part may change in any version.
+Confirmed on the development phone (2026-10-17, Sleep as Android 20261006, PulseStages test build 0.4.0-alpha.1, a
+"Recompute" of one night): its receiver (`RequestSyncReceiver`, exported, no permission) took the request within
+about 60 ms (its log: "SYNC onReceive() starting worker", "Scheduled exact Health Connect sync alarm"), ran its backup
+and its other enabled sync (SleepSync there) at once, and 10 s later a Health Connect sync like that of "Sync now": the
+last 30 days, `importMode=false`; the follow-up 10 min later started the same again. Observed with Sleep as Android
+20261006 but not yet confirmed on the development phone: it reads no extras; the backup and the other syncs are a job
+that waits for a network (requests made while there is none give one such run), while the Health Connect sync needs no
+network and runs only when its Health Connect integration is on; requests less than 10 s apart give one Health Connect
+sync, and one that arrives while a sync runs is skipped. Its documentation describes only the backup, so the Health
+Connect part may change in any version.
 
 **A follow-up for a new or recomputed night.** Sleep as Android attaches heart rate and SpO2 only to the records it
 had before a sync (above), so a night imported in the sync of a first request gets them only from a second one. A run
@@ -689,12 +692,13 @@ PulseStages' record in Health Connect; Sleep as Android gets only the new heart 
 Android, the user deletes that night there and then recomputes it in PulseStages: with the option on, the request
 after the recompute makes Sleep as Android import it again, and the follow-up attaches its heart rate.
 
-**Side effects**, observed with Sleep as Android 20261006 and not yet confirmed on the development phone:
+**Side effects**, observed with Sleep as Android 20261006 (confirmed on the development phone only where a point says
+so):
 
 - every request also runs the syncs of Sleep as Android's other enabled services (Google Fit, Google Calendar, Samsung
   Health, SleepSync), as "Sync now" does, and, unlike "Sync now", its backup (a local `sleep-export.zip` by default): a
   new or recomputed night causes two of them while the phone is online, and every refresh after late heart rate one
-  more;
+  more (confirmed on the development phone: the backup and SleepSync ran within a second of each request);
 - its sync reads every app's heart rate of the last 30 days as 10-minute averages (`BPM_AVG`), from its own quota
   ([7.2](#72-quotas));
 - it can write heart rate (`HeartRateRecord`, `RestingHeartRateRecord`) and SpO2 to Health Connect (origin
@@ -707,12 +711,16 @@ after the recompute makes Sleep as Android import it again, and the follow-up at
   stretches over our stages; they stay on that record;
 - every sync probably adds another set of 10-minute heart-rate values to records that already have heart rate: the
   averaging windows start at "now − 30 days" of each sync, and Sleep as Android skips a value only when its time and
-  value are the same (an inference, to be checked on the phone);
+  value are the same. On the development phone both the request's sync and the follow-up's offered new values, stamped
+  with their own bucket times, for every night of the 30 days that has heart rate, also for a night that already had
+  heart rate from an earlier "Sync now", and the follow-up offered the request's values again; whether they are stored
+  every time is not visible in its log;
 - the nights it imports in this sync get the cloud icon and are never exported back to Health Connect as its own
   sessions (unlike Backup → "Download from Health Connect"). Its log line "HealthConnect sessions found: total=…
   ours=… others=…" (logcat tag `SleepAsAndroid`) counts its own sessions in Health Connect of the last 30 days as
   `ours`, before that sync's export. Between the first and the follow-up request it must not grow by the nights it
-  imported; nights tracked or added in Sleep as Android itself in between do add to it.
+  imported; nights tracked or added in Sleep as Android itself in between do add to it (confirmed on the development
+  phone: 13 in both syncs, as before the test).
 
 The option changes nothing that is written and is not part of the params hash (`OutputOptions.hashExtra` leaves it
 out). It is on by default because it has no effect without Sleep as Android (nothing is sent) and the request carries

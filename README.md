@@ -273,9 +273,10 @@ already in Health Connect keep their stages until they are recomputed. The
   there and synced again (last 29 days only). A nap written as asleep / awake shows there as a time span without phases
   (both confirmed on the development phone with Sleep as Android 20261006,
   [user guide](docs/user-guide.md#sleep-as-android)). "Ask Sleep as Android to sync" (on by default) sends Sleep as
-  Android its documented sync request after a write; a second sync attaches heart rate to the nights it imported
-  (confirmed on the development phone), while the Health Connect sync that the request starts and its side effects
-  were observed with Sleep as Android 20261006 but are not yet confirmed on the development phone.
+  Android its documented sync request after a write; on the development phone the request started Sleep as Android's
+  backup and its Health Connect sync of the last 30 days, the second request 10 minutes later did the same, and the
+  night shows its heart rate there, while the other side effects were observed with Sleep as Android 20261006 but are
+  not yet confirmed on the development phone.
 - **Not verified yet.** Whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the
   behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
