@@ -204,8 +204,9 @@ already in Health Connect keep their stages until they are recomputed. The
 - **Sleep as Android compatibility** (off by default): PulseStages' session starts 1 second before the watch app's,
   for Sleep as Android, which imports only the first of overlapping sessions
   ([user guide](docs/user-guide.md#sleep-as-android)), and **Ask Sleep as Android to sync** (off by default): after
-  writing a night PulseStages asks Sleep as Android to sync, and once more 10 minutes later so that the night also
-  gets its heart rate ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync)).
+  writing or updating a night PulseStages asks Sleep as Android to sync, and once more 10 minutes after a new or
+  recomputed one so that the night also gets its heart rate
+  ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync)).
 - **Idempotent writes**: one output per night, keyed by the source sessions and rewritten under the same key on
   recompute, verified by reading it back; fragments of a night are merged, and deleted sources remove the output.
 - **Selectable sources** with a priority order: OHealth by default, any app that writes sleep sessions to Health

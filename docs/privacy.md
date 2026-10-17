@@ -85,9 +85,9 @@ for Sleep as Android, only to check that it is installed before the opt-in sync 
 - The system log (logcat), which receives a copy of the app's log ([5](#5-logs)).
 - Only with Settings → "Written sessions" → "Ask Sleep as Android to sync" (off by default): a broadcast to Sleep as
   Android (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) after a run that wrote or updated a
-  session, and once more about 10 minutes after a new one. It carries no extras and no data: it tells Sleep as Android
-  only that a sync is wanted, and with that when PulseStages wrote. Sleep as Android then reads Health Connect with
-  its own permissions, like after its own "Sync now"
+  session, and once more about 10 minutes after a new or recomputed one. It carries no extras and no data: it tells
+  Sleep as Android only that a sync is wanted, and with that when PulseStages wrote. Sleep as Android then reads
+  Health Connect with its own permissions, like after its own "Sync now"
   ([health-connect.md §8.3](health-connect.md#83-sleep-as-android)).
 
 What Health Connect and other apps do with data they hold is outside PulseStages' control.
@@ -100,7 +100,7 @@ Everything below is in the app's private storage, which other apps cannot read.
 |---|---|---|
 | Room database (the ledger) | `databases/pulsestages.db` | `estimated_nights`: one row per estimated night or nap: the ids of its source sessions, the source app, start and end with time-zone offsets, the id of PulseStages' record in Health Connect, algorithm version, params hash, estimator, coverage, confidence, minutes per stage, the stages, flags and warnings, the lowest heart rate, the number of heart-rate samples, status and timestamps, and the input fingerprint with the time it was last checked (below). `night_sources`: night ↔ source session links. `source_sessions`: every source session seen (id, app, start, end, outcome). `night_baselines`: the lowest heart rate of each written session, for the rolling baseline. `personal_models`: personal models from "Calibrate" or the unsupervised adaptation. `backfill_state`: the progress of the history backfill. `log_entries`: the internal log ([5](#5-logs)). |
 | Settings (DataStore) | `files/datastore/app_settings.json` | the settings that differ from the defaults: enabled sleep sources and their priority, schedule, title template, algorithm parameters, log level. No health data. |
-| Sync state (DataStore) | `files/datastore/sync_state.preferences_pb` | the Health Connect changes token and the source packages it belongs to, when the last sync started and ended, its outcome and a short English detail (counters), a counter of the unsupervised adaptation, and, with "Ask Sleep as Android to sync", when a pending second sync request to Sleep as Android is due. |
+| Sync state (DataStore) | `files/datastore/sync_state.preferences_pb` | the Health Connect changes token and the source packages it belongs to, when the last sync started and ended, its outcome and a short English detail (counters), when recent nights were last re-checked for late heart rate, a counter of the unsupervised adaptation, and, with "Ask Sleep as Android to sync", when a pending second sync request to Sleep as Android is due. |
 | WorkManager's database | managed by WorkManager | the scheduled and recent background work: its type, when it was requested, the id of a night to recompute, and the result of finished work (counters, outcome, an English detail). |
 | Shared log file | `cache/shared/pulsestages-log.txt` | only after you tap "Share log"; replaced by the next share; Android may delete cache files at any time. |
 | Demo-mode switch (debug builds only) | shared preferences `pulsestages_demo_mode` | one on/off value. |

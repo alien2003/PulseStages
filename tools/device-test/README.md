@@ -44,18 +44,21 @@ the later steps do not need of the run's read budget (a hard cap), and covers on
    (stages sorted, contiguous, exactly inside the session, at least one epoch each, only `STAGE_TYPE_*` values the
    app writes; clientRecordId `ps:` + sha256 of the source uuids; version `ALGO_VERSION·1000 + n`; the notes' JSON
    keys and values; the title) and the ledger must agree with the simulated Health Connect (one output per night);
-2. idempotency: a second backfill and a Changes-API sync (with its refresh of recently written nights) on the same
-   ledger must write and delete nothing;
+2. idempotency: a second backfill and a Changes-API sync (with its refresh of recently written nights; the isolated
+   pipeline's clock moves forward by `NewNightsSync.MIN_RECHECK_GAP_MS` first, so that its late-data pass runs and
+   the written nights are due for their refresh again, as at the next hourly sync) on the same ledger must write and
+   delete nothing;
 3. refresh of recently written nights (`refresh-recent`), on the same ledger: a sync on unchanged data writes and
    deletes nothing; then synthetic late heart rate is added in memory (every sample in a written night's input window
    also one second later, same bpm; never written anywhere) and a sync may rewrite only nights that were written
    before, each once, with the same clientRecordId and clientRecordVersion + 1, at most 8 per run, with the input
    update as the ledger's reason, deleting nothing; the same sync again must not rewrite those nights (their input did
    not change since). Every ledger row was created during the test, and the sync checks a night again only after as
-   long as it waited before and never within 55 minutes of its last check (`NewNightsSync.MIN_RECHECK_GAP_MS`), so the
-   scenario moves the isolated pipeline's clock forward before each sync (by the age of the oldest written row and at
-   least by that gap, at most to 35 hours after that row was created) to make the written nights of the last 30 days
-   due again, as at a later hourly sync. Under `overwritePolicy` NEVER nothing may be refreshed;
+   long as it waited before, and only in its late-data pass, which runs at most every 55 minutes
+   (`NewNightsSync.MIN_RECHECK_GAP_MS`), so the scenario moves the isolated pipeline's clock forward before each sync
+   (by the age of the oldest written row and at least by that gap, at most to 35 hours after that row was created) to
+   run the pass and make the written nights of the last 30 days due again, as at a later hourly sync. Under
+   `overwritePolicy` NEVER nothing may be refreshed;
 4. "recompute all": every written night rewritten exactly once, with clientRecordVersion + 1;
 5. the history again with the default settings;
 6. policies on the most recent weeks: naps SKIP, STAGES and SLEEP_WAKE (the default since the realistic-nap
