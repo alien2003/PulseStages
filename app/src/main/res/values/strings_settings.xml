@@ -12,7 +12,7 @@
     <string name="set_sch_daily_time_title">Daily run</string>
     <string name="set_sch_daily_time_hint">Time of the daily run (approximate: Android may delay background work).</string>
     <string name="set_sch_periodic_title">Check for new nights every</string>
-    <string name="set_sch_periodic_hint">How often the background job asks Health Connect for new sleep sessions. A check that finds nothing new costs almost nothing; recent nights are re-checked for late heart rate at most once an hour.</string>
+    <string name="set_sch_periodic_hint">How often the background job asks Health Connect for new sleep sessions. A check that finds nothing new costs almost nothing; recent nights are re-checked for late heart rate about once an hour.</string>
     <string name="set_sch_not_low_battery_title">Only when the battery is not low</string>
     <string name="set_sch_not_low_battery_hint">Background runs wait until the battery is not low.</string>
     <string name="set_wr_title_template_title">Session title</string>
@@ -24,7 +24,7 @@
     <string name="set_wr_start_before_source_title">Sleep as Android compatibility</string>
     <string name="set_wr_start_before_source_hint">Starts each written session 1 second before the source session, so that Sleep as Android imports it instead of the source\'s session without stages. Nights Sleep as Android has already imported must be deleted there and synced again. Changes the written data.</string>
     <string name="set_wr_request_saa_sync_title">Ask Sleep as Android to sync</string>
-    <string name="set_wr_request_saa_sync_hint">After a night or nap is written or updated, asks Sleep as Android to sync with Health Connect, and once more about 10 minutes after a new one, so that it adds heart rate and SpO2. Works with “Sleep as Android compatibility”. Each request also runs Sleep as Android\'s backup and its other syncs.</string>
+    <string name="set_wr_request_saa_sync_hint">After a night or nap is written or updated, asks Sleep as Android to sync with Health Connect, and once more about 10 minutes after a new or recomputed one, so that Sleep as Android adds its heart rate and SpO2. Works with “Sleep as Android compatibility”. Each request also runs Sleep as Android\'s backup and its other syncs.</string>
     <string name="set_alg_estimator_title">Estimator</string>
     <string name="set_alg_estimator_hint">Hybrid (trained classifier + duration model) is the default; HMM and Rules are simpler alternatives.</string>
     <string name="set_pre_min_bpm_title">Lowest valid heart rate</string>

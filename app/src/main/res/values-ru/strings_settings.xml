@@ -12,7 +12,7 @@
     <string name="set_sch_daily_time_title">Ежедневный запуск</string>
     <string name="set_sch_daily_time_hint">Время ежедневного запуска (примерно: Android может откладывать фоновые задачи).</string>
     <string name="set_sch_periodic_title">Проверять новые ночи каждые</string>
-    <string name="set_sch_periodic_hint">Как часто фоновая задача спрашивает у Health Connect новые сессии сна. Проверка, не нашедшая ничего нового, почти ничего не стоит; недавние ночи перепроверяются на поздний пульс не чаще раза в час.</string>
+    <string name="set_sch_periodic_hint">Как часто фоновая задача спрашивает у Health Connect новые сессии сна. Проверка, не нашедшая ничего нового, почти ничего не стоит; недавние ночи перепроверяются на поздний пульс примерно раз в час.</string>
     <string name="set_sch_not_low_battery_title">Только при нормальном заряде</string>
     <string name="set_sch_not_low_battery_hint">Фоновые запуски ждут, пока заряд батареи не станет нормальным.</string>
     <string name="set_wr_title_template_title">Заголовок сессии</string>
@@ -24,7 +24,7 @@
     <string name="set_wr_start_before_source_title">Совместимость со Sleep as Android</string>
     <string name="set_wr_start_before_source_hint">Начинает каждую записанную сессию на 1 секунду раньше исходной, чтобы Sleep as Android импортировал её, а не сессию источника без стадий. Ночи, которые Sleep as Android уже импортировал, нужно удалить в нём и синхронизировать заново. Меняет записываемые данные.</string>
     <string name="set_wr_request_saa_sync_title">Просить Sleep as Android синхронизироваться</string>
-    <string name="set_wr_request_saa_sync_hint">После записи или обновления ночи или дневного сна просит Sleep as Android синхронизироваться с Health Connect, а после новой записи — ещё раз примерно через 10 минут, чтобы он добавил пульс и SpO2. Работает вместе с настройкой «Совместимость со Sleep as Android». Каждый запрос также запускает резервное копирование и другие синхронизации Sleep as Android.</string>
+    <string name="set_wr_request_saa_sync_hint">После записи или обновления ночи или дневного сна просит Sleep as Android синхронизироваться с Health Connect, а после записи новой или пересчитанной сессии — ещё раз примерно через 10 минут, чтобы Sleep as Android добавил к ней пульс и SpO2. Работает вместе с настройкой «Совместимость со Sleep as Android». Каждый запрос также запускает резервное копирование и другие синхронизации Sleep as Android.</string>
     <string name="set_alg_estimator_title">Оценщик</string>
     <string name="set_alg_estimator_hint">По умолчанию — гибрид (обученный классификатор + модель длительностей); HMM и правила — более простые варианты.</string>
     <string name="set_pre_min_bpm_title">Минимальный допустимый пульс</string>

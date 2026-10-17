@@ -221,6 +221,30 @@ class BackfillAndRecomputeRunnerTest {
         }
 
     @Test
+    fun `a backfill stopped by WorkManager after it wrote nights still asks Sleep as Android once`() =
+        harnessTest(dir) { h ->
+            h.requestSleepAsAndroidSync()
+            h.addNights(20 downTo 1)
+            val entered = CompletableDeferred<Unit>()
+            h.estimator.beforeEstimate = {
+                if (h.estimator.inputs.size == 10) {
+                    entered.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+            val sender = RecordingSyncRequestSender()
+            val job = launch { h.backfillRunner(sender).run(inBackground = false) }
+            entered.await()
+
+            job.cancel()
+            job.join()
+
+            assertTrue(job.isCancelled)
+            assertEquals(9, h.repository.ownSessions().size)
+            assertEquals(1, sender.sent, "the nights written before the stop are in Health Connect")
+        }
+
+    @Test
     fun `an unavailable Health Connect or a missing permission blocks the backfill without a crash`() =
         harnessTest(dir) { h ->
             h.addNights(3 downTo 1)
@@ -309,6 +333,30 @@ class BackfillAndRecomputeRunnerTest {
             assertEquals(3, outcome.summary.estimated)
             assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
             assertEquals(1, sender.sent)
+        }
+
+    @Test
+    fun `a recompute that a Health Connect error ends after its first group of nights still asks Sleep as Android once`() =
+        harnessTest(dir) { h ->
+            h.addNights(listOf(20, 10, 1))
+            h.backfill.run(inBackground = false)
+            h.clock.advanceBy(MINUTE_MS)
+            h.requestSleepAsAndroidSync()
+            // Three groups of nights (more than 7 days apart): the read of the second one fails.
+            h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.QuotaExceeded("quota"), afterCalls = 1)
+            val sender = RecordingSyncRequestSender()
+
+            val outcome = h.recomputeRunner(sender).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false)
+
+            assertEquals(RetryCause.QUOTA, assertInstanceOf(WorkOutcome.Retry::class.java, outcome).cause)
+            assertEquals(
+                listOf(1, 0, 0),
+                h.ledger
+                    .allNights()
+                    .sortedBy { it.sessionStartMs }
+                    .map { it.recomputeCount },
+            )
+            assertEquals(1, sender.sent, "the night rewritten before the error is in Health Connect")
         }
 
     @Test

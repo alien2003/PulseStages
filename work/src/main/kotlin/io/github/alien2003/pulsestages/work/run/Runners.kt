@@ -8,17 +8,21 @@ import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
 import io.github.alien2003.pulsestages.data.hc.pipeline.HealthAccessGuard
 import io.github.alien2003.pulsestages.data.hc.pipeline.NewNightsSync
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightRecomputer
+import io.github.alien2003.pulsestages.data.hc.pipeline.PipelineReport
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeProgress
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.hc.pipeline.SyncReport
+import io.github.alien2003.pulsestages.data.hc.pipeline.WriteCount
 import io.github.alien2003.pulsestages.data.hc.usecase.EmRunResult
 import io.github.alien2003.pulsestages.data.hc.usecase.PersonalizationService
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateEntity
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.data.local.sync.SyncOutcome
 import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
@@ -26,9 +30,10 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * The work of EstimateNewNightsWorker, without WorkManager: Health Connect availability → permissions (the required
  * ones, plus READ_HEALTH_DATA_IN_BACKGROUND for a background run) → [NewNightsSync] (which performs both checks and
- * records the run in SyncStateStore) → [SleepAsAndroidSyncRequests.afterRun] with the nights the sync wrote (also when
- * it stopped early) → [PersonalizationService.maybeRunPopulationEm] → outcome. Runs of the periodic, daily and
- * "estimate now" works are serialized. Never throws except for cancellation.
+ * records the run in SyncStateStore) → [SleepAsAndroidSyncRequests.afterRun] with the sessions the sync wrote (also when
+ * it stopped early, ended with a Health Connect error or was cancelled) → [PersonalizationService.maybeRunPopulationEm]
+ * → outcome. Runs of the periodic, daily and "estimate now" works are serialized. Never throws except for
+ * cancellation.
  */
 @Singleton
 class EstimateNewNightsRunner
@@ -51,10 +56,8 @@ class EstimateNewNightsRunner
         ): WorkOutcome =
             mutex.withLock {
                 guardedRun(logger, TAG) {
-                    val report = sync.run(inBackground, userRequested)
-                    // Before population EM, so that Sleep as Android starts at once; writes before a stop count too.
-                    val requested = sleepAsAndroid.afterRun(report.pipeline.estimated, report.pipeline.refreshed)
-                    when (val outcome = outcomeOf(report).withSleepAsAndroidSync(requested)) {
+                    // Sleep as Android is asked before population EM, so that it starts at once.
+                    when (val outcome = sleepAsAndroid.requestSyncAfter { outcomeOf(sync.run(inBackground, userRequested, it)) }) {
                         is WorkOutcome.Completed -> outcome.copy(summary = outcome.summary.copy(personalModelUpdated = adapt(inBackground)))
                         else -> outcome
                     }
@@ -128,8 +131,8 @@ class EstimateNewNightsRunner
 /**
  * The work of BackfillWorker, without WorkManager: [BackfillEngine.run] (resumes a RUNNING / WAITING_RETRY state from
  * its persisted cursor, stops between nights after [cancel], does not start when it was cancelled after it was
- * requested) → [SleepAsAndroidSyncRequests.afterRun] with the nights this run wrote → outcome. Never throws except for
- * cancellation.
+ * requested) → [SleepAsAndroidSyncRequests.afterRun] with the sessions this run wrote (also when it stopped early or
+ * was cancelled) → outcome. Never throws except for cancellation.
  */
 class BackfillRunner
     @Inject
@@ -148,8 +151,7 @@ class BackfillRunner
             onProgress: suspend (BackfillStateEntity) -> Unit = {},
         ): WorkOutcome =
             guardedRun(logger, TAG) {
-                val report = engine.run(inBackground, requestedAtMs, onProgress)
-                outcomeOf(report).withSleepAsAndroidSync(sleepAsAndroid.afterRun(written = report.written, rewritten = 0))
+                sleepAsAndroid.requestSyncAfter { outcomeOf(engine.run(inBackground, requestedAtMs, it, onProgress)) }
             }
 
         /** Asks a running backfill to stop before its next night (one that has not begun does not start) and marks it CANCELLED. */
@@ -221,7 +223,8 @@ sealed interface RecomputeRequest {
 
 /**
  * The work of RecomputeWorker, without WorkManager: [NightRecomputer] → [SleepAsAndroidSyncRequests.afterRun] with the
- * nights it rewrote → outcome. Never throws except for cancellation.
+ * sessions it rewrote (also when it stopped early, a Health Connect error ended it or it was cancelled) → outcome.
+ * Never throws except for cancellation.
  */
 class RecomputeRunner
     @Inject
@@ -240,17 +243,23 @@ class RecomputeRunner
             onProgress: suspend (RecomputeProgress) -> Unit = {},
         ): WorkOutcome =
             guardedRun(logger, TAG, classifyDenial = { guard.reasonForDenial() }) {
-                val report =
-                    when (request) {
-                        is RecomputeRequest.Nights -> {
-                            recomputer.recompute(request.clientRecordIds, inBackground, onProgress, request.requestedAtMs)
-                        }
+                sleepAsAndroid.requestSyncAfter { outcomeOf(recompute(request, inBackground, it, onProgress)) }
+            }
 
-                        is RecomputeRequest.All -> {
-                            recomputer.recomputeAll(request.scope, inBackground, request.requestedAtMs, onProgress)
-                        }
-                    }
-                outcomeOf(report).withSleepAsAndroidSync(sleepAsAndroid.afterRun(report.estimated, report.refreshed))
+        private suspend fun recompute(
+            request: RecomputeRequest,
+            inBackground: Boolean,
+            writes: WriteCount,
+            onProgress: suspend (RecomputeProgress) -> Unit,
+        ): PipelineReport =
+            when (request) {
+                is RecomputeRequest.Nights -> {
+                    recomputer.recompute(request.clientRecordIds, inBackground, onProgress, request.requestedAtMs, writes)
+                }
+
+                is RecomputeRequest.All -> {
+                    recomputer.recomputeAll(request.scope, inBackground, request.requestedAtMs, writes, onProgress)
+                }
             }
 
         private companion object {
@@ -258,6 +267,28 @@ class RecomputeRunner
         }
     }
 
-/** This outcome with [requested] (whether Sleep as Android was asked to sync) in the summary of a completed run. */
-private fun WorkOutcome.withSleepAsAndroidSync(requested: Boolean): WorkOutcome =
-    if (this is WorkOutcome.Completed) copy(summary = summary.copy(sleepAsAndroidSyncRequested = requested)) else this
+/**
+ * Runs [work] with a fresh [WriteCount] and asks Sleep as Android to sync ([SleepAsAndroidSyncRequests.afterRun]) for
+ * the sessions it wrote, exactly once per run: after [work] returned (whether a request was sent goes into the summary
+ * of a completed outcome), and also when [work] threw, whatever it threw (a Health Connect error, any other exception
+ * or a cancellation): the sessions written before it are in Health Connect. That request is not cancellable and comes
+ * before the exception goes on. A process death still loses it; the next request, whose sync reads the last 30 days,
+ * covers such sessions too.
+ */
+@Suppress("TooGenericExceptionCaught") // Every Throwable is rethrown: the catch only adds the request for the writes before it.
+private suspend fun SleepAsAndroidSyncRequests.requestSyncAfter(work: suspend (WriteCount) -> WorkOutcome): WorkOutcome {
+    val writes = WriteCount()
+    val outcome =
+        try {
+            work(writes)
+        } catch (e: Throwable) {
+            withContext(NonCancellable) { afterRun(writes.written, writes.rewritten) }
+            throw e
+        }
+    val requested = afterRun(writes.written, writes.rewritten)
+    return if (outcome is WorkOutcome.Completed) {
+        outcome.copy(summary = outcome.summary.copy(sleepAsAndroidSyncRequested = requested))
+    } else {
+        outcome
+    }
+}

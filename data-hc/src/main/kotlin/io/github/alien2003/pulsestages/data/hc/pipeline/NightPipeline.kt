@@ -97,7 +97,8 @@ class NightPipeline
          * cancelled backfill); coroutine cancellation is honoured as well. [requestedAtMs] is when the user asked for
          * this run (backfill, recompute): a night the user deleted after that time is not written again, even by a
          * trigger that [recreates deleted nights][PipelineTrigger.recreatesDeleted] (the user deleted it while the run
-         * was pending or running); null = no such limit.
+         * was pending or running); null = no such limit. Every session written is also counted in [writes] at once, so
+         * the caller still has it when a later night or step throws or the run is cancelled.
          */
         suspend fun process(
             nights: CandidateSet,
@@ -106,9 +107,10 @@ class NightPipeline
             granted: Set<String>,
             shouldStop: () -> Boolean = { false },
             requestedAtMs: Long? = null,
+            writes: WriteCount = WriteCount(),
         ): PipelineReport =
             LedgerLock.withLock {
-                run(nights, RunSpec(settings, trigger, granted, currentParamsHash(settings, granted), requestedAtMs), shouldStop)
+                run(nights, RunSpec(settings, trigger, granted, currentParamsHash(settings, granted), requestedAtMs), writes, shouldStop)
             }
 
         /**
@@ -116,17 +118,20 @@ class NightPipeline
          * clientRecordId is in [targets] ([refreshableNights]): when such a night is up to date, its input is read again
          * and the night is estimated and rewritten only when the input changed and the record would change (see
          * `NightRun.refresh`). Every other rule of [process] applies unchanged (NEVER, deleted nights, staged sources,
-         * priority, superseding), decided under [LedgerLock] with the ledger as it is then.
+         * priority, superseding), decided under [LedgerLock] with the ledger as it is then. Sessions written or rewritten
+         * are counted in [writes] at once, as in [process].
          */
         suspend fun refresh(
             nights: CandidateSet,
             settings: AppSettings,
             granted: Set<String>,
             targets: Set<String>,
+            writes: WriteCount = WriteCount(),
         ): PipelineReport =
             LedgerLock.withLock {
                 val hash = currentParamsHash(settings, granted)
-                val report = run(nights, RunSpec(settings, PipelineTrigger.NEW_NIGHTS, granted, hash, refreshTargets = targets)) { false }
+                val spec = RunSpec(settings, PipelineTrigger.NEW_NIGHTS, granted, hash, refreshTargets = targets)
+                val report = run(nights, spec, writes) { false }
                 if (!report.stoppedEarly) markNotCandidatesChecked(targets - nights.candidates.mapTo(HashSet()) { it.clientRecordId })
                 // Skipped groups made only of the targets' own sessions (a target that is no candidate any more) were not
                 // found by this run either: like the refresh checks, they are left out of found and skipped.
@@ -150,6 +155,7 @@ class NightPipeline
         private suspend fun run(
             nights: CandidateSet,
             spec: RunSpec,
+            writes: WriteCount,
             shouldStop: () -> Boolean,
         ): PipelineReport {
             val run = NightRun(deps, spec, nights.candidates)
@@ -159,6 +165,7 @@ class NightPipeline
             while (!stopped && remaining.hasNext()) {
                 currentCoroutineContext().ensureActive()
                 val step = if (shouldStop()) Step.Cancelled else run.step(remaining.next())
+                writes.add(step)
                 report = report.add(step, run.takeSuperseded())
                 stopped = step.stopsRun
             }

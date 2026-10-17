@@ -510,11 +510,13 @@ class WorkerAdaptersTest {
             h.requestSleepAsAndroidSync()
             world.requests.afterRun(written = 1, rewritten = 0)
             world.sleepAsAndroid.failure = SecurityException("not allowed")
+            h.clock.advanceBy(10 * MINUTE_MS)
             h.repository.clearCalls()
 
             val result = world.worker<SleepAsAndroidSyncWorker>().doWork()
 
             assertTrue(result is ListenableWorker.Result.Success)
+            assertEquals("the follow-up was attempted", 2, world.sleepAsAndroid.attempts)
             assertEquals("only the first request", 1, world.sleepAsAndroid.sent)
             assertTrue("it reads nothing from Health Connect: ${h.repository.calls}", h.repository.calls.isEmpty())
         }

@@ -80,6 +80,8 @@ enum class SyncOutcome {
  * @property lastEmAdaptationNightCount number of estimated nights at the last population-level EM adaptation.
  * @property sleepAsAndroidFollowUpDueAtMs when the pending follow-up sync request to Sleep as Android is due, or null
  *   when none is pending (`write.requestSleepAsAndroidSync`).
+ * @property lateDataPassAtMs start of the run whose late-data pass (the retry and the refresh of recent nights, at most
+ *   every `NewNightsSync.MIN_RECHECK_GAP_MS`) last completed, or null if none has yet.
  */
 data class SyncState(
     val changesToken: ChangesTokenState? = null,
@@ -89,6 +91,7 @@ data class SyncState(
     val lastRunDetail: String? = null,
     val lastEmAdaptationNightCount: Int = 0,
     val sleepAsAndroidFollowUpDueAtMs: Long? = null,
+    val lateDataPassAtMs: Long? = null,
 )
 
 /**
@@ -181,6 +184,11 @@ class SyncStateStore
             dataStore.edit { it.remove(SAA_FOLLOW_UP_DUE_AT) }
         }
 
+        /** Stores that the late-data pass of the run started at [atMs] completed (replacing the time of an earlier one). */
+        suspend fun markLateDataPass(atMs: Long) {
+            dataStore.edit { it[LATE_DATA_PASS_AT] = atMs }
+        }
+
         /** Factory and keys. */
         companion object {
             /** File name passed to `preferencesDataStoreFile`. */
@@ -196,6 +204,7 @@ class SyncStateStore
             private val RUN_DETAIL = stringPreferencesKey("last_run_detail")
             private val EM_NIGHT_COUNT = intPreferencesKey("last_em_adaptation_night_count")
             private val SAA_FOLLOW_UP_DUE_AT = longPreferencesKey("sleep_as_android_follow_up_due_at")
+            private val LATE_DATA_PASS_AT = longPreferencesKey("late_data_pass_at")
 
             /**
              * Creates the Preferences DataStore over [produceFile] (the file name must end in `.preferences_pb`).
@@ -249,6 +258,7 @@ class SyncStateStore
                     lastRunDetail = this[RUN_DETAIL],
                     lastEmAdaptationNightCount = this[EM_NIGHT_COUNT] ?: 0,
                     sleepAsAndroidFollowUpDueAtMs = this[SAA_FOLLOW_UP_DUE_AT],
+                    lateDataPassAtMs = this[LATE_DATA_PASS_AT],
                 )
         }
     }

@@ -17,8 +17,8 @@ import java.io.File
 
 /**
  * When PulseStages asks Sleep as Android to sync (`write.requestSleepAsAndroidSync`): one request after a run that
- * wrote, one follow-up 10 minutes after a new write, nothing when the option is off or Sleep as Android is missing,
- * and never an exception.
+ * wrote, one follow-up 10 minutes after a new or recomputed write (never sent before it is due), nothing when the
+ * option is off or Sleep as Android is missing, and never an exception.
  */
 class SleepAsAndroidSyncRequestsTest {
     @TempDir
@@ -233,6 +233,7 @@ class SleepAsAndroidSyncRequestsTest {
             w.h.requestSleepAsAndroidSync()
             w.requests.afterRun(written = 1, rewritten = 0)
             w.sender.installed = false
+            w.h.clock.advanceBy(10 * MINUTE_MS)
 
             assertFalse(w.requests.sendFollowUp())
 
@@ -261,6 +262,7 @@ class SleepAsAndroidSyncRequestsTest {
             w.sender.failure = null
             w.requests.afterRun(written = 1, rewritten = 0)
             w.sender.failure = IllegalStateException("gone")
+            w.h.clock.advanceBy(10 * MINUTE_MS)
             assertFalse(w.requests.sendFollowUp())
             assertEquals(
                 "could not send the follow-up sync request to Sleep as Android",
@@ -270,5 +272,80 @@ class SleepAsAndroidSyncRequestsTest {
                     .message,
             )
             assertNull(w.pending(), "not sent twice")
+        }
+
+    @Test
+    fun `a follow-up work that runs before its due time sends nothing and waits for it`() =
+        worldTest { w ->
+            w.h.requestSleepAsAndroidSync()
+            w.h.settings.set { it.copy(schedule = it.schedule.copy(runOnlyWhenNotLowBattery = false)) }
+            w.requests.afterRun(written = 1, rewritten = 0)
+            // The follow-up of an earlier write that REPLACE did not stop in time runs 1 s after the new one was scheduled.
+            w.h.clock.advanceBy(1_000L)
+
+            assertFalse(w.requests.sendFollowUp())
+
+            assertEquals(1, w.sender.sent, "the newer follow-up is not used up")
+            assertEquals(NOON + 10 * MINUTE_MS, w.pending(), "and stays pending")
+            assertEquals(
+                RecordingFollowUps.Scheduled(10 * MINUTE_MS - 1_000L, ScheduleSettings(runOnlyWhenNotLowBattery = false)),
+                w.followUps.scheduled.last(),
+                "scheduled again for the rest of the wait, with the schedule's constraints",
+            )
+            assertEquals(0, w.followUps.cancelled)
+
+            w.h.clock.nowMs = NOON + 10 * MINUTE_MS
+            assertTrue(w.requests.sendFollowUp(), "the rescheduled work sends it on time")
+            assertEquals(2, w.sender.sent)
+            assertNull(w.pending())
+        }
+
+    @Test
+    fun `after the clock was set back the follow-up waits at most its usual delay`() =
+        worldTest { w ->
+            w.h.requestSleepAsAndroidSync()
+            w.requests.afterRun(written = 1, rewritten = 0)
+            w.h.clock.nowMs = NOON - 2 * 60 * MINUTE_MS
+
+            assertFalse(w.requests.sendFollowUp())
+
+            assertEquals(
+                10 * MINUTE_MS,
+                w.followUps.scheduled
+                    .last()
+                    .delayMs,
+            )
+            assertEquals(NOON - 110 * MINUTE_MS, w.pending(), "the due time moves with the clock")
+            assertEquals(1, w.sender.sent)
+        }
+
+    @Test
+    fun `a request that was sent counts as sent when its follow-up cannot be scheduled`() =
+        worldTest { w ->
+            val followUps =
+                object : SleepAsAndroidFollowUps {
+                    override fun schedule(
+                        delayMs: Long,
+                        schedule: ScheduleSettings,
+                    ): Unit = error("WorkManager is not initialized")
+
+                    override fun cancel() = Unit
+                }
+            val requests = w.h.sleepAsAndroidRequests(w.sender, followUps)
+            w.h.requestSleepAsAndroidSync()
+
+            assertTrue(requests.afterRun(written = 1, rewritten = 0))
+
+            assertEquals(1, w.sender.sent)
+            val warning =
+                w.h.logger
+                    .atLeast(LogLevel.WARN)
+                    .single()
+            assertEquals(
+                "asked Sleep as Android to sync (written=1 rewritten=0), but could not update the follow-up",
+                warning.message,
+            )
+            assertTrue(warning.throwable is IllegalStateException)
+            assertTrue(w.info().none { it.startsWith("asked Sleep as Android") }, "no success line for the follow-up")
         }
 }

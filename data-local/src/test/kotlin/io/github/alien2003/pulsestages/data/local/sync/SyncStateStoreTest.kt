@@ -176,6 +176,26 @@ class SyncStateStoreTest {
         }
 
     @Test
+    fun `the time of the last late-data pass persists across instances and the next pass replaces it`() =
+        runTest {
+            withStore { store ->
+                assertNull(store.state.first().lateDataPassAtMs, "no pass yet")
+                store.markLateDataPass(2_000L)
+                store.setSleepAsAndroidFollowUpDue(601_000L)
+            }
+            withStore { store ->
+                assertEquals(2_000L, store.state.first().lateDataPassAtMs)
+
+                store.markLateDataPass(3_302_000L)
+
+                val state = store.state.first()
+                assertEquals(3_302_000L, state.lateDataPassAtMs)
+                assertEquals(601_000L, state.sleepAsAndroidFollowUpDueAtMs, "nothing else is touched")
+                assertNull(state.lastRunStartedAtMs)
+            }
+        }
+
+    @Test
     fun `corrupted file starts from an empty state`() =
         runTest {
             file.writeBytes(byteArrayOf(0x7f, 0x01, 0x02, 0x03, 0x04))

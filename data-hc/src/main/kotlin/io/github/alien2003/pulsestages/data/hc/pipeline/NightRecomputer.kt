@@ -40,7 +40,8 @@ data class RecomputeProgress(
  * nights, every stale WRITTEN night, or every night. Each night is rebuilt from its current source sessions (read
  * again, nights close to each other share one read) and processed with [PipelineTrigger.RECOMPUTE]: the user asked,
  * so up-to-date and stale outputs are overwritten, but `overwritePolicy = NEVER` is still obeyed. Never throws except
- * for cancellation and [io.github.alien2003.pulsestages.data.hc.HealthDataException]s of the session reads.
+ * for cancellation and [io.github.alien2003.pulsestages.data.hc.HealthDataException]s of the session reads; the
+ * sessions written before either are counted in the [WriteCount] the caller passes.
  *
  * Resumable: with `notUpdatedSinceMs` only nights whose ledger row was last changed before that time are processed,
  * so a retried run (after a quota error) skips the nights the interrupted run already recomputed.
@@ -86,15 +87,17 @@ class NightRecomputer
         /**
          * Recomputes the nights of [scope] (only those last changed before [notUpdatedSinceMs], when given), oldest
          * first; [onProgress] is told after every group of nearby nights. [notUpdatedSinceMs] is also the time the
-         * user asked for the recompute (see the class documentation; the run's start when null).
+         * user asked for the recompute (see the class documentation; the run's start when null). Every session
+         * rewritten is counted in [writes] as it is written.
          */
         suspend fun recomputeAll(
             scope: RecomputeScope,
             inBackground: Boolean,
             notUpdatedSinceMs: Long? = null,
+            writes: WriteCount = WriteCount(),
             onProgress: suspend (RecomputeProgress) -> Unit = {},
         ): PipelineReport {
-            val request = Request(notUpdatedSinceMs)
+            val request = Request(notUpdatedSinceMs, writes)
             return if (request.cancelled()) cancelledBeforeStart() else recomputeScope(scope, inBackground, request, onProgress)
         }
 
@@ -120,15 +123,17 @@ class NightRecomputer
 
         /**
          * Recomputes the nights with [clientRecordIds] (unknown ids are ignored), as requested by the user at
-         * [requestedAtMs] (the run's start when null; see the class documentation).
+         * [requestedAtMs] (the run's start when null; see the class documentation). Every session rewritten is counted
+         * in [writes] as it is written.
          */
         suspend fun recompute(
             clientRecordIds: Collection<String>,
             inBackground: Boolean,
             onProgress: suspend (RecomputeProgress) -> Unit = {},
             requestedAtMs: Long? = null,
+            writes: WriteCount = WriteCount(),
         ): PipelineReport {
-            val request = Request(requestedAtMs)
+            val request = Request(requestedAtMs, writes)
             return if (request.cancelled()) cancelledBeforeStart() else recomputeNights(clientRecordIds, inBackground, request, onProgress)
         }
 
@@ -151,12 +156,15 @@ class NightRecomputer
         }
 
         /**
-         * One recompute run: when it was requested ([explicitAtMs], or now) and the [cancel] count at its start. A
-         * cancel applies to it when it came after the start, or (with an explicit request time) at or after the request.
+         * One recompute run: when it was requested ([explicitAtMs], or now), the [cancel] count at its start and what it
+         * wrote ([writes]). A cancel applies to it when it came after the start, or (with an explicit request time) at or
+         * after the request.
          */
         private inner class Request(
             /** The request time the caller gave, or null. */
             val explicitAtMs: Long?,
+            /** The sessions this run wrote so far. */
+            val writes: WriteCount,
         ) {
             private val explicit = explicitAtMs != null
             private val atStart = cancels.get()
@@ -223,6 +231,7 @@ class NightRecomputer
                         granted,
                         shouldStop = request::cancelled,
                         requestedAtMs = request.atMs,
+                        writes = request.writes,
                     )
                 if (!report.stoppedEarly) {
                     done += cluster.size

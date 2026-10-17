@@ -8,6 +8,7 @@ import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.pipeline.BackfillOutcome
 import io.github.alien2003.pulsestages.data.hc.pipeline.BackfillReport
+import io.github.alien2003.pulsestages.data.hc.pipeline.NewNightsSync
 import io.github.alien2003.pulsestages.data.hc.pipeline.OutputOptions
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.hc.pipeline.ResourceDefaultTitleProvider
@@ -172,6 +173,8 @@ class ShadowRun(
         val started = SystemClock.elapsedRealtime()
         env.health.phase = "idempotency-backfill"
         val again = env.backfill.run(inBackground = false, onProgress = progressOf("idempotency-backfill"))
+        // Every written night is due for its refresh again, as at the next hourly sync.
+        env.advanceClock(NewNightsSync.MIN_RECHECK_GAP_MS)
         env.health.phase = "idempotency-sync"
         val sync = env.sync.run(inBackground = false)
         val problems = mutableListOf<String>()

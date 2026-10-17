@@ -16,18 +16,22 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * Asks Sleep as Android to sync with Health Connect after a run that wrote to it (`write.requestSleepAsAndroidSync`, off
  * by default; see [SleepAsAndroid]). Sleep as Android imports a new night in that sync, but attaches heart rate and SpO2
- * only to the records it had before the sync, so a run that wrote a new night also schedules one follow-up request
- * [FOLLOW_UP_DELAY_MS] later:
+ * only to the records it had before the sync, so a run that wrote a new or recomputed night also schedules one
+ * follow-up request [FOLLOW_UP_DELAY_MS] later:
  * - the follow-up is a one-time WorkManager work ([SleepAsAndroidFollowUps]) rather than a step of the next run: it
  *   then comes about 10 minutes after the import whatever check interval is set (up to 24 h), needs no Health Connect
  *   access and survives process death;
  * - its due time is kept in [SyncStateStore]: the unique work (REPLACE) keeps at most one pending, the stored time makes
- *   a re-run of the work send nothing twice, and the work sends nothing once the option is off (checked when it runs);
+ *   a re-run of the work send nothing twice, a work that runs before that time (one that REPLACE did not stop in time,
+ *   or after a clock change) waits for it instead of sending, and the work sends nothing once the option is off
+ *   (checked when it runs);
  * - a run that only rewrote nights (a refresh after late heart rate) gets no follow-up: Sleep as Android imported those
  *   nights earlier, so the request's own sync already attaches the new heart rate, and every further sync may add
  *   another set of 10-minute heart-rate values. A pending follow-up that is due by then is taken as sent by it.
  *
- * Calls are serialized; never throws except for cancellation (a failure is logged and counts as not sent).
+ * Calls are serialized; never throws except for cancellation. A failure before the request went out is logged and
+ * counts as not sent; once it was sent, a failure to store or schedule its follow-up is logged on its own and the
+ * request still counts as sent.
  */
 @Singleton
 class SleepAsAndroidSyncRequests
@@ -43,10 +47,11 @@ class SleepAsAndroidSyncRequests
         private val mutex = Mutex()
 
         /**
-         * Called once by every run with the number of nights it wrote to Health Connect ([written]: new or recomputed)
-         * and rewrote there ([rewritten]: refreshed after late data), also when it stopped early. With the option on and
-         * something written it sends a request and, after a new write, schedules the follow-up; with the option off a
-         * pending follow-up is cancelled. True when a request was sent.
+         * Called once by every run with the number of sessions it wrote to Health Connect ([written]: new or recomputed)
+         * and rewrote there ([rewritten]: refreshed after late data), also when it stopped early, ended with an exception
+         * or was cancelled. With the option on and something written it sends a request and, after a new or recomputed
+         * write, schedules the follow-up; with the option off a pending follow-up is cancelled. True when a request was
+         * sent.
          */
         suspend fun afterRun(
             written: Int,
@@ -55,7 +60,8 @@ class SleepAsAndroidSyncRequests
 
         /**
          * The follow-up (SleepAsAndroidSyncWorker): sends the pending request once, if the option is still on. The
-         * pending time is cleared first, so a work that runs again sends nothing. True when a request was sent.
+         * pending time is cleared first, so a work that runs again sends nothing. A work that runs before the pending
+         * time sends nothing and schedules the follow-up again for the rest of the wait. True when a request was sent.
          */
         suspend fun sendFollowUp(): Boolean =
             mutex.withLock { guarded("could not send the follow-up sync request to Sleep as Android") { requestFollowUp() } }
@@ -87,7 +93,12 @@ class SleepAsAndroidSyncRequests
                 }
 
                 else -> {
-                    afterRequest(written, rewritten, pending, settings.schedule)
+                    // The request is out: a failure of the follow-up's bookkeeping is logged on its own and does not undo it.
+                    val what = "asked Sleep as Android to sync (written=$written rewritten=$rewritten), but could not update the follow-up"
+                    guarded(what) {
+                        afterRequest(written, rewritten, pending, settings.schedule)
+                        true
+                    }
                     true
                 }
             }
@@ -125,35 +136,60 @@ class SleepAsAndroidSyncRequests
 
         private suspend fun requestFollowUp(): Boolean {
             val pending = syncState.state.first().sleepAsAndroidFollowUpDueAtMs
-            // At most one follow-up per request, even when the work runs again (a retry, process death).
-            if (pending != null) syncState.clearSleepAsAndroidFollowUp()
+            val settings = settingsRepository.settings.first()
+            val now = clock.millis()
             return when {
                 pending == null -> {
                     logger.d(TAG, "no follow-up sync request is pending")
                     false
                 }
 
-                !enabled() -> {
+                !settings.write.requestSleepAsAndroidSync -> {
+                    syncState.clearSleepAsAndroidFollowUp()
                     logger.d(TAG, "follow-up sync request dropped: the option is off")
                     false
                 }
 
-                !sender.send() -> {
-                    logger.d(TAG, "Sleep as Android is not installed: no follow-up sync request")
+                // Not due yet: a work that REPLACE did not stop in time (the pending time is a newer write's), or the clock
+                // changed. Sending now would use up the newer follow-up within Sleep as Android's first sync.
+                now < pending -> {
+                    waitForFollowUp(pending, now, settings.schedule)
                     false
                 }
 
                 else -> {
-                    logger.i(TAG, "asked Sleep as Android to sync again: heart rate and SpO2 for the night it imported")
-                    true
+                    // At most one follow-up per request, even when the work runs again (a retry, process death).
+                    syncState.clearSleepAsAndroidFollowUp()
+                    sendDueFollowUp()
                 }
             }
         }
 
-        private suspend fun enabled(): Boolean {
-            val settings = settingsRepository.settings.first()
-            return settings.write.requestSleepAsAndroidSync
+        /**
+         * Schedules the follow-up again for the rest of the wait until [pending]. A pending time more than
+         * [FOLLOW_UP_DELAY_MS] ahead of [now] can only come from a clock that was set back: it is moved to
+         * [FOLLOW_UP_DELAY_MS] from now, so the follow-up is not held back by the size of the clock change.
+         */
+        private suspend fun waitForFollowUp(
+            pending: Long,
+            now: Long,
+            schedule: ScheduleSettings,
+        ) {
+            val dueAt = minOf(pending, now + FOLLOW_UP_DELAY_MS)
+            if (dueAt != pending) syncState.setSleepAsAndroidFollowUpDue(dueAt)
+            val waitMs = dueAt - now
+            followUps.schedule(waitMs, schedule)
+            logger.d(TAG, "follow-up sync request not due yet: scheduled again in ${TimeUnit.MILLISECONDS.toSeconds(waitMs)} s")
         }
+
+        private fun sendDueFollowUp(): Boolean =
+            if (sender.send()) {
+                logger.i(TAG, "asked Sleep as Android to sync again: heart rate and SpO2 for the night it imported")
+                true
+            } else {
+                logger.d(TAG, "Sleep as Android is not installed: no follow-up sync request")
+                false
+            }
 
         /** Forgets the pending follow-up and cancels its work. */
         private suspend fun dropFollowUp() {
@@ -178,9 +214,9 @@ class SleepAsAndroidSyncRequests
         /** Timing. */
         companion object {
             /**
-             * Delay of the follow-up request after a run that wrote a new night. Sleep as Android starts its Health
-             * Connect sync about 10 s after a request and imports the night in it; heart rate and SpO2 attach only on
-             * the next sync, so the follow-up waits well past the first one (which reads 30 days of heart rate).
+             * Delay of the follow-up request after a run that wrote a new or recomputed night. Sleep as Android starts its
+             * Health Connect sync about 10 s after a request and imports the night in it; heart rate and SpO2 attach only
+             * on the next sync, so the follow-up waits well past the first one (which reads 30 days of heart rate).
              */
             const val FOLLOW_UP_DELAY_MS: Long = 10L * 60 * 1000
 

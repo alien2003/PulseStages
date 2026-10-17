@@ -110,8 +110,8 @@ data class WriteSettings(
     val startBeforeSource: Boolean = false,
     /**
      * After a run that wrote or rewrote a session, ask Sleep as Android (its REQUEST_SYNC broadcast) to sync with Health
-     * Connect, and once more about 10 minutes after a new write, so that it attaches heart rate and SpO2 to the night it
-     * imported. Not part of the params hash.
+     * Connect, and once more about 10 minutes after a new or recomputed session, so that it attaches heart rate and SpO2
+     * to the night it imported. Not part of the params hash.
      */
     val requestSleepAsAndroidSync: Boolean = false,
 )

@@ -55,15 +55,12 @@ enum class BackfillOutcome {
  *   yet, or when the state could not be stored).
  * @property blockedReason why the run was blocked, for [BackfillOutcome.BLOCKED].
  * @property error English detail of the error, if any.
- * @property written nights written or rewritten in Health Connect by this run (resumed windows and a window the run
- *   stopped in included; unlike the counters of [state], which say how many nights have an up-to-date estimate).
  */
 data class BackfillReport(
     val outcome: BackfillOutcome,
     val state: BackfillStateEntity?,
     val blockedReason: BlockedReason? = null,
     val error: String? = null,
-    val written: Int = 0,
 )
 
 /**
@@ -83,7 +80,7 @@ data class BackfillReport(
  *   is persisted then); only a backfill requested after the cancel starts over;
  * - progress is reported after every window through `onProgress`; `nightsEstimated` counts the nights that have an
  *   up-to-date estimate afterwards (written now or already current), so a resumed window is not under-counted; the
- *   report's `written` counts only what this run wrote;
+ *   `writes` of [run] count only the sessions this run wrote, also when it ends with an error or is cancelled;
  * - a backfill writes nights the user deleted earlier again, but not one deleted after the backfill was requested
  *   (`requestedAtMs`, or the start of the backfill when not given).
  */
@@ -111,11 +108,6 @@ class BackfillEngine
             val atMs: Long,
         )
 
-        /** Nights written or rewritten so far by the current run ([BackfillReport.written]). */
-        private class WriteCount {
-            var nights = 0
-        }
-
         /** Whether a cancel request applies to the current run; see [run]. */
         private class CancelScope(
             val requestedAtMs: Long?,
@@ -141,32 +133,31 @@ class BackfillEngine
          * the run began, and a CANCELLED state stored at or after it ends the run at once ([BackfillOutcome.CANCELLED],
          * nothing processed, the state left as it is). Without it the run counts as requested now: only cancels made
          * during the run apply and a CANCELLED state starts over. [onProgress] receives the state after it is persisted
-         * (start and every window). Never throws except for cancellation.
+         * (start and every window). Every session this run writes is counted in [writes] as it is written, resumed
+         * windows and a window the run stopped in included (unlike the counters of the state, which say how many nights
+         * have an up-to-date estimate). Never throws except for cancellation.
          */
         @Suppress("TooGenericExceptionCaught") // Every failure is persisted and reported, never thrown.
         suspend fun run(
             inBackground: Boolean,
             requestedAtMs: Long? = null,
+            writes: WriteCount = WriteCount(),
             onProgress: suspend (BackfillStateEntity) -> Unit = {},
         ): BackfillReport {
             if (!runLock.tryLock()) return BackfillReport(BackfillOutcome.ALREADY_RUNNING, null)
             try {
                 scope = CancelScope(requestedAtMs, cancels.get())
-                val written = WriteCount()
-                val report =
-                    try {
-                        cancelledBeforeStart(requestedAtMs) ?: execute(inBackground, written, onProgress)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: HealthDataException) {
-                        stopWith(e)
-                    } catch (e: Exception) {
-                        logger.e(TAG, "backfill failed unexpectedly", throwable = e)
-                        val message = "${e.javaClass.simpleName}: ${e.message}"
-                        BackfillReport(BackfillOutcome.FAILED, persist(BackfillStatus.FAILED, message), error = message)
-                    }
-                // Also after an error that ended the run: the nights of the windows before it were written.
-                return report.copy(written = written.nights)
+                return try {
+                    cancelledBeforeStart(requestedAtMs) ?: execute(inBackground, writes, onProgress)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: HealthDataException) {
+                    stopWith(e)
+                } catch (e: Exception) {
+                    logger.e(TAG, "backfill failed unexpectedly", throwable = e)
+                    val message = "${e.javaClass.simpleName}: ${e.message}"
+                    BackfillReport(BackfillOutcome.FAILED, persist(BackfillStatus.FAILED, message), error = message)
+                }
             } finally {
                 runLock.unlock()
             }
@@ -203,13 +194,13 @@ class BackfillEngine
 
         private suspend fun execute(
             inBackground: Boolean,
-            written: WriteCount,
+            writes: WriteCount,
             onProgress: suspend (BackfillStateEntity) -> Unit,
         ): BackfillReport {
             val settings = settingsRepository.settings.first()
             val access = guard.check(inBackground)
             val blocked = access.blockedReason
-            if (blocked == null) return processWindows(settings, access.granted, written, onProgress)
+            if (blocked == null) return processWindows(settings, access.granted, writes, onProgress)
             logger.w(TAG, "backfill blocked: $blocked (${access.detail})")
             return BackfillReport(BackfillOutcome.BLOCKED, backfillDao.get(), blockedReason = blocked)
         }
@@ -218,7 +209,7 @@ class BackfillEngine
         private suspend fun processWindows(
             settings: AppSettings,
             granted: Set<String>,
-            written: WriteCount,
+            writes: WriteCount,
             onProgress: suspend (BackfillStateEntity) -> Unit,
         ): BackfillReport {
             var state = startOrResume(settings, granted)
@@ -227,7 +218,7 @@ class BackfillEngine
             var stop: BackfillReport? = null
             while (stop == null && state.cursorMs < state.rangeEndMs) {
                 currentCoroutineContext().ensureActive()
-                val window = processWindow(state, settings, granted, written)
+                val window = processWindow(state, settings, granted, writes)
                 state = window.state
                 stop = window.stop
                 if (stop == null) {
@@ -244,12 +235,12 @@ class BackfillEngine
             val stop: BackfillReport?,
         )
 
-        /** Processes the window starting at the cursor of [state]; adds what it wrote to [written]. */
+        /** Processes the window starting at the cursor of [state]; what it writes is counted in [writes]. */
         private suspend fun processWindow(
             state: BackfillStateEntity,
             settings: AppSettings,
             granted: Set<String>,
-            written: WriteCount,
+            writes: WriteCount,
         ): WindowResult {
             if (isCancelled()) return WindowResult(state, cancelled(state))
             val windowEnd = minOf(state.cursorMs + state.windowDays * DAY_MS, state.rangeEndMs)
@@ -264,9 +255,9 @@ class BackfillEngine
                     granted,
                     shouldStop = ::cancelRequested,
                     requestedAtMs = requestedAt,
+                    // Counted for an interrupted window too: its nights were written although its counters are not advanced.
+                    writes = writes,
                 )
-            // Counted for an interrupted window too: its nights were written although its counters are not advanced.
-            written.nights += report.estimated + report.refreshed
             val interrupted = interruption(state, report)
             val after = if (interrupted == null) state.advancedBy(windowEnd, report, clock.millis()) else state
             val stop = interrupted ?: if (isCancelled()) cancelled(after) else null

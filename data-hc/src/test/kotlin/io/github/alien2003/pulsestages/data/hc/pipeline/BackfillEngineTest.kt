@@ -155,34 +155,38 @@ class BackfillEngineTest {
         }
 
     @Test
-    fun `the report counts the nights this run wrote, not the nights that were already up to date`() =
+    fun `the write count holds the nights this run wrote, not the nights that were already up to date`() =
         harnessTest(dir) { h ->
             (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
             h.repository.quotaAfter(70)
+            val first = WriteCount()
 
-            val first = h.backfill.run(inBackground = false)
+            val stopped = h.backfill.run(inBackground = false, writes = first)
 
-            assertEquals(BackfillOutcome.QUOTA_EXCEEDED, first.outcome)
+            assertEquals(BackfillOutcome.QUOTA_EXCEEDED, stopped.outcome)
             val writtenFirst = h.repository.ownSessions().size
             assertEquals(writtenFirst, first.written)
+            assertEquals(0, first.rewritten, "a backfill rewrites nothing as a refresh")
             assertTrue(
-                first.written > checkNotNull(first.state).nightsEstimated,
-                "the nights of the window the quota stopped count too: ${first.written} > ${first.state?.nightsEstimated}",
+                first.written > checkNotNull(stopped.state).nightsEstimated,
+                "the nights of the window the quota stopped count too: ${first.written} > ${stopped.state?.nightsEstimated}",
             )
 
             h.repository.clearFailures()
-            val second = h.backfill.run(inBackground = false)
+            val second = WriteCount()
+            val resumed = h.backfill.run(inBackground = false, writes = second)
 
-            assertEquals(BackfillOutcome.DONE, second.outcome)
+            assertEquals(BackfillOutcome.DONE, resumed.outcome)
             assertEquals(20 - writtenFirst, second.written, "only the nights the resumed run wrote")
-            assertEquals(20, second.state?.nightsEstimated, "while the state counts every night with a current estimate")
+            assertEquals(20, resumed.state?.nightsEstimated, "while the state counts every night with a current estimate")
 
             h.clock.advanceBy(MINUTE_MS)
-            val third = h.backfill.run(inBackground = false)
+            val third = WriteCount()
+            val again = h.backfill.run(inBackground = false, writes = third)
 
-            assertEquals(BackfillOutcome.DONE, third.outcome)
+            assertEquals(BackfillOutcome.DONE, again.outcome)
             assertEquals(0, third.written, "a second backfill over up-to-date nights writes nothing")
-            assertEquals(20, third.state?.nightsEstimated)
+            assertEquals(20, again.state?.nightsEstimated)
             assertEquals(20, h.repository.ownSessions().size)
         }
 
@@ -191,12 +195,13 @@ class BackfillEngineTest {
         harnessTest(dir) { h ->
             (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
             h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.Transient("binder died"), afterCalls = 2)
+            val writes = WriteCount()
 
-            val report = h.backfill.run(inBackground = false)
+            val report = h.backfill.run(inBackground = false, writes = writes)
 
             assertEquals(BackfillOutcome.RETRY_LATER, report.outcome)
-            assertTrue(report.written > 0, "the first window was written")
-            assertEquals(h.repository.ownSessions().size, report.written)
+            assertTrue(writes.written > 0, "the first window was written")
+            assertEquals(h.repository.ownSessions().size, writes.written)
         }
 
     @Test
@@ -342,9 +347,10 @@ class BackfillEngineTest {
             val running = launch { h.backfill.run(inBackground = false) }
             delay(1_000)
 
-            val refused = h.backfill.run(inBackground = false)
+            val writes = WriteCount()
+            val refused = h.backfill.run(inBackground = false, writes = writes)
             assertEquals(BackfillOutcome.ALREADY_RUNNING, refused.outcome)
-            assertEquals(0, refused.written)
+            assertEquals(0, writes.written)
 
             running.join()
             assertEquals(
