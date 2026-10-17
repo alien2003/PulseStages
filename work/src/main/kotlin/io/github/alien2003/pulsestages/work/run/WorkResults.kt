@@ -101,6 +101,9 @@ object WorkResults {
     /** Output key: a new personal model was stored. */
     const val KEY_MODEL_UPDATED: String = "personalModelUpdated"
 
+    /** Output key: Sleep as Android was asked to sync. */
+    const val KEY_SLEEP_AS_ANDROID_SYNC: String = "sleepAsAndroidSyncRequested"
+
     /** Longest stored detail (WorkManager limits a Data object to 10 KB). */
     private const val MAX_DETAIL_LENGTH = 1_000
 
@@ -186,6 +189,7 @@ object WorkResults {
             .putBoolean(KEY_CANCELLED, summary.cancelled)
             .putBoolean(KEY_ALREADY_RUNNING, summary.alreadyRunning)
             .putBoolean(KEY_MODEL_UPDATED, summary.personalModelUpdated)
+            .putBoolean(KEY_SLEEP_AS_ANDROID_SYNC, summary.sleepAsAndroidSyncRequested)
     }
 
     private fun summaryOf(data: Data): RunSummary =
@@ -200,6 +204,7 @@ object WorkResults {
             cancelled = data.getBoolean(KEY_CANCELLED, false),
             alreadyRunning = data.getBoolean(KEY_ALREADY_RUNNING, false),
             personalModelUpdated = data.getBoolean(KEY_MODEL_UPDATED, false),
+            sleepAsAndroidSyncRequested = data.getBoolean(KEY_SLEEP_AS_ANDROID_SYNC, false),
         )
 
     private inline fun <reified E : Enum<E>> enumOrNull(name: String?): E? = enumValues<E>().firstOrNull { it.name == name }

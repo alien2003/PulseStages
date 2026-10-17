@@ -72,8 +72,14 @@ class SettingsReferenceTest {
         assertEquals(true, reference.inParamsHash("write.awakeAsLight"))
         assertEquals(true, reference.inParamsHash("write.startBeforeSource"))
         assertEquals(true, reference.inParamsHash("sources.hrSources"))
-        listOf("write.titleTemplate", "write.overwritePolicy", "sources.minSessionMin", "schedule.periodicMinutes", "debug.logLevel")
-            .forEach { assertEquals(it, false, reference.inParamsHash(it)) }
+        listOf(
+            "write.titleTemplate",
+            "write.overwritePolicy",
+            "write.requestSleepAsAndroidSync",
+            "sources.minSessionMin",
+            "schedule.periodicMinutes",
+            "debug.logLevel",
+        ).forEach { assertEquals(it, false, reference.inParamsHash(it)) }
     }
 
     @Test

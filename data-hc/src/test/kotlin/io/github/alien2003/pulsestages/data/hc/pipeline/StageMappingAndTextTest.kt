@@ -216,6 +216,14 @@ class SessionTextTest {
     }
 
     @Test
+    fun `asking Sleep as Android to sync changes nothing that is written, so it is not part of the params hash`() {
+        val base = WriteSettings()
+        assertEquals(OutputOptions.hashExtra(base), OutputOptions.hashExtra(base.copy(requestSleepAsAndroidSync = true)))
+        val compatible = base.copy(startBeforeSource = true)
+        assertEquals(OutputOptions.hashExtra(compatible), OutputOptions.hashExtra(compatible.copy(requestSleepAsAndroidSync = true)))
+    }
+
+    @Test
     fun `startBeforeSource is part of the params hash extra only when on, so earlier hashes stay valid`() {
         val base = WriteSettings()
         assertEquals("awakeAsLight=false", OutputOptions.hashExtra(base), "the extra of the releases before the option")

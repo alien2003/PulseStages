@@ -139,7 +139,8 @@ private val READ_ITEMS =
 
 private val WRITE_ITEMS = listOf(R.string.rationale_write_sessions, R.string.rationale_write_never_others)
 
-private val DEVICE_ITEMS = listOf(R.string.rationale_device_no_internet, R.string.rationale_device_local)
+private val DEVICE_ITEMS =
+    listOf(R.string.rationale_device_no_internet, R.string.rationale_device_local, R.string.rationale_device_saa_request)
 
 private val DELETE_ITEMS =
     listOf(R.string.rationale_delete_in_app, R.string.rationale_delete_health_connect, R.string.rationale_delete_uninstall)

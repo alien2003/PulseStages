@@ -107,6 +107,17 @@ class SettingsViewModelTest {
                 vm.onEdit(SettingsEdit.Switch("write.startBeforeSource", false))
                 assertTrue(vm.prompts().isEmpty(), "off again: the nights are up to date")
             }
+
+        @Test
+        fun `asking Sleep as Android to sync is stored and leaves the nights up to date`() =
+            runTest(main.dispatcher) {
+                val vm = viewModel()
+
+                vm.onEdit(SettingsEdit.Switch("write.requestSleepAsAndroidSync", true))
+
+                assertTrue(repository.current.write.requestSleepAsAndroidSync)
+                assertTrue(vm.prompts().isEmpty(), "nothing written changes: no recompute is offered")
+            }
     }
 
     @Nested

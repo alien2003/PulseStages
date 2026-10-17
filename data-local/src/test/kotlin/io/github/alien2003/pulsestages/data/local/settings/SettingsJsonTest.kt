@@ -43,6 +43,7 @@ class SettingsJsonTest {
                     overwritePolicy = OverwritePolicy.NEVER,
                     awakeAsLight = true,
                     startBeforeSource = true,
+                    requestSleepAsAndroidSync = true,
                 ),
             algo =
                 AlgoParams(

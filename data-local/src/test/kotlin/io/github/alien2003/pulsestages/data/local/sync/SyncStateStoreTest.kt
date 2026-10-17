@@ -154,6 +154,28 @@ class SyncStateStoreTest {
         }
 
     @Test
+    fun `a pending follow-up to Sleep as Android persists across instances until it is cleared`() =
+        runTest {
+            withStore { store ->
+                assertNull(store.state.first().sleepAsAndroidFollowUpDueAtMs, "none pending initially")
+                store.setSleepAsAndroidFollowUpDue(601_000L)
+                store.setSleepAsAndroidFollowUpDue(605_000L)
+                store.saveNewToken(listOf("com.example.a"), "t1")
+            }
+            withStore { store ->
+                assertEquals(605_000L, store.state.first().sleepAsAndroidFollowUpDueAtMs, "the later request replaced the first")
+
+                store.clearSleepAsAndroidFollowUp()
+
+                val state = store.state.first()
+                assertNull(state.sleepAsAndroidFollowUpDueAtMs)
+                assertEquals("t1", state.changesToken?.token, "nothing else is touched")
+                store.clearSleepAsAndroidFollowUp()
+                assertNull(store.state.first().sleepAsAndroidFollowUpDueAtMs, "clearing nothing is harmless")
+            }
+        }
+
+    @Test
     fun `corrupted file starts from an empty state`() =
         runTest {
             file.writeBytes(byteArrayOf(0x7f, 0x01, 0x02, 0x03, 0x04))

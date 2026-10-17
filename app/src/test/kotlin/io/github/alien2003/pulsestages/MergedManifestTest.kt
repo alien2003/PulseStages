@@ -82,6 +82,10 @@ class MergedManifestTest {
             val queries = manifest.elements("queries")
             val packages = queries.flatMap { it.children("package") }.map { it.androidAttr("name") }
             assertTrue(OHEALTH_PACKAGE in packages, "$variant: <queries> lacks the default source $OHEALTH_PACKAGE: $packages")
+            assertTrue(
+                SLEEP_AS_ANDROID_PACKAGE in packages,
+                "$variant: <queries> lacks $SLEEP_AS_ANDROID_PACKAGE (sync request): $packages",
+            )
             val intents =
                 queries.flatMap { it.children("intent") }.map { intent ->
                     intent.children("action").map { it.androidAttr("name") }.toSet() to
@@ -236,6 +240,7 @@ class MergedManifestTest {
         const val WORK_MANAGER_INITIALIZER = "androidx.work.WorkManagerInitializer"
         const val HEALTH_CONNECT_PACKAGE = "com.google.android.apps.healthdata"
         const val OHEALTH_PACKAGE = "com.heytap.health.international"
+        const val SLEEP_AS_ANDROID_PACKAGE = "com.urbandroid.sleep"
         const val QUERY_ALL_PACKAGES = "android.permission.QUERY_ALL_PACKAGES"
         const val MAIN_ACTIVITY = "$APPLICATION_ID.MainActivity"
         const val RATIONALE_ACTIVITY = "$APPLICATION_ID.PermissionsRationaleActivity"

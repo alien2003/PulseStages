@@ -16,10 +16,15 @@ import io.github.alien2003.pulsestages.data.hc.testutil.harnessTest
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateEntity
 import io.github.alien2003.pulsestages.data.local.db.BackfillStatus
+import io.github.alien2003.pulsestages.work.saa.RecordingSyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.requestSleepAsAndroidSync
+import io.github.alien2003.pulsestages.work.saa.sleepAsAndroidRequests
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -33,9 +38,11 @@ class BackfillAndRecomputeRunnerTest {
 
     private val limits = RetryLimits()
 
-    private fun PipelineHarness.backfillRunner(): BackfillRunner = BackfillRunner(backfill, logger)
+    private fun PipelineHarness.backfillRunner(sender: SyncRequestSender = RecordingSyncRequestSender()): BackfillRunner =
+        BackfillRunner(backfill, sleepAsAndroidRequests(sender), logger)
 
-    private fun PipelineHarness.recomputeRunner(): RecomputeRunner = RecomputeRunner(recomputer, health, logger)
+    private fun PipelineHarness.recomputeRunner(sender: SyncRequestSender = RecordingSyncRequestSender()): RecomputeRunner =
+        RecomputeRunner(recomputer, health, sleepAsAndroidRequests(sender), logger)
 
     private fun PipelineHarness.addNights(daysAgo: Iterable<Int>) = daysAgo.forEach { repository.addNight(OHEALTH, nightStart(it)) }
 
@@ -51,6 +58,41 @@ class BackfillAndRecomputeRunnerTest {
             assertEquals(20, outcome.summary.estimated)
             assertEquals(listOf(0, 1, 2, 3, 4, 4), progress.map { it.windowsDone })
             assertEquals(ResultKind.SUCCESS, WorkResults.kindOf(outcome, 0, limits))
+            assertFalse(outcome.summary.sleepAsAndroidSyncRequested, "off by default")
+        }
+
+    @Test
+    fun `with the option on, a backfill that wrote nights asks Sleep as Android once, one over current nights does not`() =
+        harnessTest(dir) { h ->
+            h.requestSleepAsAndroidSync()
+            h.addNights(20 downTo 1)
+            val sender = RecordingSyncRequestSender()
+
+            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(sender).run(inBackground = false))
+
+            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertEquals(1, sender.sent, "one request for the whole backfill, not one per window")
+
+            h.clock.advanceBy(MINUTE_MS)
+            val again = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(sender).run(inBackground = false))
+
+            assertEquals(20, again.summary.estimated, "every night is up to date")
+            assertFalse(again.summary.sleepAsAndroidSyncRequested)
+            assertEquals(1, sender.sent, "nothing was written")
+        }
+
+    @Test
+    fun `a backfill that wrote nights before a quota stop still asks Sleep as Android`() =
+        harnessTest(dir) { h ->
+            h.requestSleepAsAndroidSync()
+            h.addNights(20 downTo 1)
+            h.repository.failOn(Operation.READ_HEART_RATE, HealthDataException.QuotaExceeded("quota"), afterCalls = 10)
+            val sender = RecordingSyncRequestSender()
+
+            assertInstanceOf(WorkOutcome.Retry::class.java, h.backfillRunner(sender).run(inBackground = false))
+
+            assertTrue(h.repository.ownSessions().isNotEmpty())
+            assertEquals(1, sender.sent)
         }
 
     @Test
@@ -238,6 +280,7 @@ class BackfillAndRecomputeRunnerTest {
                 )
 
             assertEquals(3, outcome.summary.estimated)
+            assertFalse(outcome.summary.sleepAsAndroidSyncRequested, "off by default")
             assertEquals(3, progress.last().done)
             assertEquals(
                 listOf(1),
@@ -246,6 +289,26 @@ class BackfillAndRecomputeRunnerTest {
                     .map { it.recomputeCount }
                     .distinct(),
             )
+        }
+
+    @Test
+    fun `with the option on, a recompute that rewrote nights asks Sleep as Android once`() =
+        harnessTest(dir) { h ->
+            h.addNights(listOf(20, 10, 1))
+            h.backfill.run(inBackground = false)
+            h.clock.advanceBy(MINUTE_MS)
+            h.requestSleepAsAndroidSync()
+            val sender = RecordingSyncRequestSender()
+
+            val outcome =
+                assertInstanceOf(
+                    WorkOutcome.Completed::class.java,
+                    h.recomputeRunner(sender).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false),
+                )
+
+            assertEquals(3, outcome.summary.estimated)
+            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertEquals(1, sender.sent)
         }
 
     @Test

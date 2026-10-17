@@ -23,6 +23,8 @@
     <string name="set_wr_awake_as_light_hint">For apps that show awakenings poorly. Changes the written data.</string>
     <string name="set_wr_start_before_source_title">Sleep as Android compatibility</string>
     <string name="set_wr_start_before_source_hint">Starts each written session 1 second before the source session, so that Sleep as Android imports it instead of the source\'s session without stages. Nights Sleep as Android has already imported must be deleted there and synced again. Changes the written data.</string>
+    <string name="set_wr_request_saa_sync_title">Ask Sleep as Android to sync</string>
+    <string name="set_wr_request_saa_sync_hint">After a night or nap is written or updated, asks Sleep as Android to sync with Health Connect, and once more about 10 minutes after a new one, so that it adds heart rate and SpO2. Works with “Sleep as Android compatibility”. Each request also runs Sleep as Android\'s backup and its other syncs.</string>
     <string name="set_alg_estimator_title">Estimator</string>
     <string name="set_alg_estimator_hint">Hybrid (trained classifier + duration model) is the default; HMM and Rules are simpler alternatives.</string>
     <string name="set_pre_min_bpm_title">Lowest valid heart rate</string>

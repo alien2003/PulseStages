@@ -29,6 +29,7 @@ enum class RetryCause {
  * @property cancelled the run was cancelled by the user (backfill).
  * @property alreadyRunning another run of the same job was in progress; nothing was done.
  * @property personalModelUpdated population EM stored a new personal model after the run.
+ * @property sleepAsAndroidSyncRequested Sleep as Android was asked to sync after the run (`write.requestSleepAsAndroidSync`).
  */
 data class RunSummary(
     val found: Int = 0,
@@ -41,6 +42,7 @@ data class RunSummary(
     val cancelled: Boolean = false,
     val alreadyRunning: Boolean = false,
     val personalModelUpdated: Boolean = false,
+    val sleepAsAndroidSyncRequested: Boolean = false,
 ) {
     /** Constructors. */
     companion object {

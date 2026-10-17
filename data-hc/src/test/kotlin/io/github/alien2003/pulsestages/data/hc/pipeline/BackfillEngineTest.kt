@@ -155,6 +155,51 @@ class BackfillEngineTest {
         }
 
     @Test
+    fun `the report counts the nights this run wrote, not the nights that were already up to date`() =
+        harnessTest(dir) { h ->
+            (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            h.repository.quotaAfter(70)
+
+            val first = h.backfill.run(inBackground = false)
+
+            assertEquals(BackfillOutcome.QUOTA_EXCEEDED, first.outcome)
+            val writtenFirst = h.repository.ownSessions().size
+            assertEquals(writtenFirst, first.written)
+            assertTrue(
+                first.written > checkNotNull(first.state).nightsEstimated,
+                "the nights of the window the quota stopped count too: ${first.written} > ${first.state?.nightsEstimated}",
+            )
+
+            h.repository.clearFailures()
+            val second = h.backfill.run(inBackground = false)
+
+            assertEquals(BackfillOutcome.DONE, second.outcome)
+            assertEquals(20 - writtenFirst, second.written, "only the nights the resumed run wrote")
+            assertEquals(20, second.state?.nightsEstimated, "while the state counts every night with a current estimate")
+
+            h.clock.advanceBy(MINUTE_MS)
+            val third = h.backfill.run(inBackground = false)
+
+            assertEquals(BackfillOutcome.DONE, third.outcome)
+            assertEquals(0, third.written, "a second backfill over up-to-date nights writes nothing")
+            assertEquals(20, third.state?.nightsEstimated)
+            assertEquals(20, h.repository.ownSessions().size)
+        }
+
+    @Test
+    fun `an error that ends the backfill keeps the count of the nights written before it`() =
+        harnessTest(dir) { h ->
+            (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
+            h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.Transient("binder died"), afterCalls = 2)
+
+            val report = h.backfill.run(inBackground = false)
+
+            assertEquals(BackfillOutcome.RETRY_LATER, report.outcome)
+            assertTrue(report.written > 0, "the first window was written")
+            assertEquals(h.repository.ownSessions().size, report.written)
+        }
+
+    @Test
     fun `after process death a new engine resumes the RUNNING state`() =
         harnessTest(dir) { h ->
             (20 downTo 1).forEach { h.repository.addNight(OHEALTH, nightStart(it)) }
@@ -297,7 +342,9 @@ class BackfillEngineTest {
             val running = launch { h.backfill.run(inBackground = false) }
             delay(1_000)
 
-            assertEquals(BackfillOutcome.ALREADY_RUNNING, h.backfill.run(inBackground = false).outcome)
+            val refused = h.backfill.run(inBackground = false)
+            assertEquals(BackfillOutcome.ALREADY_RUNNING, refused.outcome)
+            assertEquals(0, refused.written)
 
             running.join()
             assertEquals(

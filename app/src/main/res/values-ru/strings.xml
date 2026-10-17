@@ -204,6 +204,7 @@
     <string name="rationale_device_title">Ничего не покидает устройство</string>
     <string name="rationale_device_no_internet">У PulseStages нет разрешения на доступ в интернет — оно не может никуда отправить ваши данные.</string>
     <string name="rationale_device_local">Вся обработка происходит на телефоне. Собственные записи (настройки, лог, какие ночи оценены) хранятся в закрытом хранилище приложения.</string>
+    <string name="rationale_device_saa_request">Только если включить «Просить Sleep as Android синхронизироваться»: после записи ночи PulseStages просит Sleep as Android синхронизироваться с Health Connect. Запрос не содержит данных.</string>
     <string name="rationale_delete_title">Как удалить данные приложения</string>
     <string name="rationale_delete_in_app">В приложении: «Главная» → «Удалить мои сессии из Health Connect» удаляет все сессии, записанные PulseStages.</string>
     <string name="rationale_delete_health_connect">В Health Connect: «Разрешения приложений» → PulseStages → «Удалить данные приложения»; там же можно отозвать все разрешения.</string>

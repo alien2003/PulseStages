@@ -14,6 +14,10 @@ import io.github.alien2003.pulsestages.work.estimate.BundledHybridModelProvider
 import io.github.alien2003.pulsestages.work.estimate.ModelAssetSource
 import io.github.alien2003.pulsestages.work.estimate.SleepStagerNightEstimator
 import io.github.alien2003.pulsestages.work.run.RetryLimits
+import io.github.alien2003.pulsestages.work.saa.BroadcastSyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidFollowUps
+import io.github.alien2003.pulsestages.work.saa.SyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.WorkManagerSleepAsAndroidFollowUps
 import io.github.alien2003.pulsestages.work.schedule.LocalZone
 import io.github.alien2003.pulsestages.work.schedule.SystemLocalZone
 import io.github.alien2003.pulsestages.work.schedule.WorkManagerWorkScheduler
@@ -29,7 +33,8 @@ annotation class WorkIoDispatcher
 
 /**
  * Interface bindings of the background-work layer: the production [NightEstimator] (core-algo's SleepStager with the
- * bundled hybrid model and the active personal model), the bundled-model provider and the WorkManager scheduler.
+ * bundled hybrid model and the active personal model), the bundled-model provider, the WorkManager scheduler and the
+ * sync requests to Sleep as Android (a broadcast, the follow-up as a work).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -45,6 +50,14 @@ abstract class WorkBindingsModule {
     /** WorkManager scheduling. */
     @Binds
     abstract fun bindWorkScheduler(implementation: WorkManagerWorkScheduler): WorkScheduler
+
+    /** Sleep as Android's sync request as a broadcast. */
+    @Binds
+    abstract fun bindSyncRequestSender(implementation: BroadcastSyncRequestSender): SyncRequestSender
+
+    /** The follow-up sync request to Sleep as Android as a WorkManager work. */
+    @Binds
+    abstract fun bindSleepAsAndroidFollowUps(implementation: WorkManagerSleepAsAndroidFollowUps): SleepAsAndroidFollowUps
 }
 
 /** Values of the background-work layer. */

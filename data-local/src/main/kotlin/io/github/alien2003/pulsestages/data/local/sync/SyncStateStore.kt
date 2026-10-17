@@ -78,6 +78,8 @@ enum class SyncOutcome {
  * @property lastRunOutcome outcome of the last finished run.
  * @property lastRunDetail English detail for the log / debug screen, or null.
  * @property lastEmAdaptationNightCount number of estimated nights at the last population-level EM adaptation.
+ * @property sleepAsAndroidFollowUpDueAtMs when the pending follow-up sync request to Sleep as Android is due, or null
+ *   when none is pending (`write.requestSleepAsAndroidSync`).
  */
 data class SyncState(
     val changesToken: ChangesTokenState? = null,
@@ -86,6 +88,7 @@ data class SyncState(
     val lastRunOutcome: SyncOutcome? = null,
     val lastRunDetail: String? = null,
     val lastEmAdaptationNightCount: Int = 0,
+    val sleepAsAndroidFollowUpDueAtMs: Long? = null,
 )
 
 /**
@@ -168,6 +171,16 @@ class SyncStateStore
             dataStore.edit { it[EM_NIGHT_COUNT] = count }
         }
 
+        /** Stores that a follow-up sync request to Sleep as Android is due at [atMs] (replacing a pending one). */
+        suspend fun setSleepAsAndroidFollowUpDue(atMs: Long) {
+            dataStore.edit { it[SAA_FOLLOW_UP_DUE_AT] = atMs }
+        }
+
+        /** Forgets the pending follow-up sync request to Sleep as Android (sent, replaced or no longer wanted). */
+        suspend fun clearSleepAsAndroidFollowUp() {
+            dataStore.edit { it.remove(SAA_FOLLOW_UP_DUE_AT) }
+        }
+
         /** Factory and keys. */
         companion object {
             /** File name passed to `preferencesDataStoreFile`. */
@@ -182,6 +195,7 @@ class SyncStateStore
             private val RUN_OUTCOME = stringPreferencesKey("last_run_outcome")
             private val RUN_DETAIL = stringPreferencesKey("last_run_detail")
             private val EM_NIGHT_COUNT = intPreferencesKey("last_em_adaptation_night_count")
+            private val SAA_FOLLOW_UP_DUE_AT = longPreferencesKey("sleep_as_android_follow_up_due_at")
 
             /**
              * Creates the Preferences DataStore over [produceFile] (the file name must end in `.preferences_pb`).
@@ -234,6 +248,7 @@ class SyncStateStore
                     lastRunOutcome = this[RUN_OUTCOME]?.let { name -> SyncOutcome.entries.firstOrNull { it.name == name } },
                     lastRunDetail = this[RUN_DETAIL],
                     lastEmAdaptationNightCount = this[EM_NIGHT_COUNT] ?: 0,
+                    sleepAsAndroidFollowUpDueAtMs = this[SAA_FOLLOW_UP_DUE_AT],
                 )
         }
     }

@@ -124,6 +124,43 @@ class WorkResultsTest {
     }
 
     @Test
+    fun `a sync request to Sleep as Android follows the refreshed nights and precedes the failures`() {
+        val main = UiText.of(R.string.result_summary_estimate, UiText.plural(R.plurals.result_estimated, 1), 4, 2)
+        val summary = RunSummary(found = 4, estimated = 1, skipped = 2, sleepAsAndroidSyncRequested = true)
+        val saa = UiText.of(R.string.result_saa_sync_requested)
+        assertEquals(
+            UiText.of(R.string.result_with_saa_sync, main, saa),
+            WorkResultText.report(RunSubject.ESTIMATE, report(OutcomeKind.COMPLETED, summary)),
+        )
+        assertEquals(
+            UiText.of(
+                R.string.result_with_failures,
+                UiText.of(
+                    R.string.result_with_saa_sync,
+                    UiText.of(R.string.result_with_refreshed, main, UiText.plural(R.plurals.result_refreshed, 2)),
+                    saa,
+                ),
+                UiText.plural(R.plurals.result_failed_nights, 1),
+            ),
+            WorkResultText.report(RunSubject.ESTIMATE, report(OutcomeKind.COMPLETED, summary.copy(failed = 1, refreshed = 2))),
+            "failures stay the last sentence",
+        )
+        val backfill = RunSummary(found = 3, estimated = 3, sleepAsAndroidSyncRequested = true)
+        assertEquals(
+            UiText.of(
+                R.string.result_with_saa_sync,
+                UiText.of(R.string.result_summary_backfill, UiText.plural(R.plurals.result_estimated, 3), 3, 0),
+                saa,
+            ),
+            WorkResultText.report(RunSubject.BACKFILL, report(OutcomeKind.COMPLETED, backfill)),
+        )
+        assertEquals(
+            UiText.of(R.string.result_with_saa_sync, UiText.of(R.string.result_night_recomputed), saa),
+            WorkResultText.report(RunSubject.RECOMPUTE_NIGHT, report(OutcomeKind.COMPLETED, backfill.copy(found = 1, estimated = 1))),
+        )
+    }
+
+    @Test
     fun `finished statuses without output and cancellations have a text, active ones none`() {
         assertEquals(UiText.of(R.string.result_done), WorkResultText.of(RunSubject.ESTIMATE, WorkStatus(JobState.SUCCEEDED)))
         assertEquals(UiText.of(R.string.result_failed), WorkResultText.of(RunSubject.ESTIMATE, WorkStatus(JobState.FAILED)))

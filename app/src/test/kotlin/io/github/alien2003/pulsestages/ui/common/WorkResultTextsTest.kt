@@ -19,7 +19,8 @@ import java.util.Locale
 /**
  * Resolves the result of "Estimate new" with nights that the automatic refresh rewrote against the app's real
  * resources, in English and Russian: every plural form of the refreshed sentence formats, it follows the summary as a
- * second sentence (before the failed nights), and no format placeholder is left.
+ * second sentence (before the failed nights), the sync request to Sleep as Android comes after it, and no format
+ * placeholder is left.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -70,6 +71,27 @@ class WorkResultTextsTest(
         if (language == "en") {
             assertEquals(
                 "Estimate new: 1 night estimated (found 3, skipped 1). 2 nights updated with late data. 1 night failed, see the log.",
+                text,
+            )
+        }
+    }
+
+    @Test
+    fun `the sync request to Sleep as Android follows the refreshed nights, failed nights stay last`() {
+        val summary = summaryText(found = 3, skipped = 1)
+        val saa = resources.getString(R.string.result_saa_sync_requested)
+
+        assertEquals("$summary $saa", resolved(RunSummary(found = 3, estimated = 1, skipped = 1, sleepAsAndroidSyncRequested = true)))
+        val text =
+            resolved(RunSummary(found = 3, estimated = 1, skipped = 1, failed = 1, refreshed = 2, sleepAsAndroidSyncRequested = true))
+
+        val refreshed = resources.getQuantityString(R.plurals.result_refreshed, 2, 2)
+        assertEquals("$summary $refreshed $saa ${resources.getQuantityString(R.plurals.result_failed_nights, 1, 1)}", text)
+        assertFalse("[$language] unfilled placeholder in \"$text\"", PLACEHOLDER.containsMatchIn(text))
+        if (language == "en") {
+            assertEquals(
+                "Estimate new: 1 night estimated (found 3, skipped 1). 2 nights updated with late data. " +
+                    "Sleep as Android was asked to sync. 1 night failed, see the log.",
                 text,
             )
         }

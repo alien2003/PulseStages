@@ -8,10 +8,12 @@ import androidx.work.WorkRequest
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
 import io.github.alien2003.pulsestages.work.run.RecomputeRequest
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import io.github.alien2003.pulsestages.work.worker.BackfillWorker
 import io.github.alien2003.pulsestages.work.worker.EstimateNewNightsWorker
 import io.github.alien2003.pulsestages.work.worker.EstimateTrigger
 import io.github.alien2003.pulsestages.work.worker.RecomputeWorker
+import io.github.alien2003.pulsestages.work.worker.SleepAsAndroidSyncWorker
 import io.github.alien2003.pulsestages.work.worker.WorkerInputs
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -36,6 +38,7 @@ class WorkRequestsTest {
             WorkRequests.backfill(now),
             WorkRequests.recomputeAll(RecomputeScope.ALL, now),
             WorkRequests.recomputeNight("ps:abc", now),
+            WorkRequests.sleepAsAndroidFollowUp(schedule, SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS),
         )
 
     @Test
@@ -109,6 +112,29 @@ class WorkRequestsTest {
         assertEquals(EstimateTrigger.NOW, WorkerInputs.triggerOf(request.workSpec.input))
         assertTrue(EstimateTrigger.NOW.userInitiated)
         assertFalse(request.workSpec.constraints.requiresBatteryNotLow(), "expedited work supports no battery constraint")
+    }
+
+    @Test
+    fun `the follow-up to Sleep as Android is a delayed one-time work with the constraints of the scheduled works`() {
+        val request = WorkRequests.sleepAsAndroidFollowUp(schedule, SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS)
+
+        assertEquals(SleepAsAndroidSyncWorker::class.java.name, request.workSpec.workerClassName)
+        assertFalse(request.workSpec.isPeriodic)
+        assertFalse(request.workSpec.expedited)
+        assertEquals(600_000L, request.workSpec.initialDelay)
+        assertTrue(request.workSpec.constraints.requiresBatteryNotLow())
+        assertEquals(BackoffPolicy.EXPONENTIAL, request.workSpec.backoffPolicy)
+        assertEquals(30_000L, request.workSpec.backoffDelayDuration)
+        assertEquals(
+            setOf(SleepAsAndroidSyncWorker::class.java.name, WorkRequests.TAG_ALL, WorkRequests.Tags.SLEEP_AS_ANDROID),
+            request.tags,
+        )
+        assertEquals(Data.EMPTY, request.workSpec.input, "it carries nothing")
+        assertEquals("sleep-as-android-follow-up", WorkRequests.Names.SLEEP_AS_ANDROID_FOLLOW_UP)
+
+        val unconstrained = WorkRequests.sleepAsAndroidFollowUp(schedule.copy(runOnlyWhenNotLowBattery = false), 1_000L)
+        assertFalse(unconstrained.workSpec.constraints.requiresBatteryNotLow())
+        assertEquals(1_000L, unconstrained.workSpec.initialDelay)
     }
 
     @Test

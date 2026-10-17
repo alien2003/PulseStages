@@ -285,6 +285,15 @@ private val writeSection =
                         write = { s, v -> s.copy(write = s.write.copy(startBeforeSource = v)) },
                     ),
                 ),
+                SettingsItem.Field(
+                    SwitchSpec(
+                        path = "write.requestSleepAsAndroidSync",
+                        title = text(R.string.set_wr_request_saa_sync_title),
+                        hint = text(R.string.set_wr_request_saa_sync_hint),
+                        read = { it.write.requestSleepAsAndroidSync },
+                        write = { s, v -> s.copy(write = s.write.copy(requestSleepAsAndroidSync = v)) },
+                    ),
+                ),
             ),
     )
 

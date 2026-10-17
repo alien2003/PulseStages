@@ -34,6 +34,8 @@
         Package visibility (Android 11+):
         - the Health Connect APK, so that getSdkStatus can see it on Android 9–13;
         - OHealth, the default sleep source;
+        - Sleep as Android, only to check that it and its REQUEST_SYNC receiver are installed before the opt-in sync
+          request ("Ask Sleep as Android to sync"); sending the broadcast itself needs no visibility;
         - every Health Connect client: each one declares the permission-rationale activity (ACTION_SHOW_PERMISSIONS_RATIONALE
           up to Android 13, VIEW_PERMISSION_USAGE + HEALTH_PERMISSIONS on Android 14+), so the apps that wrote the data
           are visible and the Sources, Home and Compare screens can show their label and icon from PackageManager.
@@ -42,6 +44,7 @@
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
         <package android:name="com.heytap.health.international" />
+        <package android:name="com.urbandroid.sleep" />
 
         <intent>
             <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />

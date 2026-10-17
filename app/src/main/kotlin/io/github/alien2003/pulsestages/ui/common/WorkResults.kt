@@ -179,10 +179,17 @@ object WorkResultText {
             } else {
                 main
             }
+        // The opt-in sync request to Sleep as Android after a run that wrote (write.requestSleepAsAndroidSync).
+        val withSaaSync =
+            if (summary.sleepAsAndroidSyncRequested) {
+                UiText.of(R.string.result_with_saa_sync, withRefreshed, UiText.of(R.string.result_saa_sync_requested))
+            } else {
+                withRefreshed
+            }
         return if (summary.failed > 0) {
-            UiText.of(R.string.result_with_failures, withRefreshed, UiText.plural(R.plurals.result_failed_nights, summary.failed))
+            UiText.of(R.string.result_with_failures, withSaaSync, UiText.plural(R.plurals.result_failed_nights, summary.failed))
         } else {
-            withRefreshed
+            withSaaSync
         }
     }
 

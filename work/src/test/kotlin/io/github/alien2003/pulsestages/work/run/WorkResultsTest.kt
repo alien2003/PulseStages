@@ -90,6 +90,18 @@ class WorkResultsTest {
     }
 
     @Test
+    fun `whether Sleep as Android was asked to sync is kept in the output`() {
+        val summary = completed.summary.copy(sleepAsAndroidSyncRequested = true)
+
+        val output = WorkResults.output(WorkOutcome.Completed(summary))
+
+        assertEquals(true, output.getBoolean(WorkResults.KEY_SLEEP_AS_ANDROID_SYNC, false))
+        assertEquals("sleepAsAndroidSyncRequested", WorkResults.KEY_SLEEP_AS_ANDROID_SYNC)
+        assertEquals(summary, WorkResults.parse(output)?.summary)
+        assertEquals(completed.summary, WorkResults.parse(WorkResults.output(completed))?.summary, "false round-trips too")
+    }
+
+    @Test
     fun `the output of a run stored before the refresh counter existed reads as nothing refreshed`() {
         val older =
             Data
@@ -100,6 +112,7 @@ class WorkResultsTest {
                 .build()
 
         assertEquals(RunSummary(found = 2, estimated = 2), WorkResults.parse(older)?.summary)
+        assertEquals(false, WorkResults.parse(older)?.summary?.sleepAsAndroidSyncRequested, "nor a sync request to Sleep as Android")
     }
 
     @Test

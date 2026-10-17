@@ -16,6 +16,7 @@ import io.github.alien2003.pulsestages.data.hc.usecase.PersonalizationService
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateEntity
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.data.local.sync.SyncOutcome
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -25,8 +26,9 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * The work of EstimateNewNightsWorker, without WorkManager: Health Connect availability → permissions (the required
  * ones, plus READ_HEALTH_DATA_IN_BACKGROUND for a background run) → [NewNightsSync] (which performs both checks and
- * records the run in SyncStateStore) → [PersonalizationService.maybeRunPopulationEm] → outcome. Runs of the periodic,
- * daily and "estimate now" works are serialized. Never throws except for cancellation.
+ * records the run in SyncStateStore) → [SleepAsAndroidSyncRequests.afterRun] with the nights the sync wrote (also when
+ * it stopped early) → [PersonalizationService.maybeRunPopulationEm] → outcome. Runs of the periodic, daily and
+ * "estimate now" works are serialized. Never throws except for cancellation.
  */
 @Singleton
 class EstimateNewNightsRunner
@@ -34,6 +36,7 @@ class EstimateNewNightsRunner
     constructor(
         private val sync: NewNightsSync,
         private val personalization: PersonalizationService,
+        private val sleepAsAndroid: SleepAsAndroidSyncRequests,
         private val logger: AppLogger,
     ) {
         private val mutex = Mutex()
@@ -48,7 +51,10 @@ class EstimateNewNightsRunner
         ): WorkOutcome =
             mutex.withLock {
                 guardedRun(logger, TAG) {
-                    when (val outcome = outcomeOf(sync.run(inBackground, userRequested))) {
+                    val report = sync.run(inBackground, userRequested)
+                    // Before population EM, so that Sleep as Android starts at once; writes before a stop count too.
+                    val requested = sleepAsAndroid.afterRun(report.pipeline.estimated, report.pipeline.refreshed)
+                    when (val outcome = outcomeOf(report).withSleepAsAndroidSync(requested)) {
                         is WorkOutcome.Completed -> outcome.copy(summary = outcome.summary.copy(personalModelUpdated = adapt(inBackground)))
                         else -> outcome
                     }
@@ -122,12 +128,14 @@ class EstimateNewNightsRunner
 /**
  * The work of BackfillWorker, without WorkManager: [BackfillEngine.run] (resumes a RUNNING / WAITING_RETRY state from
  * its persisted cursor, stops between nights after [cancel], does not start when it was cancelled after it was
- * requested) → outcome. Never throws except for cancellation.
+ * requested) → [SleepAsAndroidSyncRequests.afterRun] with the nights this run wrote → outcome. Never throws except for
+ * cancellation.
  */
 class BackfillRunner
     @Inject
     constructor(
         private val engine: BackfillEngine,
+        private val sleepAsAndroid: SleepAsAndroidSyncRequests,
         private val logger: AppLogger,
     ) {
         /**
@@ -138,7 +146,11 @@ class BackfillRunner
             inBackground: Boolean,
             requestedAtMs: Long? = null,
             onProgress: suspend (BackfillStateEntity) -> Unit = {},
-        ): WorkOutcome = guardedRun(logger, TAG) { outcomeOf(engine.run(inBackground, requestedAtMs, onProgress)) }
+        ): WorkOutcome =
+            guardedRun(logger, TAG) {
+                val report = engine.run(inBackground, requestedAtMs, onProgress)
+                outcomeOf(report).withSleepAsAndroidSync(sleepAsAndroid.afterRun(written = report.written, rewritten = 0))
+            }
 
         /** Asks a running backfill to stop before its next night (one that has not begun does not start) and marks it CANCELLED. */
         suspend fun cancel() {
@@ -207,12 +219,16 @@ sealed interface RecomputeRequest {
     ) : RecomputeRequest
 }
 
-/** The work of RecomputeWorker, without WorkManager: [NightRecomputer] → outcome. Never throws except for cancellation. */
+/**
+ * The work of RecomputeWorker, without WorkManager: [NightRecomputer] → [SleepAsAndroidSyncRequests.afterRun] with the
+ * nights it rewrote → outcome. Never throws except for cancellation.
+ */
 class RecomputeRunner
     @Inject
     constructor(
         private val recomputer: NightRecomputer,
         repository: HealthRepository,
+        private val sleepAsAndroid: SleepAsAndroidSyncRequests,
         private val logger: AppLogger,
     ) {
         private val guard = HealthAccessGuard(repository)
@@ -234,10 +250,14 @@ class RecomputeRunner
                             recomputer.recomputeAll(request.scope, inBackground, request.requestedAtMs, onProgress)
                         }
                     }
-                outcomeOf(report)
+                outcomeOf(report).withSleepAsAndroidSync(sleepAsAndroid.afterRun(report.estimated, report.refreshed))
             }
 
         private companion object {
             const val TAG = "Recompute"
         }
     }
+
+/** This outcome with [requested] (whether Sleep as Android was asked to sync) in the summary of a completed run. */
+private fun WorkOutcome.withSleepAsAndroidSync(requested: Boolean): WorkOutcome =
+    if (this is WorkOutcome.Completed) copy(summary = summary.copy(sleepAsAndroidSyncRequested = requested)) else this

@@ -7,10 +7,12 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.work.run.BackfillRunner
 import io.github.alien2003.pulsestages.work.run.EstimateNewNightsRunner
 import io.github.alien2003.pulsestages.work.run.RecomputeRunner
 import io.github.alien2003.pulsestages.work.run.WorkOutcome
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import io.github.alien2003.pulsestages.work.schedule.WorkScheduler
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -130,5 +132,36 @@ class RecomputeWorker
 
         private companion object {
             const val TAG = "RecomputeWorker"
+        }
+    }
+
+/**
+ * Sends the follow-up sync request to Sleep as Android ([SleepAsAndroidSyncRequests.sendFollowUp]) that a run which
+ * wrote a new night scheduled about 10 minutes later. Reads nothing from Health Connect and always succeeds: a failed
+ * request is logged (a retry could only send it late). Never throws out of [doWork] except for cancellation.
+ */
+@HiltWorker
+class SleepAsAndroidSyncWorker
+    @AssistedInject
+    constructor(
+        @Assisted appContext: Context,
+        @Assisted params: WorkerParameters,
+        private val requests: SleepAsAndroidSyncRequests,
+        private val logger: AppLogger,
+    ) : CoroutineWorker(appContext, params) {
+        @Suppress("TooGenericExceptionCaught") // Workers must never throw: a failed request is logged, not retried.
+        override suspend fun doWork(): Result {
+            try {
+                requests.sendFollowUp()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                logger.e(TAG, "follow-up sync request failed unexpectedly", throwable = e)
+            }
+            return Result.success()
+        }
+
+        private companion object {
+            const val TAG = "SleepAsAndroidSyncWorker"
         }
     }

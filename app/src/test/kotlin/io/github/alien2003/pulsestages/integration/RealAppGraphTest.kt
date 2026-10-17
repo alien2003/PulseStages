@@ -24,11 +24,15 @@ import io.github.alien2003.pulsestages.work.estimate.BundledHybridModelProvider
 import io.github.alien2003.pulsestages.work.estimate.SleepStagerNightEstimator
 import io.github.alien2003.pulsestages.work.run.EstimateNewNightsRunner
 import io.github.alien2003.pulsestages.work.run.RecomputeRequest
+import io.github.alien2003.pulsestages.work.saa.BroadcastSyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
+import io.github.alien2003.pulsestages.work.saa.WorkManagerSleepAsAndroidFollowUps
 import io.github.alien2003.pulsestages.work.schedule.WorkManagerWorkScheduler
 import io.github.alien2003.pulsestages.work.schedule.WorkRequests
 import io.github.alien2003.pulsestages.work.worker.BackfillWorker
 import io.github.alien2003.pulsestages.work.worker.EstimateNewNightsWorker
 import io.github.alien2003.pulsestages.work.worker.RecomputeWorker
+import io.github.alien2003.pulsestages.work.worker.SleepAsAndroidSyncWorker
 import io.github.alien2003.pulsestages.work.worker.WorkerInputs
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -48,7 +52,8 @@ import java.io.File
  * starts keepScheduled, which enqueues the periodic and the daily work; WorkManager is configured with the injected
  * HiltWorkerFactory and that factory itself (not WorkManager's reflective fallback, which cannot build these workers)
  * creates every worker; the worker chain reaches BackgroundRuleHealthRepository over the real HealthConnectRepository
- * and SleepStagerNightEstimator with the bundled model read through the app's AssetManager; the app logger mirrors to
+ * and SleepStagerNightEstimator with the bundled model read through the app's AssetManager; the sync requests to Sleep
+ * as Android are one singleton over the broadcast sender and the WorkManager follow-up; the app logger mirrors to
  * logcat with the tag "PulseStages".
  */
 @RunWith(RobolectricTestRunner::class)
@@ -115,10 +120,16 @@ class RealAppGraphTest {
             .setWorkerFactory(recording)
             .setInputData(WorkerInputs.recompute(RecomputeRequest.Nights(listOf("ps:x"))))
             .build()
-        assertEquals(3, created.size)
+        val followUp = TestListenableWorkerBuilder.from(context, SleepAsAndroidSyncWorker::class.java).setWorkerFactory(recording).build()
+        assertEquals(4, created.size)
         assertTrue("HiltWorkerFactory returned null for some worker: $created", created.all { it != null })
 
+        val requests = field<SleepAsAndroidSyncRequests>(followUp, "requests")
+        assertTrue(field<Any>(requests, "sender") is BroadcastSyncRequestSender)
+        assertTrue(field<Any>(requests, "followUps") is WorkManagerSleepAsAndroidFollowUps)
+
         val runner = field<EstimateNewNightsRunner>(estimate, "runner")
+        assertTrue("one shared instance (its lock and state)", field<Any>(runner, "sleepAsAndroid") === requests)
         val sync = field<NewNightsSync>(runner, "sync")
         val pipeline = field<NightPipeline>(sync, "pipeline")
         val repository = field<Any>(pipeline, "repository")

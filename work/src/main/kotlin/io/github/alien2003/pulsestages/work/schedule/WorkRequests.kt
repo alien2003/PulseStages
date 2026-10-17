@@ -15,6 +15,7 @@ import io.github.alien2003.pulsestages.work.worker.BackfillWorker
 import io.github.alien2003.pulsestages.work.worker.EstimateNewNightsWorker
 import io.github.alien2003.pulsestages.work.worker.EstimateTrigger
 import io.github.alien2003.pulsestages.work.worker.RecomputeWorker
+import io.github.alien2003.pulsestages.work.worker.SleepAsAndroidSyncWorker
 import io.github.alien2003.pulsestages.work.worker.WorkerInputs
 import java.time.Instant
 import java.time.LocalTime
@@ -58,7 +59,9 @@ object DailySchedule {
  * - "estimate now": one-time, expedited, run as normal work when the expedited quota is used up
  *   ([OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST]);
  * - backfill and "recompute all": one-time long-running works (they go foreground themselves);
- * - recompute of one night: one-time, expedited like "estimate now".
+ * - recompute of one night: one-time, expedited like "estimate now";
+ * - the follow-up sync request to Sleep as Android: one-time with an initial delay and the constraints of the
+ *   scheduled works (it reads nothing from Health Connect).
  */
 object WorkRequests {
     /** Initial backoff delay: 30 s (WorkRequest.MIN_BACKOFF_MILLIS is 10 s). */
@@ -87,6 +90,9 @@ object WorkRequests {
         /** "Recompute all" / "recompute stale". */
         const val RECOMPUTE_ALL: String = "recompute-all"
 
+        /** The follow-up sync request to Sleep as Android (at most one pending). */
+        const val SLEEP_AS_ANDROID_FOLLOW_UP: String = "sleep-as-android-follow-up"
+
         /** Recompute of one night. */
         fun recomputeNight(clientRecordId: String): String = "recompute-night:$clientRecordId"
     }
@@ -101,6 +107,9 @@ object WorkRequests {
 
         /** RecomputeWorker. */
         const val RECOMPUTE: String = "recompute"
+
+        /** SleepAsAndroidSyncWorker. */
+        const val SLEEP_AS_ANDROID: String = "sleep-as-android"
     }
 
     /** The schedule tag of the periodic work for [schedule]. */
@@ -180,6 +189,17 @@ object WorkRequests {
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setInputData(WorkerInputs.recompute(RecomputeRequest.Nights(listOf(clientRecordId), requestedAtMs)))
             .withDefaults(Tags.RECOMPUTE)
+            .build()
+
+    /** The follow-up sync request to Sleep as Android, [delayMs] from now, with the constraints of [schedule]. */
+    fun sleepAsAndroidFollowUp(
+        schedule: ScheduleSettings,
+        delayMs: Long,
+    ): OneTimeWorkRequest =
+        OneTimeWorkRequestBuilder<SleepAsAndroidSyncWorker>()
+            .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+            .setConstraints(constraints(schedule))
+            .withDefaults(Tags.SLEEP_AS_ANDROID)
             .build()
 
     private fun <B : WorkRequest.Builder<B, *>> B.withDefaults(jobTag: String): B =

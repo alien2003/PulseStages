@@ -26,6 +26,7 @@ import io.github.alien2003.pulsestages.work.run.RetryLimits
 import io.github.alien2003.pulsestages.work.run.RunSummary
 import io.github.alien2003.pulsestages.work.run.WorkOutcome
 import io.github.alien2003.pulsestages.work.run.WorkResults
+import io.github.alien2003.pulsestages.work.saa.sleepAsAndroidRequests
 import io.github.alien2003.pulsestages.work.worker.EstimateNewNightsWorker
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -141,9 +142,14 @@ class WorkManagerWorkSchedulerTest {
                 startMs = System.currentTimeMillis(),
             )
         val scheduler =
-            WorkManagerWorkScheduler(context, harness.settings, BackfillRunner(harness.backfill, harness.logger), harness.clock, {
-                zone
-            }, harness.logger)
+            WorkManagerWorkScheduler(
+                context,
+                harness.settings,
+                BackfillRunner(harness.backfill, harness.sleepAsAndroidRequests(), harness.logger),
+                harness.clock,
+                { zone },
+                harness.logger,
+            )
         return World(harness, scheduler)
     }
 

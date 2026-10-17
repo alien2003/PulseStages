@@ -40,16 +40,22 @@ import io.github.alien2003.pulsestages.work.run.RecomputeRunner
 import io.github.alien2003.pulsestages.work.run.RetryLimits
 import io.github.alien2003.pulsestages.work.run.RunReport
 import io.github.alien2003.pulsestages.work.run.WorkResults
+import io.github.alien2003.pulsestages.work.saa.RecordingFollowUps
+import io.github.alien2003.pulsestages.work.saa.RecordingSyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.requestSleepAsAndroidSync
+import io.github.alien2003.pulsestages.work.saa.sleepAsAndroidRequests
 import io.github.alien2003.pulsestages.work.schedule.WorkJob
 import io.github.alien2003.pulsestages.work.schedule.WorkScheduler
 import io.github.alien2003.pulsestages.work.schedule.WorkStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -114,6 +120,11 @@ class WorkerAdaptersTest {
         /** The app is in the foreground for Health Connect unless the fake says otherwise (as in the harness). */
         val support = WorkerSupport(harness.foregroundState, RetryLimits(), notifications, harness.logger)
 
+        /** What Sleep as Android is sent, through the requests every runner and the follow-up worker share. */
+        val sleepAsAndroid = RecordingSyncRequestSender()
+        val followUps = RecordingFollowUps()
+        val requests = harness.sleepAsAndroidRequests(sleepAsAndroid, followUps)
+
         private val factory =
             object : WorkerFactory() {
                 override fun createWorker(
@@ -127,18 +138,27 @@ class WorkerAdaptersTest {
                             EstimateNewNightsWorker(
                                 appContext,
                                 workerParameters,
-                                EstimateNewNightsRunner(h.sync, h.personalization, h.logger),
+                                EstimateNewNightsRunner(h.sync, h.personalization, requests, h.logger),
                                 support,
                                 scheduler,
                             )
                         }
 
                         BackfillWorker::class.java.name -> {
-                            BackfillWorker(appContext, workerParameters, BackfillRunner(h.backfill, h.logger), support)
+                            BackfillWorker(appContext, workerParameters, BackfillRunner(h.backfill, requests, h.logger), support)
                         }
 
                         RecomputeWorker::class.java.name -> {
-                            RecomputeWorker(appContext, workerParameters, RecomputeRunner(h.recomputer, h.health, h.logger), support)
+                            RecomputeWorker(
+                                appContext,
+                                workerParameters,
+                                RecomputeRunner(h.recomputer, h.health, requests, h.logger),
+                                support,
+                            )
+                        }
+
+                        SleepAsAndroidSyncWorker::class.java.name -> {
+                            SleepAsAndroidSyncWorker(appContext, workerParameters, requests, h.logger)
                         }
 
                         else -> {
@@ -449,6 +469,54 @@ class WorkerAdaptersTest {
 
             assertTrue(world.worker<RecomputeWorker>(Data.EMPTY, attempt = 0).doWork() is ListenableWorker.Result.Retry)
             assertTrue(world.worker<RecomputeWorker>(Data.EMPTY, attempt = 3).doWork() is ListenableWorker.Result.Failure)
+        }
+
+    @Test
+    fun theFollowUpWorkerSendsThePendingRequestOnceAndAlwaysSucceeds() =
+        runTest {
+            val world = World(this)
+            val h = world.harness
+            h.requestSleepAsAndroidSync()
+            h.repository.addNight(OHEALTH, nightStart(1))
+            val run = world.worker<EstimateNewNightsWorker>(now()).doWork()
+            assertEquals(true, report(run).summary?.sleepAsAndroidSyncRequested)
+            assertEquals(1, world.sleepAsAndroid.sent)
+            assertEquals(1, world.followUps.scheduled.size)
+            h.clock.advanceBy(10 * MINUTE_MS)
+            h.repository.clearCalls()
+
+            val followUp = world.worker<SleepAsAndroidSyncWorker>().doWork()
+
+            assertTrue(followUp is ListenableWorker.Result.Success)
+            assertEquals(2, world.sleepAsAndroid.sent)
+            assertNull(
+                h.syncState.state
+                    .first()
+                    .sleepAsAndroidFollowUpDueAtMs,
+            )
+            assertTrue(
+                "a re-run sends nothing",
+                world.worker<SleepAsAndroidSyncWorker>(attempt = 1).doWork() is ListenableWorker.Result.Success,
+            )
+            assertEquals(2, world.sleepAsAndroid.sent)
+            assertTrue("it reads nothing from Health Connect: ${h.repository.calls}", h.repository.calls.isEmpty())
+        }
+
+    @Test
+    fun theFollowUpWorkerSucceedsWhenTheRequestFails() =
+        runTest {
+            val world = World(this)
+            val h = world.harness
+            h.requestSleepAsAndroidSync()
+            world.requests.afterRun(written = 1, rewritten = 0)
+            world.sleepAsAndroid.failure = SecurityException("not allowed")
+            h.repository.clearCalls()
+
+            val result = world.worker<SleepAsAndroidSyncWorker>().doWork()
+
+            assertTrue(result is ListenableWorker.Result.Success)
+            assertEquals("only the first request", 1, world.sleepAsAndroid.sent)
+            assertTrue("it reads nothing from Health Connect: ${h.repository.calls}", h.repository.calls.isEmpty())
         }
 
     @Test
