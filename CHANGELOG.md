@@ -10,6 +10,15 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
+PulseStages can now ask Sleep as Android to import a night it wrote and, 10 minutes later, to add the night's heart
+rate, without tapping "Sync now" ("Ask Sleep as Android to sync", on by default; without Sleep as Android nothing
+happens, and the request carries no data). New nights can be looked for every 15 or 30 minutes, while the look for
+late heart rate stays at most about hourly. Install it over 0.3.0 like any update (same signing key): the app keeps its
+data and the check interval you chose, and no night becomes stale
+([user guide](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/user-guide.md#ask-sleep-as-android-to-sync)).
+
 ### Added
 
 - **Ask Sleep as Android to sync** (Settings → "Written sessions" → "Ask Sleep as Android to sync",
@@ -34,22 +43,22 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   the setting off if you do not want them. Not part of the params hash. The manifest now queries `com.urbandroid.sleep`,
   only to check that it is installed; the message of a run you started adds "Sleep as Android was asked to sync.", and
   the privacy screen has a point about the request. English and Russian texts
-  ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync),
-  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android),
-  [privacy.md §2](docs/privacy.md#2-everything-stays-on-the-device), [PLAN.md §2](PLAN.md#2-decisions)).
+  ([user guide](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/user-guide.md#ask-sleep-as-android-to-sync),
+  [health-connect.md §8.3](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/health-connect.md#83-sleep-as-android),
+  [privacy.md §2](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/privacy.md#2-everything-stays-on-the-device), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.4.0/PLAN.md#2-decisions)).
 
 ### Changed
 
 - **Checks every 15 or 30 minutes.** Settings → "Schedule" → "Check for new nights every" is now a list: "15 min",
   "30 min" or 1 to 24 hours (1 h by default); 15 minutes is WorkManager's minimum period. Health Connect cannot notify
   an app of new data, so a shorter interval brings new nights sooner, and a check that finds nothing costs one
-  change-log read ([health-connect.md §7.2](docs/health-connect.md#72-quotas)). The setting's key is now
+  change-log read ([health-connect.md §7.2](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/health-connect.md#72-quotas)). The setting's key is now
   `schedule.periodicMinutes` instead of `schedule.periodicHours`: stored settings and exports of 0.3.0 and older keep
   loading, their hours converted to minutes (also a quoted number; `schedule.periodicMinutes` wins when a file has
   both), and exports contain only `schedule.periodicMinutes`, so 0.3.0 reads the interval of an export of this version
   as 1 h. The periodic work is enqueued again once after the update (its schedule tag is now
   `schedule:periodic:<minutes>min:…`), and its log line says "periodic check every … min". Home's "New nights" no
-  longer says "every hour" ([settings reference](docs/settings-reference.md#schedule)).
+  longer says "every hour" ([settings reference](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/settings-reference.md#schedule)).
 - **Recent nights are re-checked at most about once an hour.** The retry of recent nights without an estimate and the
   refresh of written nights after late heart rate form one late-data pass, which runs at most every 55 minutes
   (`NewNightsSync.MIN_RECHECK_GAP_MS`), measured from the start of the run whose pass last completed (kept in the sync
@@ -58,19 +67,19 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   schedule of about 1, 2, 4, 8, 16 and 32 hours. A pass cut short by a quota error or a refused access is repeated by
   the next run. "Estimate new" runs the pass at once, and the next automatic pass waits 55 minutes from it. With the
   default of 1 h little changes: only a run less than 55 minutes after the last pass, such as the daily run shortly
-  after a periodic one, now skips it ([user guide](docs/user-guide.md#automatic-runs),
-  [health-connect.md §5](docs/health-connect.md#5-changes-api)).
+  after a periodic one, now skips it ([user guide](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/user-guide.md#automatic-runs),
+  [health-connect.md §5](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/health-connect.md#5-changes-api)).
 - **The retry skips nights of disabled sources.** A night without an estimate whose app was disabled on the Sources
   screen is never found by the read of its time window, so it was retried, and cost a sleep-session read, on every
-  run; it is no longer retried ([architecture.md §6.7](docs/architecture.md#67-what-a-sync-does)).
+  run; it is no longer retried ([architecture.md §6.7](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/architecture.md#67-what-a-sync-does)).
 
 ### Fixed
 
 - **Sleep as Android's read window in the documentation.** The syncs it starts itself, after saving a record and when
   its tracking ends, read Health Connect for the last 30 days like "Sync now", not 14 days as the 0.3.0 notes said
   (observed with Sleep as Android 20261006, not yet confirmed on the development phone): they send the same sync request that "Ask Sleep as
-  Android to sync" sends ([health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android),
-  [user guide](docs/user-guide.md#how-sleep-as-android-imports)).
+  Android to sync" sends ([health-connect.md §8.3](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/health-connect.md#83-sleep-as-android),
+  [user guide](https://github.com/alien2003/PulseStages/blob/v0.4.0/docs/user-guide.md#how-sleep-as-android-imports)).
 
 ## [0.3.0] - 2026-10-15
 
@@ -417,7 +426,8 @@ for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epoc
   and of the debug signing certificate.
 - **Licence**: WTFPL.
 
-[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.4.0
 [0.3.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.2.0
 [0.1.1]: https://github.com/alien2003/PulseStages/releases/tag/v0.1.1
