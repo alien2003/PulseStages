@@ -411,6 +411,21 @@ class SourceSettlementTest {
         }
 
     @Test
+    fun `heart rate of the package only after the session, none in it, does not settle it either`() =
+        harnessTest(dir, now = time(7, 40)) { h ->
+            h.enableSources(OTHER_APP)
+            // The band was put on after the wake: heart rate from 07:00 on, none in the session.
+            h.repository.addSleepSession(OTHER_APP, nightStart(0), time(7, 0), stages = listOf(HcStage(nightStart(0), time(7, 0), 4)))
+            h.repository.addHeartRate(OTHER_APP, time(7, 0), time(8, 15))
+            h.syncAt(time(8, 15))
+
+            val quiet = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
+            assertFalse(quiet.ownHeartRate, "heart rate counts only inside the session")
+            assertEquals(time(8, 40), quiet.thresholdMs, "unchanged for an hour since 07:40")
+            assertEquals(time(8, 14), quiet.latestHeartRateMs)
+        }
+
+    @Test
     fun `Sleep as Android's own sessions are ignored`() =
         harnessTest(dir) { h ->
             h.enableSources(OHEALTH, SLEEP_AS_ANDROID)
@@ -431,13 +446,37 @@ class SourceSettlementTest {
             assertEquals(Settlement.Settled(emptyList(), emptyMap()), h.settle())
 
             val changed = h.repository.updateSleepSession(session.uuid) { it }
-            h.clock.advanceBy(HOUR_MS)
+            h.clock.advanceBy(30 * MINUTE_MS)
             assertEquals(SourceVersion.of(changed), h.settle().unsettled(UnsettledReason.NOT_PROCESSED).version)
-            assertEquals(0, h.repository.callCount(Operation.READ_HEART_RATE), "only recent sessions need heart rate")
 
             h.sync.run(inBackground = false)
             assertEquals(NightStatus.NOT_ESTIMATED, h.singleNight().status)
+            h.repository.clearCalls()
+            // Changed 30 min ago and no heart rate in it: the rule for recent sessions would wait 30 min more.
             assertEquals(listOf(SourceVersion.of(changed)), h.settle().settled().versions, "only a recent night awaits an estimate")
+            assertEquals(0, h.repository.callCount(Operation.READ_HEART_RATE), "only recent sessions need heart rate")
+        }
+
+    @Test
+    fun `a written night that ended over 12 hours ago is not checked for a deletion, also one older than the window`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(35))
+            h.backfill.run(inBackground = false)
+            assertEquals(NightStatus.WRITTEN, h.singleNight().status)
+
+            assertEquals(Settlement.Settled(emptyList(), emptyMap()), h.settle(), "its session starts before the 30 days read")
+        }
+
+    @Test
+    fun `a recent night estimated from Sleep as Android's own session is not checked for a deletion`() =
+        harnessTest(dir, now = time(7, 5)) { h ->
+            h.enableSources(OHEALTH, SLEEP_AS_ANDROID)
+            h.repository.addNight(SLEEP_AS_ANDROID, nightStart(0))
+            h.syncAt(time(8, 15))
+            assertEquals(SLEEP_AS_ANDROID, h.singleNight().sourcePackage)
+            assertEquals(NightStatus.WRITTEN, h.singleNight().status)
+
+            assertEquals(Settlement.Settled(emptyList(), emptyMap()), h.settle(), "its sessions are not read")
         }
 
     @Test

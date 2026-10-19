@@ -3,6 +3,7 @@ package io.github.alien2003.pulsestages.work.saa
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
+import io.github.alien2003.pulsestages.data.hc.HealthPermissions
 import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
 import io.github.alien2003.pulsestages.data.hc.testutil.DAY_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
@@ -12,6 +13,7 @@ import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.OWN
 import io.github.alien2003.pulsestages.data.hc.testutil.cyclingBpm
 import io.github.alien2003.pulsestages.data.hc.testutil.harnessTest
+import io.github.alien2003.pulsestages.data.local.settings.LogLevel
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
 import io.github.alien2003.pulsestages.data.local.sync.SyncStateStore
 import io.github.alien2003.pulsestages.work.run.EstimateNewNightsRunner
@@ -23,6 +25,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.File
 
 /** [hours]:[minutes]:[seconds] on the day of [MIDNIGHT] plus [day] days. */
@@ -67,12 +71,14 @@ private class SimulatedWork(
 
 /**
  * The phone: PulseStages' scheduled runs at [runTimes] ([EstimateNewNightsRunner], in the background with background
- * access) and its request work, and Sleep as Android, which imports 10 s after every request ([ImportingSleepAsAndroid];
- * observed with Sleep as Android 20261006). OHealth is the test, which writes to [h]'s Health Connect between the steps.
+ * access; with [inApp], "Estimate new" in the app instead, while the app is otherwise in the background) and its request
+ * work, and Sleep as Android, which imports 10 s after every request ([ImportingSleepAsAndroid]; observed with Sleep as
+ * Android 20261006). OHealth is the test, which writes to [h]'s Health Connect between the steps.
  */
 private class Phone(
     val h: PipelineHarness,
     private val runTimes: MutableList<Long>,
+    private val inApp: Boolean = false,
 ) {
     val saa = ImportingSleepAsAndroid(h.repository, importDelayMs = 10_000L) { h.clock.millis() }
     val work = SimulatedWork { h.clock.millis() }
@@ -97,7 +103,13 @@ private class Phone(
 
                 run -> {
                     runTimes.removeAt(0)
-                    runner.run(inBackground = true)
+                    if (inApp) {
+                        h.repository.inBackground = false
+                        runner.run(inBackground = false, userRequested = true)
+                        h.repository.inBackground = true
+                    } else {
+                        runner.run(inBackground = true)
+                    }
                 }
 
                 else -> {
@@ -237,44 +249,71 @@ class SleepAsAndroidGateScenarioTest {
         }
 
     @Test
-    fun `the morning race - a rewrite of the previous night seconds before the new provisional night sends nothing`() =
-        scenario(time(7, 5, day = -1)) { h ->
-            // Runs every 15 minutes, none in the last hour before 07:30:15 (Doze): that run makes the late-data pass.
-            val runs = every(15 * MINUTE_MS, time(7, 30, day = -1, seconds = 15), time(6, 15, seconds = 15))
-            val phone = Phone(h, (runs + every(15 * MINUTE_MS, time(7, 30, seconds = 15), time(11, 0))).toMutableList())
-            // The previous night, published at 07:05 with its heart rate except for 02:00-03:00, and complete.
-            val previousStart = time(23, 0, day = -2)
-            val previous = h.repository.addSleepSession(OHEALTH, previousStart, time(7, 0, day = -1))
-            h.heartRate(previousStart, previousStart - 30 * MINUTE_MS, time(2, 0, day = -1))
-            h.heartRate(previousStart, time(3, 0, day = -1), time(7, 5, day = -1))
-            phone.advanceTo(time(8, 30, day = -1))
-            h.heartRate(previousStart, time(7, 5, day = -1), time(8, 30, day = -1))
-            phone.advanceTo(time(7, 30))
-            phone.assertImportedFinal(previousStart, time(7, 0, day = -1))
-            val before = phone.saa.requests
+    fun `hourly checks - complete nights wait for the late-data pass that rewrites them with the heart rate that settled them`() =
+        scenario(time(7, 30)) { h ->
+            // The default check interval: runs at 07:55, 08:55, ... OHealth publishes the night cut at 07:29, the final
+            // version (08:03) at 08:05 with heart rate only to 07:29, and the rest of its heart rate at 09:12.
+            val phone = Phone(h, every(HOUR_MS, time(7, 55), time(12, 55)))
+            val start = time(2, 20)
+            val source = h.repository.addSleepSession(OHEALTH, start, time(7, 29))
+            h.heartRate(start, time(1, 50), time(7, 29))
+            phone.advanceTo(time(8, 5))
+            h.repository.updateSleepSession(source.uuid) { it.copy(endMs = time(8, 3)) }
+            phone.advanceTo(time(9, 12))
+            h.heartRate(start, time(7, 29), time(9, 12))
+            phone.advanceTo(time(13, 0))
 
-            // The morning batch: the previous night's late heart rate and the session written again, then a run that
-            // rewrites it, then 5 s later, before a request would be imported, the new night's provisional version.
-            h.heartRate(previousStart, time(2, 0, day = -1), time(3, 0, day = -1))
-            h.repository.updateSleepSession(previous.uuid) { it }
-            val source = phone.replay19Oct(provisionalAtMs = time(7, 30, seconds = 20))
-            phone.advanceTo(time(11, 0))
-
-            assertTrue(
-                phone.saa.requestTimes
-                    .drop(before)
-                    .all { it > time(9, 12) },
-                "${phone.saa.requestTimes}",
-            )
-            phone.assertImportedFinal(source.startMs, time(8, 3))
-            assertEquals(time(7, 0, day = -1), phone.saa.recordOf(previousStart, time(7, 0, day = -1)).endMs, "never updated")
+            phone.assertImportedFinal(start, time(8, 3))
+            assertTrue(phone.saa.requestTimes.all { it > time(9, 55) }, "after the run at 09:55 rewrote it: ${phone.saa.requestTimes}")
         }
 
+    /**
+     * The morning batch of OHealth brings the previous night's late heart rate (and may write that session again,
+     * [sessionWrittenAgain]) seconds before the new night's provisional version; a run between them rewrites the previous
+     * night. The write starts the settled streak again even when no session changed.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = [true, false])
+    fun `the morning race - a rewrite of the previous night seconds before the new provisional night sends nothing`(
+        sessionWrittenAgain: Boolean,
+    ) = scenario(time(7, 5, day = -1)) { h ->
+        // Runs every 15 minutes, none in the last hour before 07:30:15 (Doze): that run makes the late-data pass.
+        val runs = every(15 * MINUTE_MS, time(7, 30, day = -1, seconds = 15), time(6, 15, seconds = 15))
+        val phone = Phone(h, (runs + every(15 * MINUTE_MS, time(7, 30, seconds = 15), time(11, 0))).toMutableList())
+        // The previous night, published at 07:05 with its heart rate except for 02:00-03:00, and complete.
+        val previousStart = time(23, 0, day = -2)
+        val previous = h.repository.addSleepSession(OHEALTH, previousStart, time(7, 0, day = -1))
+        h.heartRate(previousStart, previousStart - 30 * MINUTE_MS, time(2, 0, day = -1))
+        h.heartRate(previousStart, time(3, 0, day = -1), time(7, 5, day = -1))
+        phone.advanceTo(time(8, 30, day = -1))
+        h.heartRate(previousStart, time(7, 5, day = -1), time(8, 30, day = -1))
+        phone.advanceTo(time(7, 30))
+        phone.assertImportedFinal(previousStart, time(7, 0, day = -1))
+        val before = phone.saa.requests
+
+        // The morning batch: the previous night's late heart rate (and the session written again), then a run that
+        // rewrites it, then 5 s later, before a request would be imported, the new night's provisional version.
+        h.heartRate(previousStart, time(2, 0, day = -1), time(3, 0, day = -1))
+        if (sessionWrittenAgain) h.repository.updateSleepSession(previous.uuid) { it }
+        val source = phone.replay19Oct(provisionalAtMs = time(7, 30, seconds = 20))
+        phone.advanceTo(time(11, 0))
+
+        assertTrue(
+            phone.saa.requestTimes
+                .drop(before)
+                .all { it > time(9, 12) },
+            "${phone.saa.requestTimes}",
+        )
+        phone.assertImportedFinal(source.startMs, time(8, 3))
+        assertEquals(time(7, 0, day = -1), phone.saa.recordOf(previousStart, time(7, 0, day = -1)).endMs, "never updated")
+    }
+
     @Test
-    fun `daily checks - the final version published between runs is sent after the next run, not dropped`() =
+    fun `daily and 24-hour checks 12 hours apart - the final version published between runs is sent after the next run`() =
         scenario(time(7, 30)) { h ->
             h.settings.set { it.copy(schedule = it.schedule.copy(periodicMinutes = 1440)) }
-            // The daily run at 09:00 and the periodic one, every 24 hours, at 21:00.
+            // The daily run at 09:00 and the periodic one, every 24 hours, at 21:00: the final version is processed
+            // within 12 hours of its publication.
             val phone = Phone(h, mutableListOf(time(9, 0), time(21, 0), time(9, 0, day = 1)))
 
             val start = phone.replay18Oct()
@@ -285,6 +324,57 @@ class SleepAsAndroidGateScenarioTest {
             phone.assertImportedFinal(start, time(12, 15))
             assertEquals(2, phone.saa.requests)
             assertTrue(phone.saa.requestTimes.all { it > time(21, 0) })
+        }
+
+    /**
+     * A documented limit (health-connect.md §8.3): with only one check every 24 hours the final version leaves the
+     * 12-hour scope before a run has processed it, and the request owed for the provisional version then goes out with
+     * PulseStages' record of that version, which Sleep as Android keeps.
+     */
+    @Test
+    fun `checks 24 hours apart - a session that leaves the 12-hour scope unprocessed is sent cut short`() =
+        scenario(time(7, 30)) { h ->
+            h.settings.set { it.copy(schedule = it.schedule.copy(periodicMinutes = 1440)) }
+            val phone = Phone(h, mutableListOf(time(9, 0), time(9, 0, day = 1, seconds = 30)))
+
+            val start = phone.replay18Oct()
+            phone.advanceTo(time(11, 0, day = 1))
+
+            val record = phone.saa.recordOf(start, time(12, 15))
+            assertEquals(OWN, record.packageName)
+            assertEquals(time(7, 29), record.endMs, "PulseStages' record of the provisional version")
+            val first = phone.saa.requestTimes.first()
+            assertTrue(first > time(0, 33, day = 1) && first < time(9, 0, day = 1), "once 12 h after the final's last change: $first")
+            assertEquals(
+                time(12, 15),
+                h.repository
+                    .ownSessions()
+                    .single()
+                    .endMs,
+                "the next run's record is final, too late",
+            )
+        }
+
+    @Test
+    fun `without background access, a night checked by a daily Estimate new is sent after the next day's, not dropped`() =
+        scenario(time(7, 30)) { h ->
+            h.repository.revoke(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+            h.repository.inBackground = true
+            // The user opens the app every morning at about 09:00; nothing reads Health Connect in between.
+            val phone = Phone(h, mutableListOf(time(9, 0), time(9, 0, day = 1, seconds = 30)), inApp = true)
+
+            val start = phone.replay18Oct()
+            phone.advanceTo(time(11, 0, day = 1))
+
+            phone.assertImportedFinal(start, time(12, 15))
+            assertTrue(phone.saa.requestTimes.all { it > time(9, 0, day = 1) }, "${phone.saa.requestTimes}")
+            assertEquals(2, phone.saa.requests, "the request after the second day's run, and its follow-up")
+            val sent = h.logger.lines.first { it.level == LogLevel.INFO && it.message.startsWith("asked Sleep as Android to sync (") }
+            assertEquals(
+                "asked Sleep as Android to sync (owed for 15 min; without a new check: no background access; follow-up in 10 min)",
+                sent.message,
+                "by the work, on the streak that the run in the app began",
+            )
         }
 
     @Test
