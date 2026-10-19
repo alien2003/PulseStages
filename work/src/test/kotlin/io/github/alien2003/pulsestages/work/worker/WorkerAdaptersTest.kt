@@ -42,6 +42,7 @@ import io.github.alien2003.pulsestages.work.run.RunReport
 import io.github.alien2003.pulsestages.work.run.WorkResults
 import io.github.alien2003.pulsestages.work.saa.RecordingFollowUps
 import io.github.alien2003.pulsestages.work.saa.RecordingSyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import io.github.alien2003.pulsestages.work.saa.requestSleepAsAndroidSync
 import io.github.alien2003.pulsestages.work.saa.sleepAsAndroidRequests
 import io.github.alien2003.pulsestages.work.schedule.WorkJob
@@ -55,7 +56,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -235,6 +235,8 @@ class WorkerAdaptersTest {
         runTest {
             val world = World(this)
             val h = world.harness
+            // The checks of the Sleep as Android request read heart rate too.
+            h.requestSleepAsAndroidSync(on = false)
             h.repository.addNight(OHEALTH, nightStart(0))
             world.worker<EstimateNewNightsWorker>(periodic()).doWork()
             h.clock.advanceBy(15 * MINUTE_MS)
@@ -472,53 +474,66 @@ class WorkerAdaptersTest {
         }
 
     @Test
-    fun theFollowUpWorkerSendsThePendingRequestOnceAndAlwaysSucceeds() =
+    fun theRequestWorkerSendsTheOwedRequestOnceTheNightsAreCompleteAndAlwaysSucceeds() =
         runTest {
             val world = World(this)
             val h = world.harness
             h.requestSleepAsAndroidSync()
             h.repository.addNight(OHEALTH, nightStart(1))
             val run = world.worker<EstimateNewNightsWorker>(now()).doWork()
-            assertEquals(true, report(run).summary?.sleepAsAndroidSyncRequested)
-            assertEquals(1, world.sleepAsAndroid.sent)
-            assertEquals(1, world.followUps.scheduled.size)
-            h.clock.advanceBy(10 * MINUTE_MS)
+            assertEquals(true, report(run).summary?.sleepAsAndroidSyncDeferred)
+            assertEquals(0, world.sleepAsAndroid.attempts)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
             h.repository.clearCalls()
 
-            val followUp = world.worker<SleepAsAndroidSyncWorker>().doWork()
+            val request = world.worker<SleepAsAndroidSyncWorker>().doWork()
 
-            assertTrue(followUp is ListenableWorker.Result.Success)
-            assertEquals(2, world.sleepAsAndroid.sent)
-            assertNull(
+            assertTrue(request is ListenableWorker.Result.Success)
+            assertEquals(1, world.sleepAsAndroid.sent)
+            assertEquals("the check reads the sessions once", listOf(Operation.READ_SLEEP_SESSIONS), h.repository.calls)
+            assertEquals(
+                "the follow-up, scheduled by the work itself",
+                listOf(RecordingFollowUps.Scheduled(SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS, ScheduleSettings())),
+                world.followUps.scheduledFromWork,
+            )
+            assertNotNull(
                 h.syncState.state
                     .first()
-                    .sleepAsAndroidFollowUpDueAtMs,
+                    .sleepAsAndroidRequest.dueAtMs,
             )
             assertTrue(
                 "a re-run sends nothing",
                 world.worker<SleepAsAndroidSyncWorker>(attempt = 1).doWork() is ListenableWorker.Result.Success,
             )
-            assertEquals(2, world.sleepAsAndroid.sent)
-            assertTrue("it reads nothing from Health Connect: ${h.repository.calls}", h.repository.calls.isEmpty())
+            assertEquals(1, world.sleepAsAndroid.sent)
+            assertEquals("the work never cancels itself", 0, world.followUps.cancelled)
         }
 
     @Test
-    fun theFollowUpWorkerSucceedsWhenTheRequestFails() =
+    fun theRequestWorkerSucceedsWhenTheRequestFails() =
         runTest {
             val world = World(this)
             val h = world.harness
             h.requestSleepAsAndroidSync()
-            world.requests.afterRun(written = 1, rewritten = 0)
+            world.requests.recordRun(written = 1, rewritten = 0)
+            world.requests.trySend()
             world.sleepAsAndroid.failure = SecurityException("not allowed")
-            h.clock.advanceBy(10 * MINUTE_MS)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
             h.repository.clearCalls()
 
             val result = world.worker<SleepAsAndroidSyncWorker>().doWork()
 
             assertTrue(result is ListenableWorker.Result.Success)
-            assertEquals("the follow-up was attempted", 2, world.sleepAsAndroid.attempts)
-            assertEquals("only the first request", 1, world.sleepAsAndroid.sent)
-            assertTrue("it reads nothing from Health Connect: ${h.repository.calls}", h.repository.calls.isEmpty())
+            assertEquals("the request was attempted", 1, world.sleepAsAndroid.attempts)
+            assertEquals(0, world.sleepAsAndroid.sent)
+            assertEquals(listOf(Operation.READ_SLEEP_SESSIONS), h.repository.calls)
+
+            world.requests.recordRun(written = 1, rewritten = 0)
+            world.requests.trySend()
+            world.sleepAsAndroid.failure = AssertionError("a bug")
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertTrue("even an error", world.worker<SleepAsAndroidSyncWorker>().doWork() is ListenableWorker.Result.Success)
+            assertEquals(2, world.sleepAsAndroid.attempts)
         }
 
     @Test

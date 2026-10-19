@@ -19,11 +19,13 @@ import io.github.alien2003.pulsestages.data.hc.testutil.harnessTest
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import io.github.alien2003.pulsestages.data.local.db.NightStatus
 import io.github.alien2003.pulsestages.data.local.db.PersonalModelKind
+import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
+import io.github.alien2003.pulsestages.data.local.sync.SleepAsAndroidRequestState
 import io.github.alien2003.pulsestages.data.local.sync.SyncOutcome
 import io.github.alien2003.pulsestages.work.saa.RecordingFollowUps
 import io.github.alien2003.pulsestages.work.saa.RecordingSyncRequestSender
-import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidFollowUps
-import io.github.alien2003.pulsestages.work.saa.SyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidRequest
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import io.github.alien2003.pulsestages.work.saa.requestSleepAsAndroidSync
 import io.github.alien2003.pulsestages.work.saa.sleepAsAndroidRequests
 import kotlinx.coroutines.CompletableDeferred
@@ -34,7 +36,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -50,12 +51,10 @@ class EstimateNewNightsRunnerTest {
 
     private val limits = RetryLimits()
 
-    private fun PipelineHarness.runner(
-        sender: SyncRequestSender = RecordingSyncRequestSender(),
-        followUps: SleepAsAndroidFollowUps = RecordingFollowUps(),
-    ): EstimateNewNightsRunner = EstimateNewNightsRunner(sync, personalization, sleepAsAndroidRequests(sender, followUps), logger)
+    private fun PipelineHarness.runner(requests: SleepAsAndroidSyncRequests = sleepAsAndroidRequests()): EstimateNewNightsRunner =
+        EstimateNewNightsRunner(sync, personalization, requests, logger)
 
-    private suspend fun PipelineHarness.pendingFollowUp(): Long? = syncState.state.first().sleepAsAndroidFollowUpDueAtMs
+    private suspend fun PipelineHarness.request(): SleepAsAndroidRequestState = syncState.state.first().sleepAsAndroidRequest
 
     private fun kinds(outcome: WorkOutcome): List<ResultKind> = (0..limits.maxRetries).map { WorkResults.kindOf(outcome, it, limits) }
 
@@ -64,20 +63,23 @@ class EstimateNewNightsRunnerTest {
         harnessTest(dir) { h ->
             h.repository.addNight(OHEALTH, nightStart(2))
             h.repository.addNight(OHEALTH, nightStart(1))
-
             val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
 
-            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.runner(sender).run(inBackground = true))
+            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.runner(requests).run(inBackground = true))
 
             assertEquals(2, outcome.summary.estimated)
             assertEquals(2, h.repository.ownSessions().size)
             assertEquals(ResultKind.SUCCESS, WorkResults.kindOf(outcome, 0, limits))
-            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred, "on by default, once the nights are complete")
+            assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
             assertEquals(1, sender.sent, "Sleep as Android is asked once by default")
         }
 
     @Test
-    fun `with the option off, a sync that writes nights asks Sleep as Android nothing and schedules no follow-up`() =
+    fun `with the option off, a sync that writes nights asks Sleep as Android nothing and schedules nothing`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync(on = false)
             h.repository.addNight(OHEALTH, nightStart(2))
@@ -85,42 +87,49 @@ class EstimateNewNightsRunnerTest {
             val sender = RecordingSyncRequestSender()
             val followUps = RecordingFollowUps()
 
-            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.runner(sender, followUps).run(inBackground = true))
+            val outcome =
+                assertInstanceOf(
+                    WorkOutcome.Completed::class.java,
+                    h.runner(h.sleepAsAndroidRequests(sender, followUps)).run(inBackground = true),
+                )
 
             assertEquals(2, h.repository.ownSessions().size)
             assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
-            assertEquals(0, sender.attempts, "not even looked up")
+            assertFalse(outcome.summary.sleepAsAndroidSyncDeferred)
+            assertEquals(0, sender.lookups, "not even looked up")
             assertTrue(followUps.scheduled.isEmpty())
-            assertNull(h.pendingFollowUp())
+            assertEquals(SleepAsAndroidRequestState(), h.request())
         }
 
     @Test
-    fun `with the option on, a sync that writes two nights asks Sleep as Android once and an idle run does not`() =
+    fun `with the option on, a sync that writes two nights asks Sleep as Android once they are complete and an idle run does not`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync()
             h.repository.addNight(OHEALTH, nightStart(2))
             h.repository.addNight(OHEALTH, nightStart(1))
             val sender = RecordingSyncRequestSender()
-            val runner = h.runner(sender)
+            val requests = h.sleepAsAndroidRequests(sender)
+            val runner = h.runner(requests)
 
             val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = true))
 
             assertEquals(2, outcome.summary.estimated)
-            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred)
+            assertTrue(WorkResults.parse(WorkResults.output(outcome))?.summary?.sleepAsAndroidSyncDeferred == true)
+            assertEquals(0, sender.attempts)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
             assertEquals(1, sender.sent)
-            assertNotNull(
-                h.syncState.state
-                    .first()
-                    .sleepAsAndroidFollowUpDueAtMs,
-                "the follow-up for the new nights",
-            )
-            assertTrue(WorkResults.parse(WorkResults.output(outcome))?.summary?.sleepAsAndroidSyncRequested == true)
+            assertNotNull(h.request().dueAtMs, "the follow-up for the new nights")
 
-            h.clock.advanceBy(15 * MINUTE_MS)
+            h.clock.advanceBy(5 * MINUTE_MS)
             val idle = assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = true))
 
             assertFalse(idle.summary.sleepAsAndroidSyncRequested)
-            assertEquals(1, sender.sent, "nothing written, nothing asked")
+            assertFalse(idle.summary.sleepAsAndroidSyncDeferred, "nothing written")
+            assertEquals(1, sender.sent, "nothing written, nothing asked before the follow-up is due")
+            h.clock.advanceBy(5 * MINUTE_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork(), "the follow-up")
         }
 
     @Test
@@ -170,18 +179,33 @@ class EstimateNewNightsRunnerTest {
         }
 
     @Test
-    fun `a run that wrote a night and was then blocked still asks Sleep as Android once`() =
+    fun `a run that wrote a night and was then blocked leaves the request owed, and it goes out once the nights are complete`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync()
             h.repository.addNight(OHEALTH, nightStart(2))
             h.repository.addNight(OHEALTH, nightStart(1))
             h.estimator.beforeEstimate = { h.repository.revoke(HealthPermissions.READ_HEART_RATE) }
             val sender = RecordingSyncRequestSender()
+            val followUps = RecordingFollowUps()
+            val requests = h.sleepAsAndroidRequests(sender, followUps)
 
-            assertInstanceOf(WorkOutcome.Blocked::class.java, h.runner(sender).run(inBackground = false))
+            assertInstanceOf(WorkOutcome.Blocked::class.java, h.runner(requests).run(inBackground = false))
 
             assertEquals(1, h.repository.ownSessions().size)
-            assertEquals(1, sender.sent, "the night written before the stop is in Health Connect")
+            assertEquals(0, sender.attempts, "a run that did not complete checks nothing")
+            assertEquals(NOON, h.request().dueAtMs, "the night written before the stop is in Health Connect: a request is owed")
+            assertEquals(
+                listOf(RecordingFollowUps.Scheduled(SleepAsAndroidSyncRequests.RECHECK_MS, ScheduleSettings())),
+                followUps.scheduled,
+            )
+
+            h.repository.grant(HealthPermissions.READ_HEART_RATE)
+            h.estimator.beforeEstimate = {}
+            h.clock.advanceBy(15 * MINUTE_MS)
+            assertInstanceOf(WorkOutcome.Completed::class.java, h.runner(requests).run(inBackground = false))
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
+            assertEquals(1, sender.sent)
         }
 
     @Test
@@ -192,9 +216,9 @@ class EstimateNewNightsRunnerTest {
             h.repository.addNight(OHEALTH, nightStart(1), withHeartRate = false)
             val sender = RecordingSyncRequestSender()
             val followUps = RecordingFollowUps()
-            val runner = h.runner(sender, followUps)
+            val runner = h.runner(h.sleepAsAndroidRequests(sender, followUps))
             assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = false))
-            assertEquals(0, sender.attempts, "nothing written yet")
+            assertEquals(SleepAsAndroidRequestState(), h.request(), "nothing written yet")
             h.clock.advanceBy(HOUR_MS)
             h.repository.addNight(OHEALTH, nightStart(0))
             // The first sleep-session read is the Changes page's window, the second the retry's: it ends the sync.
@@ -204,8 +228,16 @@ class EstimateNewNightsRunnerTest {
 
             assertEquals(RetryCause.QUOTA, outcome.cause)
             assertEquals(1, h.repository.ownSessions().size, "the new night was written before the error")
-            assertEquals(1, sender.sent, "and Sleep as Android is asked for it")
-            assertEquals(1, followUps.scheduled.size)
+            assertEquals(
+                SleepAsAndroidRequestState(dueAtMs = NOON + HOUR_MS, followUp = true, owedSinceMs = NOON + HOUR_MS),
+                h.request(),
+                "and a request is owed for it",
+            )
+            assertEquals(
+                listOf(RecordingFollowUps.Scheduled(SleepAsAndroidSyncRequests.RECHECK_MS, ScheduleSettings())),
+                followUps.scheduled,
+            )
+            assertEquals(0, sender.attempts, "checked by the work, not by a run that did not complete")
             assertEquals(
                 NOON,
                 h.syncState.state
@@ -216,7 +248,7 @@ class EstimateNewNightsRunnerTest {
         }
 
     @Test
-    fun `a run cancelled after it wrote a night still asks Sleep as Android, then the cancellation goes on`() =
+    fun `a run cancelled after it wrote a night still records the request for it, then the cancellation goes on`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync()
             h.repository.addNight(OHEALTH, nightStart(2))
@@ -233,7 +265,7 @@ class EstimateNewNightsRunnerTest {
             var finished = false
             val job =
                 launch {
-                    h.runner(sender, followUps).run(inBackground = false)
+                    h.runner(h.sleepAsAndroidRequests(sender, followUps)).run(inBackground = false)
                     finished = true
                 }
             entered.await()
@@ -244,9 +276,12 @@ class EstimateNewNightsRunnerTest {
             assertTrue(job.isCancelled)
             assertFalse(finished, "the runner rethrew the cancellation")
             assertEquals(1, h.repository.ownSessions().size, "the first night was written before WorkManager stopped the run")
-            assertEquals(1, sender.sent)
-            assertEquals(1, followUps.scheduled.size)
-            assertNotNull(h.pendingFollowUp())
+            assertEquals(0, sender.attempts, "the check is left to the work")
+            assertEquals(
+                listOf(RecordingFollowUps.Scheduled(SleepAsAndroidSyncRequests.RECHECK_MS, ScheduleSettings())),
+                followUps.scheduled,
+            )
+            assertEquals(NOON, h.request().dueAtMs)
             assertEquals(
                 SyncOutcome.CANCELLED,
                 h.syncState.state
@@ -256,7 +291,7 @@ class EstimateNewNightsRunnerTest {
         }
 
     @Test
-    fun `with the option on, checks of an unchanged night ask nothing and a rewrite after late heart rate asks once`() =
+    fun `checks of a night whose heart rate is late leave the request waiting until it passes the end by an hour`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync()
             // A recent night whose heart rate has only partly reached Health Connect (until 307 min after the start).
@@ -264,38 +299,46 @@ class EstimateNewNightsRunnerTest {
             val bpm = cyclingBpm(session.startMs)
             h.repository.addHeartRate(OHEALTH, session.startMs - 30 * MINUTE_MS, session.startMs + 307 * MINUTE_MS, bpm = bpm)
             val sender = RecordingSyncRequestSender()
-            val followUps = RecordingFollowUps()
-            val runner = h.runner(sender, followUps)
-            assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = true))
-            assertEquals(1, sender.sent)
-            assertEquals(1, followUps.scheduled.size)
-            val due = checkNotNull(h.pendingFollowUp())
+            val requests = h.sleepAsAndroidRequests(sender)
+            val runner = h.runner(requests)
+            val first = assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = true))
+            assertTrue(first.summary.sleepAsAndroidSyncDeferred)
 
-            val checkedAtMin = mutableListOf<Int>()
+            val passesAtMin = mutableListOf<Int>()
             (1..8).forEach { run ->
                 h.clock.advanceBy(15 * MINUTE_MS)
-                val reads = h.repository.callCount(Operation.READ_HEART_RATE)
                 val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = true))
-                if (h.repository.callCount(Operation.READ_HEART_RATE) > reads) checkedAtMin += run * 15
+                if (h.syncState.state
+                        .first()
+                        .lateDataPassAtMs == h.clock.millis()
+                ) {
+                    passesAtMin += run * 15
+                }
                 assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
+                assertFalse(outcome.summary.sleepAsAndroidSyncDeferred, "nothing written")
                 assertEquals(0, outcome.summary.refreshed)
             }
-
-            assertEquals(listOf(60, 120), checkedAtMin, "the hourly checks")
-            assertEquals(1, sender.sent, "a check that finds nothing new asks nothing")
-            assertEquals(due, h.pendingFollowUp(), "the follow-up is left to its own work")
+            assertEquals(listOf(60, 120), passesAtMin, "the hourly checks: a waiting request asks for no other")
 
             h.repository.addHeartRate(OHEALTH, session.startMs + 308 * MINUTE_MS, session.endMs + 30 * MINUTE_MS, bpm = bpm)
             h.clock.advanceBy(NewNightsSync.MIN_RECHECK_GAP_MS)
             val rewrite = assertInstanceOf(WorkOutcome.Completed::class.java, runner.run(inBackground = true))
 
             assertEquals(1, rewrite.summary.refreshed)
-            assertEquals(0, rewrite.summary.estimated)
-            assertTrue(rewrite.summary.sleepAsAndroidSyncRequested)
-            assertEquals(2, sender.sent, "exactly one request for the rewrite")
-            assertEquals(1, followUps.scheduled.size, "no new follow-up for a rewrite")
-            assertEquals(1, followUps.cancelled, "the follow-up that was due is taken by this request")
-            assertNull(h.pendingFollowUp())
+            assertTrue(rewrite.summary.sleepAsAndroidSyncDeferred, "its heart rate does not reach an hour after the end yet")
+            assertEquals(0, sender.attempts)
+
+            h.repository.addHeartRate(OHEALTH, session.endMs + 30 * MINUTE_MS, h.clock.millis(), bpm = bpm)
+            var runs = 0
+            while (sender.sent == 0 && runs < 4) {
+                h.clock.advanceBy(15 * MINUTE_MS)
+                runner.run(inBackground = true)
+                runs++
+            }
+            assertEquals(1, sender.sent, "sent $runs runs after the heart rate passed the end by an hour")
+            assertTrue(runs in 2..3, "confirmed for 15 minutes and checked by a late-data pass: $runs")
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork(), "then the follow-up of the new night")
         }
 
     @Test
@@ -454,6 +497,8 @@ class EstimateNewNightsRunnerTest {
     @Test
     fun `an idle background run, population EM included, makes only the permission checks and one change-log read`() =
         harnessTest(dir) { h ->
+            // The checks of the Sleep as Android request read Health Connect too (see SleepAsAndroidSyncRequestsTest).
+            h.requestSleepAsAndroidSync(on = false)
             h.repository.addNight(OHEALTH, nightStart(0))
             h.runner().run(inBackground = false)
             h.clock.advanceBy(15 * MINUTE_MS)
@@ -469,6 +514,8 @@ class EstimateNewNightsRunnerTest {
     @Test
     fun `a run the user asked for re-checks a recent night that a scheduled run 15 minutes after its check leaves alone`() =
         harnessTest(dir) { h ->
+            // The checks of the Sleep as Android request read heart rate too (see SleepAsAndroidSyncRequestsTest).
+            h.requestSleepAsAndroidSync(on = false)
             h.repository.addNight(OHEALTH, nightStart(0))
             val runner = h.runner()
             runner.run(inBackground = false)

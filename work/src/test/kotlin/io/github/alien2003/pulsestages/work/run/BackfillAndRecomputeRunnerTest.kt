@@ -10,18 +10,24 @@ import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeProgress
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
 import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
+import io.github.alien2003.pulsestages.data.hc.testutil.NOON
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.addNight
 import io.github.alien2003.pulsestages.data.hc.testutil.harnessTest
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import io.github.alien2003.pulsestages.data.local.db.BackfillStateEntity
 import io.github.alien2003.pulsestages.data.local.db.BackfillStatus
+import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
+import io.github.alien2003.pulsestages.data.local.sync.SleepAsAndroidRequestState
+import io.github.alien2003.pulsestages.work.saa.RecordingFollowUps
 import io.github.alien2003.pulsestages.work.saa.RecordingSyncRequestSender
-import io.github.alien2003.pulsestages.work.saa.SyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidRequest
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import io.github.alien2003.pulsestages.work.saa.requestSleepAsAndroidSync
 import io.github.alien2003.pulsestages.work.saa.sleepAsAndroidRequests
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -38,11 +44,13 @@ class BackfillAndRecomputeRunnerTest {
 
     private val limits = RetryLimits()
 
-    private fun PipelineHarness.backfillRunner(sender: SyncRequestSender = RecordingSyncRequestSender()): BackfillRunner =
-        BackfillRunner(backfill, sleepAsAndroidRequests(sender), logger)
+    private fun PipelineHarness.backfillRunner(requests: SleepAsAndroidSyncRequests = sleepAsAndroidRequests()): BackfillRunner =
+        BackfillRunner(backfill, requests, logger)
 
-    private fun PipelineHarness.recomputeRunner(sender: SyncRequestSender = RecordingSyncRequestSender()): RecomputeRunner =
-        RecomputeRunner(recomputer, health, sleepAsAndroidRequests(sender), logger)
+    private fun PipelineHarness.recomputeRunner(requests: SleepAsAndroidSyncRequests = sleepAsAndroidRequests()): RecomputeRunner =
+        RecomputeRunner(recomputer, health, requests, logger)
+
+    private suspend fun PipelineHarness.request(): SleepAsAndroidRequestState = syncState.state.first().sleepAsAndroidRequest
 
     private fun PipelineHarness.addNights(daysAgo: Iterable<Int>) = daysAgo.forEach { repository.addNight(OHEALTH, nightStart(it)) }
 
@@ -58,7 +66,7 @@ class BackfillAndRecomputeRunnerTest {
             assertEquals(20, outcome.summary.estimated)
             assertEquals(listOf(0, 1, 2, 3, 4, 4), progress.map { it.windowsDone })
             assertEquals(ResultKind.SUCCESS, WorkResults.kindOf(outcome, 0, limits))
-            assertTrue(outcome.summary.sleepAsAndroidSyncRequested, "on by default")
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred, "on by default, once the nights are complete")
         }
 
     @Test
@@ -67,17 +75,22 @@ class BackfillAndRecomputeRunnerTest {
             h.requestSleepAsAndroidSync()
             h.addNights(20 downTo 1)
             val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
 
-            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(sender).run(inBackground = false))
+            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(requests).run(inBackground = false))
 
-            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred)
+            assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork(), "without a run's late-data pass, an hour later")
             assertEquals(1, sender.sent, "one request for the whole backfill, not one per window")
 
             h.clock.advanceBy(MINUTE_MS)
-            val again = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(sender).run(inBackground = false))
+            val again = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(requests).run(inBackground = false))
 
             assertEquals(20, again.summary.estimated, "every night is up to date")
             assertFalse(again.summary.sleepAsAndroidSyncRequested)
+            assertFalse(again.summary.sleepAsAndroidSyncDeferred)
             assertEquals(1, sender.sent, "nothing was written")
         }
 
@@ -88,24 +101,38 @@ class BackfillAndRecomputeRunnerTest {
             h.addNights(20 downTo 1)
             val sender = RecordingSyncRequestSender()
 
-            val outcome = assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(sender).run(inBackground = false))
+            val outcome =
+                assertInstanceOf(
+                    WorkOutcome.Completed::class.java,
+                    h.backfillRunner(h.sleepAsAndroidRequests(sender)).run(inBackground = false),
+                )
 
             assertEquals(20, h.repository.ownSessions().size)
             assertFalse(outcome.summary.sleepAsAndroidSyncRequested)
-            assertEquals(0, sender.attempts, "not even looked up")
+            assertFalse(outcome.summary.sleepAsAndroidSyncDeferred)
+            assertEquals(0, sender.lookups, "not even looked up")
         }
 
     @Test
-    fun `a backfill that wrote nights before a quota stop still asks Sleep as Android`() =
+    fun `a backfill that wrote nights before a quota stop still asks Sleep as Android once every night is processed`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync()
             h.addNights(20 downTo 1)
             h.repository.failOn(Operation.READ_HEART_RATE, HealthDataException.QuotaExceeded("quota"), afterCalls = 10)
             val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
 
-            assertInstanceOf(WorkOutcome.Retry::class.java, h.backfillRunner(sender).run(inBackground = false))
+            assertInstanceOf(WorkOutcome.Retry::class.java, h.backfillRunner(requests).run(inBackground = false))
 
             assertTrue(h.repository.ownSessions().isNotEmpty())
+            assertEquals(NOON, h.request().dueAtMs, "owed for the nights written before the stop")
+            assertEquals(0, sender.attempts)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.DEFERRED, requests.onWork(), "the nights the backfill has not reached are not processed")
+
+            assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(requests).run(inBackground = false))
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
             assertEquals(1, sender.sent)
         }
 
@@ -235,7 +262,7 @@ class BackfillAndRecomputeRunnerTest {
         }
 
     @Test
-    fun `a backfill stopped by WorkManager after it wrote nights still asks Sleep as Android once`() =
+    fun `a backfill stopped by WorkManager after it wrote nights leaves a request owed for them, checked by the work`() =
         harnessTest(dir) { h ->
             h.requestSleepAsAndroidSync()
             h.addNights(20 downTo 1)
@@ -247,7 +274,8 @@ class BackfillAndRecomputeRunnerTest {
                 }
             }
             val sender = RecordingSyncRequestSender()
-            val job = launch { h.backfillRunner(sender).run(inBackground = false) }
+            val followUps = RecordingFollowUps()
+            val job = launch { h.backfillRunner(h.sleepAsAndroidRequests(sender, followUps)).run(inBackground = false) }
             entered.await()
 
             job.cancel()
@@ -255,7 +283,12 @@ class BackfillAndRecomputeRunnerTest {
 
             assertTrue(job.isCancelled)
             assertEquals(9, h.repository.ownSessions().size)
-            assertEquals(1, sender.sent, "the nights written before the stop are in Health Connect")
+            assertEquals(NOON, h.request().dueAtMs, "the nights written before the stop are in Health Connect")
+            assertEquals(
+                listOf(RecordingFollowUps.Scheduled(SleepAsAndroidSyncRequests.RECHECK_MS, ScheduleSettings())),
+                followUps.scheduled,
+            )
+            assertEquals(0, sender.sent)
         }
 
     @Test
@@ -318,7 +351,7 @@ class BackfillAndRecomputeRunnerTest {
                 )
 
             assertEquals(3, outcome.summary.estimated)
-            assertTrue(outcome.summary.sleepAsAndroidSyncRequested, "on by default")
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred, "on by default, once the nights are complete")
             assertEquals(3, progress.last().done)
             assertEquals(
                 listOf(1),
@@ -337,20 +370,23 @@ class BackfillAndRecomputeRunnerTest {
             h.clock.advanceBy(MINUTE_MS)
             h.requestSleepAsAndroidSync()
             val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
 
             val outcome =
                 assertInstanceOf(
                     WorkOutcome.Completed::class.java,
-                    h.recomputeRunner(sender).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false),
+                    h.recomputeRunner(requests).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false),
                 )
 
             assertEquals(3, outcome.summary.estimated)
-            assertTrue(outcome.summary.sleepAsAndroidSyncRequested)
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred)
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
             assertEquals(1, sender.sent)
         }
 
     @Test
-    fun `a recompute that a Health Connect error ends after its first group of nights still asks Sleep as Android once`() =
+    fun `a recompute that a Health Connect error ends after its first group of nights still leaves a request owed`() =
         harnessTest(dir) { h ->
             h.addNights(listOf(20, 10, 1))
             h.backfill.run(inBackground = false)
@@ -359,8 +395,9 @@ class BackfillAndRecomputeRunnerTest {
             // Three groups of nights (more than 7 days apart): the read of the second one fails.
             h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.QuotaExceeded("quota"), afterCalls = 1)
             val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
 
-            val outcome = h.recomputeRunner(sender).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false)
+            val outcome = h.recomputeRunner(requests).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false)
 
             assertEquals(RetryCause.QUOTA, assertInstanceOf(WorkOutcome.Retry::class.java, outcome).cause)
             assertEquals(
@@ -370,7 +407,14 @@ class BackfillAndRecomputeRunnerTest {
                     .sortedBy { it.sessionStartMs }
                     .map { it.recomputeCount },
             )
-            assertEquals(1, sender.sent, "the night rewritten before the error is in Health Connect")
+            assertEquals(h.clock.millis(), h.request().dueAtMs, "the night rewritten before the error is in Health Connect")
+            assertEquals(0, sender.attempts)
+            h.repository.clearFailures()
+            h.clock.advanceBy(MINUTE_MS)
+            assertEquals(SleepAsAndroidRequest.DEFERRED, requests.onWork(), "checked by the work: the nights look complete from now on")
+            h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+            assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
+            assertEquals(1, sender.sent)
         }
 
     @Test

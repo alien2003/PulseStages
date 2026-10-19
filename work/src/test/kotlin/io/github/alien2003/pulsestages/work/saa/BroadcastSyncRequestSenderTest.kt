@@ -15,7 +15,8 @@ import org.robolectric.Shadows.shadowOf
 
 /**
  * The sync request to Sleep as Android on Robolectric: the bare intent of its Intent API, sent as one broadcast only
- * when Sleep as Android's receiver of the action is installed.
+ * when Sleep as Android's receiver of the action is installed, which [BroadcastSyncRequestSender.isInstalled] looks up
+ * without sending anything.
  */
 @RunWith(RobolectricTestRunner::class)
 class BroadcastSyncRequestSenderTest {
@@ -44,6 +45,7 @@ class BroadcastSyncRequestSenderTest {
 
     @Test
     fun withoutSleepAsAndroidNothingIsSent() {
+        assertFalse(BroadcastSyncRequestSender(application).isInstalled())
         assertFalse(BroadcastSyncRequestSender(application).send())
 
         assertTrue(shadowOf(application).broadcastIntents.isEmpty())
@@ -53,9 +55,19 @@ class BroadcastSyncRequestSenderTest {
     fun anotherAppWithAReceiverOfTheActionDoesNotCount() {
         installReceiver("org.example.other")
 
+        assertFalse(BroadcastSyncRequestSender(application).isInstalled())
         assertFalse(BroadcastSyncRequestSender(application).send())
 
         assertTrue(shadowOf(application).broadcastIntents.isEmpty())
+    }
+
+    @Test
+    fun withItsReceiverInstalledTheLookupSaysSoAndSendsNothing() {
+        installReceiver()
+
+        assertTrue(BroadcastSyncRequestSender(application).isInstalled())
+
+        assertTrue("a lookup only", shadowOf(application).broadcastIntents.isEmpty())
     }
 
     @Test

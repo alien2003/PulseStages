@@ -106,8 +106,6 @@ data class SleepAsAndroidRequestState(
  * @property lastRunOutcome outcome of the last finished run.
  * @property lastRunDetail English detail for the log / debug screen, or null.
  * @property lastEmAdaptationNightCount number of estimated nights at the last population-level EM adaptation.
- * @property sleepAsAndroidFollowUpDueAtMs when the pending follow-up sync request to Sleep as Android is due, or null
- *   when none is pending (`write.requestSleepAsAndroidSync`).
  * @property sleepAsAndroidRequest the sync request owed to Sleep as Android and how long the nights have looked settled.
  * @property lateDataPassAtMs start of the run whose late-data pass (the retry and the refresh of recent nights, at most
  *   every `NewNightsSync.MIN_RECHECK_GAP_MS`) last completed, or null if none has yet.
@@ -122,7 +120,6 @@ data class SyncState(
     val lastRunOutcome: SyncOutcome? = null,
     val lastRunDetail: String? = null,
     val lastEmAdaptationNightCount: Int = 0,
-    val sleepAsAndroidFollowUpDueAtMs: Long? = null,
     val sleepAsAndroidRequest: SleepAsAndroidRequestState = SleepAsAndroidRequestState(),
     val lateDataPassAtMs: Long? = null,
     val lateDataPassRequestedAtMs: Long? = null,
@@ -206,14 +203,6 @@ class SyncStateStore
         /** Stores the night count at which population-level EM adaptation last ran. */
         suspend fun setLastEmAdaptationNightCount(count: Int) {
             dataStore.edit { it[EM_NIGHT_COUNT] = count }
-        }
-
-        /**
-         * Stores that a follow-up sync request to Sleep as Android is due at [atMs] (replacing a pending one), or forgets
-         * the pending one when [atMs] is null (sent, replaced or no longer wanted).
-         */
-        suspend fun setSleepAsAndroidFollowUpDue(atMs: Long?) {
-            dataStore.edit { it.setOrRemove(SAA_FOLLOW_UP_DUE_AT, atMs) }
         }
 
         /** Stores that the late-data pass of the run started at [atMs] completed (replacing the time of an earlier one). */
@@ -373,7 +362,6 @@ class SyncStateStore
                     lastRunOutcome = this[RUN_OUTCOME]?.let { name -> SyncOutcome.entries.firstOrNull { it.name == name } },
                     lastRunDetail = this[RUN_DETAIL],
                     lastEmAdaptationNightCount = this[EM_NIGHT_COUNT] ?: 0,
-                    sleepAsAndroidFollowUpDueAtMs = this[SAA_FOLLOW_UP_DUE_AT],
                     sleepAsAndroidRequest = readSleepAsAndroidRequest(),
                     lateDataPassAtMs = this[LATE_DATA_PASS_AT],
                     lateDataPassRequestedAtMs = this[LATE_DATA_PASS_REQUESTED_AT],

@@ -136,9 +136,12 @@ class RecomputeWorker
     }
 
 /**
- * Sends the follow-up sync request to Sleep as Android ([SleepAsAndroidSyncRequests.sendFollowUp]) that a run which
- * wrote a new night scheduled about 10 minutes later. Reads nothing from Health Connect and always succeeds: a failed
- * request is logged (a retry could only send it late). Never throws out of [doWork] except for cancellation.
+ * Checks the sync request owed to Sleep as Android and sends it once the recent nights are complete
+ * ([SleepAsAndroidSyncRequests.onWork]): the request of a run that wrote, its follow-up about 10 minutes later and every
+ * later check of a request that waits, scheduled by the runs and by this work itself. The check reads Health Connect,
+ * in the background unless the app is visible: without READ_HEALTH_DATA_IN_BACKGROUND it then relies on what an
+ * earlier check in the foreground stored. Always succeeds: a failed request is logged (a retry could only send it
+ * late). Never throws out of [doWork] except for cancellation.
  */
 @HiltWorker
 class SleepAsAndroidSyncWorker
@@ -152,11 +155,11 @@ class SleepAsAndroidSyncWorker
         @Suppress("TooGenericExceptionCaught") // Workers must never throw: a failed request is logged, not retried.
         override suspend fun doWork(): Result {
             try {
-                requests.sendFollowUp()
+                requests.onWork()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                logger.e(TAG, "follow-up sync request failed unexpectedly", throwable = e)
+                logger.e(TAG, "sync request failed unexpectedly", throwable = e)
             }
             return Result.success()
         }

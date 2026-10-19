@@ -30,6 +30,8 @@ enum class RetryCause {
  * @property alreadyRunning another run of the same job was in progress; nothing was done.
  * @property personalModelUpdated population EM stored a new personal model after the run.
  * @property sleepAsAndroidSyncRequested Sleep as Android was asked to sync after the run (`write.requestSleepAsAndroidSync`).
+ * @property sleepAsAndroidSyncDeferred the run wrote and the sync request to Sleep as Android it owes waits until the
+ *   nights are complete (it is sent later, by another run or its own work).
  */
 data class RunSummary(
     val found: Int = 0,
@@ -43,6 +45,7 @@ data class RunSummary(
     val alreadyRunning: Boolean = false,
     val personalModelUpdated: Boolean = false,
     val sleepAsAndroidSyncRequested: Boolean = false,
+    val sleepAsAndroidSyncDeferred: Boolean = false,
 ) {
     /** Constructors. */
     companion object {

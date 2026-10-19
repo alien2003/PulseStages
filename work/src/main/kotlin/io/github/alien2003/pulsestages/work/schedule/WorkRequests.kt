@@ -60,8 +60,8 @@ object DailySchedule {
  *   ([OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST]);
  * - backfill and "recompute all": one-time long-running works (they go foreground themselves);
  * - recompute of one night: one-time, expedited like "estimate now";
- * - the follow-up sync request to Sleep as Android: one-time with an initial delay and the constraints of the
- *   scheduled works (it reads nothing from Health Connect).
+ * - the sync request to Sleep as Android: one-time with an initial delay and the constraints of the scheduled works
+ *   (it checks whether the recent nights are complete, which reads Health Connect).
  */
 object WorkRequests {
     /** Initial backoff delay: 30 s (WorkRequest.MIN_BACKOFF_MILLIS is 10 s). */
@@ -90,7 +90,12 @@ object WorkRequests {
         /** "Recompute all" / "recompute stale". */
         const val RECOMPUTE_ALL: String = "recompute-all"
 
-        /** The follow-up sync request to Sleep as Android (at most one pending). */
+        /**
+         * The sync request to Sleep as Android, sent once the recent nights are complete: the owed request, its follow-up
+         * and the checks of a request that waits (at most one pending). The name of 0.4.0's follow-up work is kept: one
+         * may still be pending under it after an update, and the next one scheduled replaces or follows it instead of
+         * running beside it (when it runs, it checks like a new one).
+         */
         const val SLEEP_AS_ANDROID_FOLLOW_UP: String = "sleep-as-android-follow-up"
 
         /** Recompute of one night. */
@@ -191,7 +196,7 @@ object WorkRequests {
             .withDefaults(Tags.RECOMPUTE)
             .build()
 
-    /** The follow-up sync request to Sleep as Android, [delayMs] from now, with the constraints of [schedule]. */
+    /** The work of the sync request to Sleep as Android, [delayMs] from now, with the constraints of [schedule]. */
     fun sleepAsAndroidFollowUp(
         schedule: ScheduleSettings,
         delayMs: Long,

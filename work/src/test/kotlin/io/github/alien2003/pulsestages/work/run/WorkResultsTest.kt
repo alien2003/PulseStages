@@ -102,6 +102,18 @@ class WorkResultsTest {
     }
 
     @Test
+    fun `whether the sync request to Sleep as Android waits for complete nights is kept in the output`() {
+        val summary = completed.summary.copy(sleepAsAndroidSyncDeferred = true)
+
+        val output = WorkResults.output(WorkOutcome.Completed(summary))
+
+        assertEquals(true, output.getBoolean(WorkResults.KEY_SLEEP_AS_ANDROID_SYNC_DEFERRED, false))
+        assertEquals("sleepAsAndroidSyncDeferred", WorkResults.KEY_SLEEP_AS_ANDROID_SYNC_DEFERRED)
+        assertEquals(summary, WorkResults.parse(output)?.summary)
+        assertEquals(completed.summary, WorkResults.parse(WorkResults.output(completed))?.summary, "false round-trips too")
+    }
+
+    @Test
     fun `the output of a run stored before the refresh counter existed reads as nothing refreshed`() {
         val older =
             Data
@@ -113,6 +125,7 @@ class WorkResultsTest {
 
         assertEquals(RunSummary(found = 2, estimated = 2), WorkResults.parse(older)?.summary)
         assertEquals(false, WorkResults.parse(older)?.summary?.sleepAsAndroidSyncRequested, "nor a sync request to Sleep as Android")
+        assertEquals(false, WorkResults.parse(older)?.summary?.sleepAsAndroidSyncDeferred, "nor one that waits")
     }
 
     @Test

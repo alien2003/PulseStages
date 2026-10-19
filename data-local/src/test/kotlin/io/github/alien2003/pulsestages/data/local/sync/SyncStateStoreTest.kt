@@ -182,34 +182,12 @@ class SyncStateStoreTest {
         }
 
     @Test
-    fun `a pending follow-up to Sleep as Android persists across instances until it is cleared`() =
-        runTest {
-            withStore { store ->
-                assertNull(store.state.first().sleepAsAndroidFollowUpDueAtMs, "none pending initially")
-                store.setSleepAsAndroidFollowUpDue(601_000L)
-                store.setSleepAsAndroidFollowUpDue(605_000L)
-                store.saveNewToken(listOf("com.example.a"), "t1")
-            }
-            withStore { store ->
-                assertEquals(605_000L, store.state.first().sleepAsAndroidFollowUpDueAtMs, "the later request replaced the first")
-
-                store.setSleepAsAndroidFollowUpDue(null)
-
-                val state = store.state.first()
-                assertNull(state.sleepAsAndroidFollowUpDueAtMs)
-                assertEquals("t1", state.changesToken?.token, "nothing else is touched")
-                store.setSleepAsAndroidFollowUpDue(null)
-                assertNull(store.state.first().sleepAsAndroidFollowUpDueAtMs, "clearing nothing is harmless")
-            }
-        }
-
-    @Test
     fun `the time of the last late-data pass persists across instances and the next pass replaces it`() =
         runTest {
             withStore { store ->
                 assertNull(store.state.first().lateDataPassAtMs, "no pass yet")
                 store.markLateDataPass(2_000L)
-                store.setSleepAsAndroidFollowUpDue(601_000L)
+                store.updateSleepAsAndroidRequest { it.copy(dueAtMs = 601_000L) }
             }
             withStore { store ->
                 assertEquals(2_000L, store.state.first().lateDataPassAtMs)
@@ -218,7 +196,7 @@ class SyncStateStoreTest {
 
                 val state = store.state.first()
                 assertEquals(3_302_000L, state.lateDataPassAtMs)
-                assertEquals(601_000L, state.sleepAsAndroidFollowUpDueAtMs, "nothing else is touched")
+                assertEquals(601_000L, state.sleepAsAndroidRequest.dueAtMs, "nothing else is touched")
                 assertNull(state.lastRunStartedAtMs)
             }
         }
@@ -333,7 +311,6 @@ class SyncStateStoreTest {
                     state.sleepAsAndroidRequest,
                     "kept under the new keys",
                 )
-                assertNull(state.sleepAsAndroidFollowUpDueAtMs)
             }
             assertFalse(LEGACY_FOLLOW_UP_DUE_AT.name in storedKeys(), "the 0.4.0 key is gone")
         }

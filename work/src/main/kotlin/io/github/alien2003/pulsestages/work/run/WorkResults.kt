@@ -104,6 +104,9 @@ object WorkResults {
     /** Output key: Sleep as Android was asked to sync. */
     const val KEY_SLEEP_AS_ANDROID_SYNC: String = "sleepAsAndroidSyncRequested"
 
+    /** Output key: the sync request to Sleep as Android waits until the nights are complete. */
+    const val KEY_SLEEP_AS_ANDROID_SYNC_DEFERRED: String = "sleepAsAndroidSyncDeferred"
+
     /** Longest stored detail (WorkManager limits a Data object to 10 KB). */
     private const val MAX_DETAIL_LENGTH = 1_000
 
@@ -190,6 +193,7 @@ object WorkResults {
             .putBoolean(KEY_ALREADY_RUNNING, summary.alreadyRunning)
             .putBoolean(KEY_MODEL_UPDATED, summary.personalModelUpdated)
             .putBoolean(KEY_SLEEP_AS_ANDROID_SYNC, summary.sleepAsAndroidSyncRequested)
+            .putBoolean(KEY_SLEEP_AS_ANDROID_SYNC_DEFERRED, summary.sleepAsAndroidSyncDeferred)
     }
 
     private fun summaryOf(data: Data): RunSummary =
@@ -205,6 +209,7 @@ object WorkResults {
             alreadyRunning = data.getBoolean(KEY_ALREADY_RUNNING, false),
             personalModelUpdated = data.getBoolean(KEY_MODEL_UPDATED, false),
             sleepAsAndroidSyncRequested = data.getBoolean(KEY_SLEEP_AS_ANDROID_SYNC, false),
+            sleepAsAndroidSyncDeferred = data.getBoolean(KEY_SLEEP_AS_ANDROID_SYNC_DEFERRED, false),
         )
 
     private inline fun <reified E : Enum<E>> enumOrNull(name: String?): E? = enumValues<E>().firstOrNull { it.name == name }

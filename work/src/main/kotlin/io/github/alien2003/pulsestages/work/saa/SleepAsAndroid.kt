@@ -23,6 +23,12 @@ object SleepAsAndroid {
     const val ACTION_REQUEST_SYNC: String = "com.urbandroid.sleep.REQUEST_SYNC"
 
     /**
+     * The window of Sleep as Android's Health Connect sync: 30 days (observed with Sleep as Android 20261006). Only the
+     * sessions that start in it can be imported by a request, so only they are checked before one is sent.
+     */
+    const val SYNC_WINDOW_MS: Long = 30L * 24 * 60 * 60 * 1000
+
+    /**
      * The sync request: the action restricted to [PACKAGE] (an explicit broadcast for the manifest-receiver limits of
      * Android 8+). No extras, data, component or flags: it carries nothing about the user, and a stopped Sleep as
      * Android (never opened, or force-stopped) is deliberately not woken.
@@ -31,21 +37,30 @@ object SleepAsAndroid {
 }
 
 /** Sends Sleep as Android's sync request ([SleepAsAndroid.requestSyncIntent]). */
-fun interface SyncRequestSender {
+interface SyncRequestSender {
+    /**
+     * Whether Sleep as Android with its receiver of the request is installed: a lookup only, nothing is sent. Checked
+     * before anything is stored or read for a request, so that nothing is owed to an app that is not there.
+     */
+    fun isInstalled(): Boolean
+
     /** Sends the request; false when Sleep as Android (with its receiver) is not installed: nothing was sent. */
     fun send(): Boolean
 }
 
 /**
- * [SyncRequestSender] over a broadcast. Whether the receiver exists is looked up first (that needs package visibility:
- * the app manifest queries [SleepAsAndroid.PACKAGE]); the delivery itself does not. Android reports nothing back, so
- * "sent" does not mean that Sleep as Android received it (a stopped app receives no broadcasts).
+ * [SyncRequestSender] over a broadcast. Whether the receiver exists is looked up first, by [isInstalled] and again by
+ * [send] (that needs package visibility: the app manifest queries [SleepAsAndroid.PACKAGE]); the delivery itself does
+ * not. Android reports nothing back, so "sent" does not mean that Sleep as Android received it (a stopped app receives
+ * no broadcasts).
  */
 class BroadcastSyncRequestSender
     @Inject
     constructor(
         @param:ApplicationContext private val context: Context,
     ) : SyncRequestSender {
+        override fun isInstalled(): Boolean = receiversOf(SleepAsAndroid.requestSyncIntent()).isNotEmpty()
+
         override fun send(): Boolean {
             val intent = SleepAsAndroid.requestSyncIntent()
             if (receiversOf(intent).isEmpty()) return false

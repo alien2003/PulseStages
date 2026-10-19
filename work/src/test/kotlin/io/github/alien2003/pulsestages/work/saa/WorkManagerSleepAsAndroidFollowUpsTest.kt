@@ -25,8 +25,8 @@ import org.robolectric.RuntimeEnvironment
 
 /**
  * [WorkManagerSleepAsAndroidFollowUps] against work-testing's test WorkManager (Robolectric): one delayed unique work
- * with the schedule's constraints, replaced by a later follow-up and removed by a cancel. Its worker never runs here
- * (the delay holds it; the factory would refuse it anyway).
+ * with the schedule's constraints, replaced by a later one that a run schedules, appended to the pending one by the work
+ * itself, and removed by a cancel. Its worker never runs here (the delay holds it; the factory would refuse it anyway).
  */
 @RunWith(RobolectricTestRunner::class)
 class WorkManagerSleepAsAndroidFollowUpsTest {
@@ -92,5 +92,33 @@ class WorkManagerSleepAsAndroidFollowUpsTest {
 
         assertTrue(infos().all { it.state == WorkInfo.State.CANCELLED })
         followUps.cancel()
+    }
+
+    @Test
+    fun theWorkSchedulesItselfAfterThePendingOneWithoutCancellingIt() {
+        followUps.schedule(SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS, ScheduleSettings())
+        val pending = infos().single().id
+
+        followUps.scheduleFromWork(SleepAsAndroidSyncRequests.RECHECK_MS, ScheduleSettings(runOnlyWhenNotLowBattery = false))
+
+        val infos = infos()
+        assertEquals("appended: ${infos.map { it.state }}", 2, infos.size)
+        assertEquals("not cancelled", WorkInfo.State.ENQUEUED, infos.single { it.id == pending }.state)
+        val next = infos.single { it.id != pending }
+        assertEquals("waits for the running one to finish", WorkInfo.State.BLOCKED, next.state)
+        assertEquals(SleepAsAndroidSyncRequests.RECHECK_MS, next.initialDelayMillis)
+        assertFalse(next.constraints.requiresBatteryNotLow())
+
+        followUps.cancel()
+        assertTrue(infos().all { it.state == WorkInfo.State.CANCELLED })
+    }
+
+    @Test
+    fun withoutAPendingWorkTheWorkSchedulesItselfAsTheOnlyOne() {
+        followUps.scheduleFromWork(SleepAsAndroidSyncRequests.RECHECK_MS, ScheduleSettings())
+
+        val info = infos().single()
+        assertEquals(WorkInfo.State.ENQUEUED, info.state)
+        assertEquals(SleepAsAndroidSyncRequests.RECHECK_MS, info.initialDelayMillis)
     }
 }

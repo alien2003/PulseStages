@@ -1,6 +1,9 @@
 package io.github.alien2003.pulsestages.work.saa
 
+import io.github.alien2003.pulsestages.data.hc.HcSleepSession
+import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository
 import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
+import io.github.alien2003.pulsestages.data.hc.pipeline.SourceSettlement
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
 
 /** A [SyncRequestSender] that counts the requests; [installed] says whether Sleep as Android is there. */
@@ -9,7 +12,7 @@ class RecordingSyncRequestSender(
     @Volatile var installed: Boolean = true,
 ) : SyncRequestSender {
     /** Thrown by [send] when set (e.g. a SecurityException of the platform). */
-    @Volatile var failure: Exception? = null
+    @Volatile var failure: Throwable? = null
 
     /** Requests sent. */
     @Volatile var sent: Int = 0
@@ -19,6 +22,15 @@ class RecordingSyncRequestSender(
     @Volatile var attempts: Int = 0
         private set
 
+    /** Calls of [isInstalled]. */
+    @Volatile var lookups: Int = 0
+        private set
+
+    override fun isInstalled(): Boolean {
+        lookups++
+        return installed
+    }
+
     override fun send(): Boolean {
         attempts++
         failure?.let { throw it }
@@ -27,10 +39,68 @@ class RecordingSyncRequestSender(
     }
 }
 
+/**
+ * Sleep as Android's import of a Health Connect sync, as its code does it, [importDelayMs] after every request (at once
+ * when 0; [importDue] runs the imports that are due): the sessions of other apps that start in its 30-day window, in
+ * start order, where a session that overlaps an earlier-starting one is dropped (the earliest start wins) and one that
+ * overlaps an imported record is skipped (both ends inclusive). An imported record is never updated.
+ */
+class ImportingSleepAsAndroid(
+    private val repository: FakeHealthRepository,
+    private val importDelayMs: Long = 0L,
+    private val now: () -> Long,
+) : SyncRequestSender {
+    private val pending = mutableListOf<Long>()
+
+    /** The records Sleep as Android holds, as they were when it imported them. */
+    val imported: MutableList<HcSleepSession> = mutableListOf()
+
+    /** Requests received. */
+    var requests: Int = 0
+        private set
+
+    /** When each request was received. */
+    val requestTimes: MutableList<Long> = mutableListOf()
+
+    /** When the next import is due, or null when no request waits for one. */
+    val nextImportAtMs: Long? get() = pending.minOrNull()
+
+    override fun isInstalled(): Boolean = true
+
+    override fun send(): Boolean {
+        requests++
+        requestTimes += now()
+        if (importDelayMs == 0L) import() else pending += now() + importDelayMs
+        return true
+    }
+
+    /** Runs the imports of the requests whose delay has passed. */
+    fun importDue() {
+        if (pending.removeAll { it <= now() }) import()
+    }
+
+    private fun import() {
+        val candidates = mutableListOf<HcSleepSession>()
+        repository
+            .allSessions()
+            .filter { it.startMs >= now() - SleepAsAndroid.SYNC_WINDOW_MS }
+            .forEach { session -> if (candidates.none { it.overlaps(session) }) candidates += session }
+        candidates.filter { candidate -> imported.none { it.overlaps(candidate) } }.forEach { imported += it }
+    }
+
+    /** The imported record that overlaps `[startMs, endMs]`. */
+    fun recordOf(
+        startMs: Long,
+        endMs: Long,
+    ): HcSleepSession = imported.single { it.startMs <= endMs && startMs <= it.endMs }
+
+    private fun HcSleepSession.overlaps(other: HcSleepSession): Boolean = startMs <= other.endMs && other.startMs <= endMs
+}
+
 /** A [SleepAsAndroidFollowUps] that records what is scheduled and cancelled. */
 class RecordingFollowUps : SleepAsAndroidFollowUps {
     /**
-     * One [schedule] call.
+     * One [schedule] or [scheduleFromWork] call.
      *
      * @property delayMs the delay.
      * @property schedule the schedule settings whose constraints apply.
@@ -43,6 +113,12 @@ class RecordingFollowUps : SleepAsAndroidFollowUps {
     /** Every [schedule] call, in order. */
     val scheduled: MutableList<Scheduled> = mutableListOf()
 
+    /** Every [scheduleFromWork] call, in order. */
+    val scheduledFromWork: MutableList<Scheduled> = mutableListOf()
+
+    /** Every call, in order: "schedule", "scheduleFromWork" or "cancel". */
+    val calls: MutableList<String> = mutableListOf()
+
     /** Calls of [cancel]. */
     var cancelled: Int = 0
         private set
@@ -51,19 +127,30 @@ class RecordingFollowUps : SleepAsAndroidFollowUps {
         delayMs: Long,
         schedule: ScheduleSettings,
     ) {
+        calls += "schedule"
         scheduled += Scheduled(delayMs, schedule)
     }
 
+    override fun scheduleFromWork(
+        delayMs: Long,
+        schedule: ScheduleSettings,
+    ) {
+        calls += "scheduleFromWork"
+        scheduledFromWork += Scheduled(delayMs, schedule)
+    }
+
     override fun cancel() {
+        calls += "cancel"
         cancelled++
     }
 }
 
-/** The production [SleepAsAndroidSyncRequests] over this harness's settings, sync state, clock and log. */
+/** The production [SleepAsAndroidSyncRequests] over this harness's settings, sync state, clock, log and [settlement]. */
 fun PipelineHarness.sleepAsAndroidRequests(
     sender: SyncRequestSender = RecordingSyncRequestSender(),
     followUps: SleepAsAndroidFollowUps = RecordingFollowUps(),
-): SleepAsAndroidSyncRequests = SleepAsAndroidSyncRequests(settings, syncState, sender, followUps, clock, logger)
+    settlement: SourceSettlement = this.settlement,
+): SleepAsAndroidSyncRequests = SleepAsAndroidSyncRequests(settings, syncState, sender, followUps, clock, logger, settlement)
 
 /** Turns `write.requestSleepAsAndroidSync` (on by default) on or off. */
 suspend fun PipelineHarness.requestSleepAsAndroidSync(on: Boolean = true) {

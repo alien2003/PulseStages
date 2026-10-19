@@ -55,7 +55,7 @@ abstract class WorkBindingsModule {
     @Binds
     abstract fun bindSyncRequestSender(implementation: BroadcastSyncRequestSender): SyncRequestSender
 
-    /** The follow-up sync request to Sleep as Android as a WorkManager work. */
+    /** The work of the sync request to Sleep as Android (its checks and its follow-up) as a WorkManager work. */
     @Binds
     abstract fun bindSleepAsAndroidFollowUps(implementation: WorkManagerSleepAsAndroidFollowUps): SleepAsAndroidFollowUps
 }
