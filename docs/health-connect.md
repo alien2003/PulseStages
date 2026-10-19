@@ -135,7 +135,9 @@ when it means "no package").
 | `SleepSessionRecord` | `SourceScanner` (Settings → "Sleep sources") | any origin | the last 90 days, or the whole history with `READ_HEALTH_DATA_HISTORY` |
 | `SleepSessionRecord` | `ReferenceComparison` (Compare) | any origin; PulseStages' own sessions are dropped afterwards | "90 days", "1 year" or "All history" |
 | `SleepSessionRecord` (own) | write verification; the per-run lookup of our records (also by a refresh whose input changed, to compare with the stored record); "Delete my sessions"; the delete fallback on Android 9–13 | PulseStages only | ±60 s around the written record's start; ±24 h around the run's nights; from the epoch to now; from the epoch to now + 24 h |
+| `SleepSessionRecord` | `SourceSettlement`: the check of a sync request to Sleep as Android that is owed ([8.3](#83-sleep-as-android)) | the enabled source packages except Sleep as Android | `[now − 30 days, now)`, the window of Sleep as Android's sync; one read, not padded |
 | `HeartRateRecord` | `NightInputReader` (pipeline, including the refresh of written nights; night detail, Compare, personalization) | the night's package (`sources.hrSources` = `SAME_AS_SLEEP`, default) or any origin (`ANY`); Compare uses the enabled sources first and any origin when they have none | `[start − margin − 24 h, end + margin)`; samples are then clipped to `[start − margin, end + margin)` |
+| `HeartRateRecord` | `SourceSettlement`, after its ledger checks passed | per package with sessions that ended in the last 12 h, that package only, whatever `sources.hrSources` says | `[earliest start of those sessions − 24 h, now + 5 min)`; samples are then clipped to `[earliest start, now + 5 min)` |
 | `StepsRecord` | `NightInputReader` | as heart rate | as heart rate; records overlapping `[start − margin, end + margin)` are kept |
 | `OxygenSaturationRecord`, `RespiratoryRateRecord`, `HeartRateVariabilityRmssdRecord` | `NightInputReader`, only when enabled in the parameters and granted | as heart rate | `[start − margin, end + margin)`; instantaneous records need no padding |
 
@@ -193,6 +195,12 @@ Connect built from android15-release and later rejects other reads with a `Secur
 silently replaces the origin filter by the caller's own package and returns no error (AOSP
 `HealthConnectServiceImpl`). PulseStages never relies on either behaviour: it refuses such reads itself and reports the
 run as blocked ([architecture.md §6.5](architecture.md#65-the-background-permission-guard)).
+
+The check of a sync request owed to Sleep as Android also reads other apps' data (their sleep sessions and heart rate,
+[8.3](#83-sleep-as-android)), mostly in its own work in the background. Without the permission the same guard refuses
+those reads before the call, so they cost no quota, and the request falls back on what a check in the foreground found:
+it is sent without a new check 15 minutes after such a check first found the nights complete, and without such a
+finding it waits for the next run in the foreground ("Estimate new", a recompute or a backfill).
 
 ## 4. Data written
 
@@ -369,7 +377,7 @@ the same range.
 | `MAX_REREAD_MS` | 30 days | Health Connect keeps change logs for about 30 days |
 | `TOKEN_MAX_AGE_MS` | 25 days | tokens are documented as valid for 30 days; an older token is treated as expired |
 | `RETRY_RECENT_MS` | 36 hours | nights that ended this recently are retried (without an estimate) or refreshed (written) by every late-data pass; late arrivals are retried or refreshed for this long after they were first seen |
-| `MIN_RECHECK_GAP_MS` | 55 min | the late-data pass (the retry and the refresh of recent nights) runs at most this often, measured from the start of the run whose pass last completed (`late_data_pass_at` in `sync_state`), so a 15- or 30-minute check keeps the hourly cadence; 55 rather than 60 min so that an hourly run is never skipped by a few minutes of jitter. "Estimate new" runs the pass at once |
+| `MIN_RECHECK_GAP_MS` | 55 min | the late-data pass (the retry and the refresh of recent nights) runs at most this often, measured from the start of the run whose pass last completed (`late_data_pass_at` in `sync_state`), so a 15- or 30-minute check keeps the hourly cadence; 55 rather than 60 min so that an hourly run is never skipped by a few minutes of jitter. "Estimate new" runs the pass at once, and so does the first run that starts after the sync request to Sleep as Android asked for a pass (`late_data_pass_requested_at`, [8.3](#83-sleep-as-android)) |
 | `LATE_ARRIVAL_MAX_MS` | 30 days | nights first seen at most this long after they ended are retried or refreshed with growing gaps |
 | `MAX_REFRESH_NIGHTS_PER_RUN` | 8 | written nights whose input one pass reads again; the rest are left to later passes ([7.2](#72-quotas)) |
 
@@ -407,8 +415,11 @@ pass ([architecture.md §6.7](architecture.md#67-what-a-sync-does),
 every check. A pass that stopped early (a quota error, a refused access) or ended with an exception (for example a
 Health Connect error of the retry's window read) is repeated by the next run; a transient error of the refresh's
 window read ends only the refresh, and the pass counts as done, so it is left to the next pass. "Estimate new" (`EstimateTrigger.NOW`, `userRequested`) runs the pass at once, also a few minutes after the
-last one, and the next scheduled pass comes at least 55 min after it. Heart rate that arrives after these windows is
-used only by a recompute.
+last one, and the next scheduled pass comes at least 55 min after it. The sync request to Sleep as Android asks for a
+pass when the recent nights first look complete (`late_data_pass_requested_at` in `sync_state`), because a pass may
+still rewrite a night with the heart rate that made them look complete: the first run that starts at or after that
+time runs the pass, also within 55 min of the last one, unless a pass of a run that started at or after it has already
+completed ([8.3](#83-sleep-as-android)). Heart rate that arrives after these windows is used only by a recompute.
 
 ## 6. Deleting records
 
@@ -502,6 +513,16 @@ without an estimate (usually none or one; more after a backfill of nights withou
 reads of the checks (about 97 a day at 15 min), below 8000; each "Estimate new" adds one pass. Usually only the one or two sessions
 of the last 36 hours are due. A backlog of more than 8 due nights (a backfill that makes many recent nights due at
 once) is worked off one pass at a time, as with hourly checks.
+
+While a sync request to Sleep as Android is owed ([8.3](#83-sleep-as-android)), each check of it makes 1 + n read
+calls: one read of the sleep sessions of the enabled sources of the last 30 days (one page) and, once the ledger checks
+pass, one heart-rate read per package with a session that ended in the last 12 hours (usually n = 1; one call per page
+of up to 1000 records over that night and the 24 h left padding, usually one to three). A check is made only when the
+request is due: after a completed run and in its work, at most about four times an hour (a deferral moves the due time
+15 minutes ahead, or to the end of the confirmation or the time the session's heart rate must reach). The request is
+usually owed from the morning write until one or two hours after waking up; the worst case, a request owed for the full
+24 hours (`MAX_OWED_MS`), is about 96 checks and a few hundred read calls a day, well within the background quota. A
+check that the background rule refuses ([3.5](#35-background-reads)) makes no call.
 
 The Health Connect sync that "Ask Sleep as Android to sync" requests ([8.3](#83-sleep-as-android)) is Sleep as
 Android's own: the quota is counted per app (`RateLimiter` keeps its buckets per caller uid), so its reads (among them
@@ -637,22 +658,23 @@ Android does not need it, because it imports AWAKE as awake. The user's steps ar
 [user guide](user-guide.md#sleep-as-android).
 
 **`write.requestSleepAsAndroidSync`** (Settings → "Written sessions" → "Ask Sleep as Android to sync", on by default)
-lets PulseStages start that sync. After a run that wrote or rewrote at least one session (a periodic or daily check,
-"Estimate new", a backfill or a recompute; also one that stopped after writing: a quota error, a refused access,
-another Health Connect error, or WorkManager stopping it), `SleepAsAndroidSyncRequests.afterRun` sends Sleep as
-Android's public sync request once: the broadcast
-`Intent("com.urbandroid.sleep.REQUEST_SYNC").setPackage("com.urbandroid.sleep")` (`SleepAsAndroid.requestSyncIntent`)
-with no extras, data, component or flags, so it carries nothing about the user. Its
-[Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html) lists it among its broadcasts as "Request Backup
-Sync" ("Triggers CSV export and cloud backup") and asks for the package on every intent. `BroadcastSyncRequestSender`
-first looks up the receiver with `queryBroadcastReceivers` (hence the `<queries>` entry,
-[2.2](#22-manifest-declarations)) and sends nothing when Sleep as Android is not installed. Android reports nothing
-back, so a request counts as sent even when Sleep as Android does not get it: a stopped app (never opened, or
-force-stopped) receives no broadcasts, and PulseStages deliberately does not wake it (no
-`FLAG_INCLUDE_STOPPED_PACKAGES`). A run that wrote nothing sends nothing, and a failed request is logged and never
-fails the run; once the request is out, a failure to store or schedule its follow-up (below) is logged as a warning of
-its own and the request still counts as sent. Every session is counted as it is written (`WriteCount`,
-[architecture.md §6.7](architecture.md#67-what-a-sync-does)), so only a process death loses the request; the next
+lets PulseStages start that sync once the nights Sleep as Android would import are complete. A run that wrote or
+rewrote at least one session (a periodic or daily check, "Estimate new", a backfill or a recompute; also one that
+stopped after writing: a quota error, a refused access, another Health Connect error, or WorkManager stopping it)
+leaves a request owed (`SleepAsAndroidSyncRequests.recordRun`), and the request is sent only when the check below finds
+those nights complete, usually one to two hours after the user woke up. It is Sleep as Android's public sync request:
+the broadcast `Intent("com.urbandroid.sleep.REQUEST_SYNC").setPackage("com.urbandroid.sleep")`
+(`SleepAsAndroid.requestSyncIntent`) with no extras, data, component or flags, so it carries nothing about the user.
+Its [Intent API](https://sleep.urbandroid.org/docs/devs/intent_api.html) lists it among its broadcasts as "Request
+Backup Sync" ("Triggers CSV export and cloud backup") and asks for the package on every intent.
+`BroadcastSyncRequestSender` looks up the receiver with `queryBroadcastReceivers` (hence the `<queries>` entry,
+[2.2](#22-manifest-declarations)) before a request is owed and again before it is sent; nothing is owed or sent while
+Sleep as Android is not installed. Android reports nothing back, so a request counts as sent even when Sleep as Android
+does not get it: a stopped app (never opened, or force-stopped) receives no broadcasts, and PulseStages deliberately
+does not wake it (no `FLAG_INCLUDE_STOPPED_PACKAGES`). A run that wrote nothing owes nothing, and a failed request is
+logged and never fails the run; once the request is out, a failure to schedule its follow-up (below) is logged as a
+warning of its own and the request still counts as sent. Every session is counted as it is written (`WriteCount`,
+[architecture.md §6.7](architecture.md#67-what-a-sync-does)), so only a process death loses the owed request; the next
 request's sync, which reads the last 30 days, then covers that night too.
 
 Confirmed on the development phone (2026-10-17, Sleep as Android 20261006, PulseStages test build 0.4.0-alpha.1, a
@@ -666,31 +688,149 @@ network and runs only when its Health Connect integration is on; requests less t
 sync, and one that arrives while a sync runs is skipped. Its documentation describes only the backup, so the Health
 Connect part may change in any version.
 
+**Why the request waits for complete nights.** OHealth publishes a night in several uploads and updates the same
+session in place (same Health Connect id, a later end). PulseStages' log on the development phone shows it for 17, 18
+and 19 Oct 2026: a provisional session cut at about 07:29 while the user still slept (03:14 → 07:29, 04:20 → 07:29 and
+02:19 → 07:29), on 18 Oct an intermediate version at about 09:30, and the final version within minutes of the real wake
+(ending 10:55, 12:15 and 08:03; on 18 and 19 Oct published at most 2 and 7 minutes after the wake). PulseStages
+followed every version under one `clientRecordId` per night (a recompute after the source changed, version + 1).
+Version 0.4.0 asked for a sync right after its first write of a night (07:34 on 18 Oct, 07:55 on 19 Oct), and Sleep as
+Android, which imports about 10 s after a request and never updates an imported record (above), most likely imported
+the provisional version then. All three nights ended at 07:29 in Sleep as Android (confirmed on the development phone),
+and the later requests, sent after PulseStages' records of them were final, changed nothing. On 17 Oct the installed
+build sent no request: most likely a "Sync now" in Sleep as Android locked in PulseStages' record while it still ended
+at 07:29, because with 12-hour checks PulseStages had not yet processed OHealth's final version. Holding the write back
+instead would not help: a sync of Sleep as Android in the meantime (one of its own, or "Sync now") would import
+OHealth's provisional session, which has no stages, and keep it, and other readers would get the night later. So
+PulseStages still writes every version at once and gates only the request.
+
+**When the request is sent.** An owed request is checked after every completed run (`trySend`) and in its work
+(`onWork`, below), never before its due time. `SourceSettlement.check` reads the sleep sessions of the enabled sources
+except Sleep as Android (which never imports its own sessions) that start in the last 30 days
+(`SleepAsAndroid.SYNC_WINDOW_MS`, the window of Sleep as Android's sync); zero-length sessions and sessions ending more
+than 5 min in the future are ignored. A session is in scope when it ended or was last changed in the last 12 h
+(`SourceSettlement.SETTLE_TIMEOUT_MS`), and recent when it ended then. The first of these findings keeps the nights
+from counting as complete ("settled"):
+
+1. a ledger night of these sources that ended in the last 12 h has a source session that is gone from Health Connect,
+   and PulseStages has not applied the deletion yet, so its record of that night may still be there
+   (`DELETION_PENDING`);
+2. per session in scope, from the ledger only: PulseStages has not processed it as it is now (`NOT_PROCESSED`: no
+   row, or a row with other times); it belongs to two written nights (`LEFTOVER_OUTPUT`: superseding the older one
+   failed, and the next sync repairs it); its written night does not cover it (`OUTPUT_BEHIND`: it grew, and the
+   longer night could not be estimated); the night of a recent one still awaits an estimate (`AWAITING_ESTIMATE`). A
+   session that no automatic run would change counts as processed: one that `NEVER` kept from being written or whose
+   written night `NEVER` keeps, and one whose night the user deleted;
+3. per recent session, the heart rate of its own package, whatever `sources.hrSources` says (another app's heart rate
+   tells nothing about the source's next upload): it must reach the session's end + `sources.mergeGapMin` + 30 min
+   (`DATA_MARGIN_EXTRA_MS`; 60 min by default) and at least 5 min after the session was last changed
+   (`CLOCK_TOLERANCE_MS`; samples stamped after now + 5 min are ignored). A session in which its package wrote no heart
+   rate must instead be unchanged for 60 min (`QUIET_MS`) and that margin past its end (`WAITING_FOR_DATA`).
+
+The heart-rate rule follows the log: between OHealth's uploads no heart rate or steps past a provisional end reached
+Health Connect for at least 1.5 h, and the one upload during sleep (18 Oct) also extended the session, so heart rate
+past the end comes with or after the upload that publishes the final version. The margin covers a back-to-sleep
+fragment that would merge with the night (gaps of 21–36 min and sessions of 20–27 min were seen, which leaves 3–11 min
+of slack: do not lower it). Requiring the heart rate to come at least 5 min after the session's last change keeps heart
+rate that was already in Health Connect when a later version came out from settling that version. The ledger checks
+hold the request while PulseStages' own record of a night is not up to date.
+
+**Confirmation.** One settled check is not enough. The nights must look settled at every check for 15 min
+(`CONFIRM_MS`: OHealth wrote a session again 0–16 min after its final version, and how spread out one of its uploads
+can be has not been measured), and a run that started after they first looked settled must have completed its
+late-data pass ([5](#5-changes-api)), which may still rewrite a night with the heart rate that settled it (it did on 18
+and 19 Oct, 62 and 47 min after the final version was written). The first settled check requests that pass
+(`late_data_pass_requested_at`), so the next run runs it even within 55 min of the last one; it is waited for at most
+60 min (`CHECK_WAIT_MS`, the default check interval). Every write starts the settled streak again (an upload has just
+arrived or a record changed); a session that leaves the 12-h scope does not. While the nights are not settled, the
+request is checked again in 15 min (`RECHECK_MS`, the shortest check interval), or at the time the session's heart rate
+must reach if that is later. A check that fails with a Health Connect error keeps the streak and is repeated in 15 min.
+A request owed for 24 h (`MAX_OWED_MS`) without a write or a request is dropped with an info line ("sync request to
+Sleep as Android dropped: …"; a warning when the last check failed): every hold other than a failing check ends 12 h
+after the last change of a session, and check intervals up to 24 h are allowed. Two requests are at least 10 min apart
+(`FOLLOW_UP_DELAY_MS`), because Sleep as Android skips a request that arrives while it syncs. When the clock was set
+back (an owed, sent or streak time later than now), those times count as now, the streak starts again and the next
+check is at most 15 min away.
+
+**Expected delay.** With 15-minute checks the request goes out about 15–30 min after heart rate from an hour past the
+wake reaches Health Connect, with hourly checks up to an hour later: usually one to two hours after waking up. For 18
+Oct (final 12:15) that is about 13:30–14:45, for 19 Oct (final 08:03) about 09:20–10:35 (estimated from the log). A
+recompute waits as well, at least 15 min.
+
+**The work.** Every later check, and the follow-up, is made by the one-time unique work `sleep-as-android-follow-up`
+(`SleepAsAndroidSyncWorker`, battery-not-low like the scheduled works), unless a run comes first. A run that wrote
+schedules it with `ExistingWorkPolicy.REPLACE` for the due time, or for a check in 15 min, as soon as its writes are
+recorded, also when the run is stopped (`recordRun` is not cancellable and touches only `sync_state` and WorkManager);
+the check right after a completed run (`trySend`) reads Health Connect and is cancellable, and the work covers a run
+that ends otherwise. The work schedules its next check itself with `APPEND_OR_REPLACE` (REPLACE would cancel it while it
+still stores its state) and never cancels itself. The request state in `sync_state` (the due time, whether a follow-up
+is owed, since when a request is owed, the settled streak's session versions and start, the last request and its session
+versions) is stored in one edit before anything is sent or scheduled, so a work that runs again sends nothing twice, and
+scheduling is the last call. The work keeps the name of 0.4.0's follow-up work, so one still pending after the update is
+replaced or followed rather than run beside it; 0.4.0's due time (`sleep_as_android_follow_up_due_at`) is read once as
+an owed request without a follow-up, so it waits for complete nights as well, and the key is removed. With the option
+off or without Sleep as Android an owed request is forgotten, and a run cancels the work.
+
+**Without background access.** The work runs in the background, where `SourceSettlement` cannot read other apps' data
+without `READ_HEALTH_DATA_IN_BACKGROUND`: the guard refuses before the call ([3.5](#35-background-reads)). The request
+is then sent without a new check once a settled streak that a check in the foreground started is 15 min old (the log
+line adds "without a new check: no background access"); without such a streak nothing is scheduled, and the next run in
+the foreground ("Estimate new", a recompute or a backfill) checks. Automatic runs read nothing without that permission
+either ([2.1](#21-health-permissions)), so such a user gets the request about 15 min after an "Estimate new" made once
+the night is complete, and nothing checks that it is still complete then.
+
 **A follow-up for a new or recomputed night.** Sleep as Android attaches heart rate and SpO2 only to the records it
 had before a sync (above), so a night imported in the sync of a first request gets them only from a second one. A run
-that wrote a new or recomputed night (`written`) therefore also schedules one follow-up request
-`SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS` = 10 min later: the one-time unique work `sleep-as-android-follow-up`
-(`SleepAsAndroidSyncWorker`, `ExistingWorkPolicy.REPLACE`, battery-not-low like the scheduled works), whose due time
-is kept in `sync_state` (`sleep_as_android_follow_up_due_at`). It is a work rather than a step of the next run because
-it then comes about 10 min after the import whatever the check interval (up to 24 h), needs no Health Connect access
-and survives process death. REPLACE keeps at most one pending; the due time is cleared before the request is sent, so
-a work that runs again sends nothing twice; a work that runs before the due time (one that REPLACE did not stop in
-time, or after a clock change) sends nothing and schedules itself again for the rest of the wait, at most 10 min, so
-that it does not use up a newer night's follow-up within Sleep as Android's first sync; the work sends nothing once
-the option is off, and a run with the option off cancels a pending one. A run that only rewrote nights (`rewritten`:
-a refresh after late heart rate) gets no follow-up: Sleep as Android imported those nights earlier, so the request's
-own sync attaches the new heart rate, and every further sync may add another set of heart-rate values (below). A
-night Sleep as Android did not have yet (the option was off when PulseStages wrote it, the first request did not reach
-a stopped Sleep as Android, or the night was deleted there) is imported by that sync and gets its heart rate only from
-the next request. A pending follow-up that is due by then counts as sent by that request.
+that wrote a new or recomputed night (`written`) therefore owes one more request, due
+`SleepAsAndroidSyncRequests.FOLLOW_UP_DELAY_MS` = 10 min after the first is sent. It is checked like the first: while
+the nights still look settled with the same session versions, it goes out 10 min after the first; otherwise it waits
+for them again. A run that only rewrote nights (`rewritten`: a refresh after late heart rate) owes a request without a
+follow-up: Sleep as Android imported those nights earlier, so the request's own sync attaches the new heart rate, and
+every further sync may add another set of heart-rate values (below). A rewrite while a request is owed keeps its due
+time and its follow-up. A night Sleep as Android did not have yet (the option was off when PulseStages wrote it, the
+first request did not reach a stopped Sleep as Android, or the night was deleted there) is imported by that sync and
+gets its heart rate only from the next request.
 
-**The first version stays in Sleep as Android.** Its copy of a night keeps the stages of the first import (above),
-and with the option Sleep as Android imports a night seconds after PulseStages first wrote it. With 15- or 30-minute
-checks that first version is more often an estimate from part of the night's heart rate, possibly the rules fallback
-("Rules fallback (low coverage)"). The automatic update after late heart rate ([5](#5-changes-api)) then changes only
-PulseStages' record in Health Connect; Sleep as Android gets only the new heart rate. To get the update into Sleep as
-Android, the user deletes that night there and then recomputes it in PulseStages: with the option on, the request
-after the recompute makes Sleep as Android import it again, and the follow-up attaches its heart rate.
+**What can still lock in a night that is cut short.** The check covers only PulseStages' request. Sleep as Android still
+imports whatever Health Connect holds when it syncs for any other reason ("Sync now", saving a record, the end of its
+own tracking), and keeps it. Between OHealth's provisional version and PulseStages' record of the final one (on the
+development phone 07:34–12:17 on 18 Oct and 07:55–08:10 on 19 Oct) such a sync imports the night cut short, and before
+PulseStages' first write of the night OHealth's provisional session without stages. The user guide therefore advises
+against a "Sync now" in the morning. Further limits, documented rather than gated:
+
+- an OHealth upload during a sleep-in that brings heart rate past the cut without extending the session (not
+  observed) makes the provisional version look final;
+- an upload spread over more than 15 min (not measured; the info line "the nights changed while confirming (after …
+  min): …" measures it);
+- late heart rate of the previous night, uploaded the next morning, still changes only PulseStages' record of it:
+  Sleep as Android gets the heart rate but keeps the stages it imported;
+- with a check interval over 12 h a session can leave the scope before PulseStages has processed it;
+- without background access the request is sent without a new check (above);
+- a night that can never be estimated, or a band taken off at the wake (no heart rate after the end), holds every
+  request until 12 h after its end;
+- a process death between a write and `recordRun` loses the request until the next write; the next request's 30-day
+  sync covers that night.
+
+When a session that went out with the last request later has another start or end, PulseStages warns once ("Sleep as
+Android was asked to sync … min ago; a session of … then ended … earlier than it does now: Sleep as Android may keep
+the earlier version").
+
+**Repairing a night that was cut short.** Sleep as Android keeps its copy until the user deletes it there and it syncs
+again; the automatic update after late heart rate ([5](#5-changes-api)) and a recompute change only PulseStages'
+record. The user deletes that night in Sleep as Android (cloud icon) and does not undo the deletion: its undo writes
+the old record back, also over a night it has imported again since (observed with Sleep as Android 20261006). Then
+either the user recomputes the night in PulseStages, whose request, sent once the nights are complete, imports it
+again, and whose follow-up attaches its heart rate; or, once no provisional night is in Health Connect (in the
+afternoon), the user taps "Sync now" twice, the second time after the first sync has finished (a tap while a sync runs
+is skipped). A sync imports every session of the 30-day window that Sleep as Android lacks, a provisional one
+included, hence the afternoon. Not suitable: the sync button of its Health Connect screen (it reads up to 5 years back
+and imports every session of that span it lacks), Backup → "Download from Health Connect" (duplicates, above) and the
+"Health Connect" row (a switch, above). Confirmed on the development phone on 2026-10-19: after the three nights of
+17–19 Oct had been deleted in Sleep as Android, two syncs about 2 min apart, started by the same request PulseStages
+sends, imported PulseStages' final versions (Sleep as Android's log: 19 Oct 02:19:59 → 08:03:00; 17 and 18 Oct with
+heart rate attached up to 10:54 and 12:14) and attached their heart rate. Observed with Sleep as Android 20261006, not
+confirmed: SleepSync's normal sync also removes a deleted record from its server, and only a download or restore from
+SleepSync before such a sync could bring the old copy back.
 
 **Side effects**, observed with Sleep as Android 20261006 (confirmed on the development phone only where a point says
 so):
@@ -727,10 +867,16 @@ out). It is on by default because it has no effect without Sleep as Android (not
 no data; the cost is that with Sleep as Android installed every write brings the side effects above, so the user guide
 says when to turn it off. It is meant for use with `write.startBeforeSource`, which stays off by default: without
 that, the session Sleep as Android imports in the requested sync is the source's, without stages, as in its own syncs.
-PulseStages' log has "asked Sleep as Android to sync (written=N rewritten=M; follow-up in 10 min)" and, 10 min later,
-"asked Sleep as Android to sync again: heart rate and SpO2 for the night it imported" (tag `SleepAsAndroid`); the
-message of a run the user started adds "Sleep as Android was asked to sync.", and the work output carries
-`sleepAsAndroidSyncRequested`. The user's steps are in the [user guide](user-guide.md#ask-sleep-as-android-to-sync).
+The wait for complete nights has no setting of its own ([PLAN.md §2](../PLAN.md#2-decisions)). PulseStages' log (tag
+`SleepAsAndroid`) has "not asked yet: …; checking again in … min" while the request waits (at info level the first time
+and whenever what it waits for changes, at debug level for repeats), "asked Sleep as Android to sync (owed for … min;
+heart rate of … up to … min after the end; follow-up in 10 min)" and, 10 min later, "asked Sleep as Android to sync
+again: heart rate and SpO2 for the nights it imported". The message of a run the user started adds "Sleep as Android
+was asked to sync." or, when the run wrote and the request waits, "Sleep as Android will be asked to sync once the
+nights are complete."; the work output carries `sleepAsAndroidSyncRequested` and `sleepAsAndroidSyncDeferred`. The
+check is tested with replays of 18 and 19 Oct (`SourceSettlementTest`, and `SleepAsAndroidGateScenarioTest`, whose fake
+Sleep as Android imports like the real one and ends with PulseStages' final record of every night); it has not yet run
+on the development phone. The user's steps are in the [user guide](user-guide.md#ask-sleep-as-android-to-sync).
 
 ## 9. Deleting PulseStages data
 

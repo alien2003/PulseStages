@@ -10,6 +10,33 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sleep as Android kept nights that were cut short.** OHealth publishes a night in steps: on the development phone it
+  wrote each of the nights of 17–19 October 2026 first with an end at about 07:29, while the user was still asleep, and
+  extended the same session to the real wake later, up to about five hours later. Sleep as Android imports a night
+  once and never updates it, and 0.4.0 asked it to sync right after PulseStages' first write of a night, so it kept
+  the 07:29 versions (confirmed on the development phone). "Ask Sleep as Android to sync" now sends its request, and
+  the second one 10 minutes later, only once the recent nights are complete: PulseStages has processed every recent
+  session of the enabled sources as it is now, the heart rate of each session's own app reaches "Merge gap" + 30
+  minutes past its end (60 minutes by default) and was uploaded after the session last changed, and this holds for 15
+  minutes and through one more look for late heart rate, which the next check then makes even within the hour. The
+  request therefore usually comes 1–2 hours after you wake up instead of minutes after the first write, and a
+  recompute waits at least 15 minutes; PulseStages still writes every version to Health Connect at once. While a
+  request waits, the message of a run you started says "Sleep as Android will be asked to sync once the nights are
+  complete.", and the log says what it waits for ("not asked yet: …"); the setting's hint and the privacy screen say
+  that the request comes once a night is complete. A second request still pending from 0.4.0 waits for complete
+  nights as well. The work `sleep-as-android-follow-up` now reads Health Connect (one read of the sleep sessions of
+  the last 30 days and one heart-rate read per source, at most about four times an hour while a request is owed):
+  without background access the request is sent, without a new check, 15 minutes after a run in the foreground such
+  as "Estimate new" found the nights complete, and otherwise waits for such a run. Nights that Sleep as Android
+  already holds cut short stay as they are: delete them there (cloud icon; do not undo the deletion), then tap
+  "Recompute" on them in PulseStages, or "Sync now" twice in Sleep as Android in the afternoon (confirmed on the
+  development phone for three nights); do not tap "Sync now" there in the morning. The wait itself is not yet
+  confirmed on the development phone
+  ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync),
+  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+
 ## [0.4.0] - 2026-10-17
 
 PulseStages can now ask Sleep as Android to import a night it wrote and, 10 minutes later, to add the night's heart

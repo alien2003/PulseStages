@@ -201,11 +201,13 @@ already in Health Connect keep their stages until they are recomputed. The
   (asleep / awake only by default, the estimated stages, or nothing).
 - **Its own, clearly marked Health Connect record** per night: title "Sleep stages from heart rate (estimate)", the
   algorithm version and a hash of every parameter in its notes; the source data are never modified.
-- **Sleep as Android compatibility** (off by default): PulseStages' session starts 1 second before the watch app's,
-  for Sleep as Android, which imports only the first of overlapping sessions
+- **Sleep as Android compatibility** (off by default): PulseStages' session starts 1 second before the watch app's, for
+  Sleep as Android, which imports only the first of overlapping sessions
   ([user guide](docs/user-guide.md#sleep-as-android)), and **Ask Sleep as Android to sync** (on by default; it does
-  nothing without Sleep as Android): after writing or updating a night PulseStages asks Sleep as Android to sync, and
-  once more 10 minutes after a new or recomputed one so that the night also gets its heart rate
+  nothing without Sleep as Android): once the nights PulseStages wrote or updated are complete, usually 1–2 hours after
+  waking up, it asks Sleep as Android to sync, and once more 10 minutes later after a new or recomputed night so that
+  the night also gets its heart rate. It waits because Sleep as Android keeps the first version of a night it imports,
+  and the watch app may publish a night cut short before the whole night
   ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync)).
 - **Idempotent writes**: one output per night, keyed by the source sessions and rewritten under the same key on
   recompute, verified by reading it back; fragments of a night are merged, and deleted sources remove the output.
@@ -273,10 +275,15 @@ already in Health Connect keep their stages until they are recomputed. The
   there and synced again (last 29 days only). A nap written as asleep / awake shows there as a time span without phases
   (both confirmed on the development phone with Sleep as Android 20261006,
   [user guide](docs/user-guide.md#sleep-as-android)). "Ask Sleep as Android to sync" (on by default) sends Sleep as
-  Android its documented sync request after a write; on the development phone the request started Sleep as Android's
-  backup and its Health Connect sync of the last 30 days, the second request 10 minutes later did the same, and the
-  night shows its heart rate there, while the other side effects were observed with Sleep as Android 20261006 but are
-  not yet confirmed on the development phone.
+  Android its documented sync request once the nights PulseStages wrote are complete; on the development phone the
+  request started Sleep as Android's backup and its Health Connect sync of the last 30 days, the second request 10
+  minutes later did the same, and the night shows its heart rate there, while the other side effects were observed
+  with Sleep as Android 20261006 but are not yet confirmed on the development phone. Sleep as Android never updates a
+  night it imported: OHealth published nights cut at about 07:29 while the user still slept and extended them later,
+  and Sleep as Android kept the 07:29 versions (confirmed on the development phone), most likely imported through
+  0.4.0's request, which was sent right after the first write. The request now waits for complete nights (not yet
+  confirmed on the development phone); a "Sync now" in Sleep as Android in the morning can still import a night cut
+  short.
 - **Not verified yet.** Whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the
   behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).

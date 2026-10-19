@@ -13,8 +13,8 @@ stores, what it writes, where data can leave the app and how to delete everythin
   each written night it keeps only a fingerprint of them (sample counts and one-way digests), to notice data that
   arrives late.
 - Data leaves the app only through Health Connect, through files you export or share yourself, and through the system
-  log (logcat). By default it also asks Sleep as Android, if installed, to sync after writing a night ("Ask Sleep as
-  Android to sync", which you can turn off); that request carries no data.
+  log (logcat). By default it also asks Sleep as Android, if installed, to sync once a night it wrote is complete
+  ("Ask Sleep as Android to sync", which you can turn off); that request carries no data.
 - Its private data is excluded from Android backups and device transfer.
 
 The same points, in shorter form, are on the app's own privacy screen "PulseStages and your health data" (Home →
@@ -39,8 +39,8 @@ Contents:
 
 | Data | Read from | Used for | Kept by PulseStages |
 |---|---|---|---|
-| Sleep sessions of the sources you enable (by default OHealth) | Health Connect | finding the nights to estimate | the session ids, app package, start and end, and what happened to each session (ledger) |
-| Heart rate around each night | Health Connect | the main input of the estimate | not the samples; derived values only: the night's lowest smoothed heart rate (for the rolling baseline), the share of the night with heart-rate data, the number of samples used, and for each written night the number of samples read and a SHA-256 digest of them (input fingerprint, [3](#3-what-is-stored-on-the-device)) |
+| Sleep sessions of the sources you enable (by default OHealth) | Health Connect | finding the nights to estimate; with "Ask Sleep as Android to sync", checking that the recent ones are complete before the request | the session ids, app package, start and end, and what happened to each session (ledger); while a sync request to Sleep as Android is owed and after it was sent, the ids, start and end and last-change times of the recent sessions (sync state, [3](#3-what-is-stored-on-the-device)) |
+| Heart rate around each night | Health Connect | the main input of the estimate; with "Ask Sleep as Android to sync", whether the source's heart rate reaches past the end of a recent night | not the samples; derived values only: the night's lowest smoothed heart rate (for the rolling baseline), the share of the night with heart-rate data, the number of samples used, and for each written night the number of samples read and a SHA-256 digest of them (input fingerprint, [3](#3-what-is-stored-on-the-device)) |
 | Steps around each night | Health Connect | movement input of the estimate | not the samples; for each written night only their number and a SHA-256 digest (input fingerprint) |
 | SpO2, respiratory rate, HRV (optional; only when enabled in Settings and allowed) | Health Connect | optional inputs of the estimate | not the samples; for each written night only their number and a SHA-256 digest of each channel that was read (input fingerprint) |
 | Sleep sessions of every app (Sources screen) | Health Connect | listing the apps that write sleep, with session counts and the date of the last one | no; only the sources you enable, their priority and manually added packages are saved in the settings |
@@ -85,12 +85,12 @@ Android, which is on by default:
 - Files you export or share ([6](#6-exports-and-sharing)).
 - The system log (logcat), which receives a copy of the app's log ([5](#5-logs)).
 - With Settings → "Written sessions" → "Ask Sleep as Android to sync" (on by default) and Sleep as Android
-  installed: a broadcast to Sleep as Android (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) after a
-  run that wrote or updated a session, and once more about 10 minutes after a new or recomputed one. Nothing is sent
-  when Sleep as Android is not installed. It carries no extras and no data: it tells Sleep as Android only that a sync
-  is wanted, and with that when PulseStages wrote. Sleep as Android then reads Health Connect with its own
-  permissions, like after its own "Sync now" ([health-connect.md §8.3](health-connect.md#83-sleep-as-android)). To
-  stop it, turn the setting off.
+  installed: a broadcast to Sleep as Android (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) once the
+  nights that a run wrote or updated are complete (usually 1–2 hours after waking up), and once more 10 minutes later
+  after a new or recomputed one. Nothing is sent when Sleep as Android is not installed. It carries no extras and no
+  data: it tells Sleep as Android only that a sync is wanted, and with that roughly when PulseStages' recent nights
+  became complete. Sleep as Android then reads Health Connect with its own permissions, like after its own "Sync now"
+  ([health-connect.md §8.3](health-connect.md#83-sleep-as-android)). To stop it, turn the setting off.
 
 What Health Connect and other apps do with data they hold is outside PulseStages' control.
 
@@ -102,7 +102,7 @@ Everything below is in the app's private storage, which other apps cannot read.
 |---|---|---|
 | Room database (the ledger) | `databases/pulsestages.db` | `estimated_nights`: one row per estimated night or nap: the ids of its source sessions, the source app, start and end with time-zone offsets, the id of PulseStages' record in Health Connect, algorithm version, params hash, estimator, coverage, confidence, minutes per stage, the stages, flags and warnings, the lowest heart rate, the number of heart-rate samples, status and timestamps, and the input fingerprint with the time it was last checked (below). `night_sources`: night ↔ source session links. `source_sessions`: every source session seen (id, app, start, end, outcome). `night_baselines`: the lowest heart rate of each written session, for the rolling baseline. `personal_models`: personal models from "Calibrate" or the unsupervised adaptation. `backfill_state`: the progress of the history backfill. `log_entries`: the internal log ([5](#5-logs)). |
 | Settings (DataStore) | `files/datastore/app_settings.json` | the settings that differ from the defaults: enabled sleep sources and their priority, schedule, title template, algorithm parameters, log level. No health data. |
-| Sync state (DataStore) | `files/datastore/sync_state.preferences_pb` | the Health Connect changes token and the source packages it belongs to, when the last sync started and ended, its outcome and a short English detail (counters), when recent nights were last re-checked for late heart rate, a counter of the unsupervised adaptation, and, with "Ask Sleep as Android to sync", when a pending second sync request to Sleep as Android is due. |
+| Sync state (DataStore) | `files/datastore/sync_state.preferences_pb` | the Health Connect changes token and the source packages it belongs to, when the last sync started and ended, its outcome and a short English detail (counters), when recent nights were last re-checked for late heart rate and when such a check was last asked for, a counter of the unsupervised adaptation, and, with "Ask Sleep as Android to sync", the sync request to Sleep as Android: whether one is owed and when it is due, whether a second one follows, since when it is owed, when it was last sent, and the Health Connect ids with the start, end and last-change times of the recent source sessions that last looked complete and that the last request covered (their ids, starts and ends are also in the ledger). |
 | WorkManager's database | managed by WorkManager | the scheduled and recent background work: its type, when it was requested, the id of a night to recompute, and the result of finished work (counters, outcome, an English detail). |
 | Shared log file | `cache/shared/pulsestages-log.txt` | only after you tap "Share log"; replaced by the next share; Android may delete cache files at any time. |
 | Demo-mode switch (debug builds only) | shared preferences `pulsestages_demo_mode` | one on/off value. |
@@ -150,8 +150,10 @@ The app keeps an internal log for troubleshooting (Settings → Log).
   started and how they ended, counters, why a night was or was not estimated (with its heart-rate coverage), why a
   night was updated after more data arrived (with its heart-rate sample counts before and after), the package names of
   the sleep sources, Health Connect errors with their English message and stack trace. Lines about a
-  night carry the night's key (`ps:` and a hash of its source session ids). The code does not log heart-rate samples
-  or the sequence of stages.
+  night carry the night's key (`ps:` and a hash of its source session ids). The lines about the sync request to Sleep
+  as Android say what it waits for, with minutes relative to a session's end (how far the source's heart rate reaches,
+  for example), and a changed session with the first 8 characters of its Health Connect id. The code does not log
+  heart-rate samples or the sequence of stages.
 - **How much.** Lines below the level of Settings → Debugging → "Log level" (default Info) are not recorded. The
   database keeps the newest 10,000 lines; a message is cut at 8,000 characters.
 - **Logcat.** Every recorded line is also written to the Android system log with the tag `PulseStages`. The system log

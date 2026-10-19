@@ -187,7 +187,8 @@ enqueue, cancel or run by the suite.
   the runner opens PulseStages once at the end and returns to the home screen: its real WorkManager then registers the
   periodic and daily runs again, as whenever you open the app, and a periodic check that became due during the run may
   run right then (in the app's normal process, after the "after" snapshot); with "Ask Sleep as Android to sync" on (the
-  default), a night that check writes also makes it ask Sleep as Android, if installed, to sync. The runner checks that the jobs are back.
+  default), a night that check writes also leaves a sync request for Sleep as Android, if installed, which PulseStages
+  sends once the nights are complete. The runner checks that the jobs are back.
   `--no-rearm` skips this; then open the app once yourself.
 - In every test process the app's start-up code runs as at any start of the app; it schedules its periodic and daily
   work into that process's in-memory WorkManager and, at the default log level, writes two lines to the app's internal
