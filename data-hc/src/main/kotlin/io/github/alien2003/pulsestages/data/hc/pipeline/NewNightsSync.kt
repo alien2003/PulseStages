@@ -78,7 +78,8 @@ data class SyncReport(
  *   30-minute check interval, whatever an attempt records, so that each pass does what one hourly run does. A run the
  *   user asked for ("Estimate new now") runs it at once, and so does the first run that starts after a pass was
  *   requested ([SyncState.lateDataPassRequestedAtMs]: the Sleep as Android sync request waits for one before it takes
- *   the recent nights for complete).
+ *   the recent nights for complete); a requested pass that a failure left incomplete is run again by the next run, for
+ *   up to [MIN_RECHECK_GAP_MS] after the request.
  * - Runs in the background never read without READ_HEALTH_DATA_IN_BACKGROUND ([HealthAccessGuard]).
  *
  * [run] never throws except for cancellation; every failure is reported in [SyncReport]. The sessions it writes are
@@ -190,9 +191,10 @@ class NewNightsSync
          * stopped early is stored as complete; one that stopped early (a quota error, a refused access) or ended with an
          * exception (for example a Health Connect error of the retry's window read) is tried again by the next run. A
          * transient or invalid read of the refresh's window ends only the refresh ([refreshStopped]) and the pass counts
-         * as complete, so it is left to the next pass. Because the whole pass is gated, a night whose attempt records
-         * nothing (its source now has its own stages, or a written night can no longer be estimated) is still read only
-         * once per pass.
+         * as complete, so it is left to the next pass, and so does a pass in which a night failed; except for a requested
+         * pass ([retriedForRequest]), which the next run tries again. Because the whole pass is gated, a night whose
+         * attempt records nothing (its source now has its own stages, or a written night can no longer be estimated) is
+         * still read only once per pass.
          */
         private suspend fun lateDataPass(
             settings: AppSettings,
@@ -203,19 +205,36 @@ class NewNightsSync
         ): PipelineReport {
             val state = syncState.state.first()
             val last = state.lateDataPassAtMs
+            val requested = state.lateDataPassRequestedAtMs?.takeIf { requestedSince(last, it, runStartMs) }
             val due =
                 userRequested ||
-                    requestedSince(last, state.lateDataPassRequestedAtMs, runStartMs) ||
+                    requested != null ||
                     last == null ||
                     last > runStartMs ||
                     runStartMs - last >= MIN_RECHECK_GAP_MS
             if (!due) return PipelineReport()
             val retried = retryUnfinished(settings, granted, runStartMs, writes)
             val refreshed = if (retried.stoppedEarly) PipelineReport() else refreshWritten(settings, granted, runStartMs, writes)
-            val report = retried + refreshed
-            if (!report.stoppedEarly) syncState.markLateDataPass(runStartMs)
+            val report = retried + (refreshed ?: PipelineReport())
+            val incomplete = refreshed == null || report.failed > 0
+            if (!report.stoppedEarly && !(incomplete && retriedForRequest(requested, runStartMs))) {
+                syncState.markLateDataPass(runStartMs)
+            }
             return report
         }
+
+        /**
+         * Whether an incomplete late-data pass (its refresh stopped on a transient or invalid read, or a night failed) of a
+         * run that started at [runStartMs] is not stored, so that the next run tries it again: when it answers a pass
+         * [requested] less than [MIN_RECHECK_GAP_MS] before. The requester (the Sleep as Android sync request) would
+         * otherwise take the recent nights for checked while a refresh may still rewrite one of them. Later, an incomplete
+         * pass counts as complete like an unrequested one, so a failure that persists costs at most the passes of that
+         * time.
+         */
+        private fun retriedForRequest(
+            requested: Long?,
+            runStartMs: Long,
+        ): Boolean = requested != null && runStartMs - requested < MIN_RECHECK_GAP_MS
 
         /**
          * Whether a late-data pass was [requested] after the run of the [last] pass started and no later than [runStartMs]:
@@ -287,14 +306,15 @@ class NewNightsSync
          * Changes API only reports sleep sessions. Due are the up-to-date nights ([NightPipeline.refreshableNights]) on the
          * schedule of [isDue], where the last attempt is the last write or refresh check. At most
          * [MAX_REFRESH_NIGHTS_PER_RUN] are checked per run (nights that ended recently first, then the longest unchecked
-         * late arrivals); the rest are left to later runs. Never under OverwritePolicy.NEVER (no read at all).
+         * late arrivals); the rest are left to later runs. Never under OverwritePolicy.NEVER (no read at all). Null when a
+         * transient or invalid read of its window stopped it ([refreshStopped]): nothing was refreshed.
          */
         private suspend fun refreshWritten(
             settings: AppSettings,
             granted: Set<String>,
             runStartMs: Long,
             writes: WriteCount,
-        ): PipelineReport {
+        ): PipelineReport? {
             val due =
                 if (settings.write.overwritePolicy == OverwritePolicy.NEVER) emptyList() else dueForRefresh(settings, granted, runStartMs)
             if (due.isEmpty()) return PipelineReport()
@@ -321,16 +341,16 @@ class NewNightsSync
         /**
          * A Health Connect error outside the per-night isolation of the refresh (the read of its window): only the refresh
          * stops, and the run keeps the report of what it did before. A quota error or a refused access stops the run as
-         * anywhere else; a transient or invalid read is logged and left to the next late-data pass (this pass still
-         * counts as complete, so about 55 minutes later with a shorter check interval).
+         * anywhere else; a transient or invalid read is logged and left to the next late-data pass (null: this pass still
+         * counts as complete unless it was requested, so about 55 minutes later with a shorter check interval).
          */
-        private suspend fun refreshStopped(e: HealthDataException): PipelineReport {
+        private suspend fun refreshStopped(e: HealthDataException): PipelineReport? {
             logger.w(TAG, "refresh of written nights stopped: ${e.message}", throwable = e)
             return when (e) {
                 is HealthDataException.QuotaExceeded -> PipelineReport(quotaHit = true)
                 is HealthDataException.PermissionDenied -> PipelineReport.blocked(guard.reasonForDenial())
                 is HealthDataException.Unavailable -> PipelineReport.blocked(BlockedReason.HEALTH_CONNECT_UNAVAILABLE)
-                is HealthDataException.Transient, is HealthDataException.InvalidData -> PipelineReport()
+                is HealthDataException.Transient, is HealthDataException.InvalidData -> null
             }
         }
 

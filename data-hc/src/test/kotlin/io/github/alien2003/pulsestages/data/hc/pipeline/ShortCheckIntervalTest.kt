@@ -366,6 +366,63 @@ class ShortCheckIntervalTest {
         }
 
     @Test
+    fun `a requested pass whose refresh stopped on a transient read is not stored, and the next run runs it again`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            h.clock.advanceBy(10 * MINUTE_MS)
+            h.syncState.updateSleepAsAndroidRequest(requestLateDataPassAtMs = h.clock.millis()) { it }
+            h.clock.advanceBy(5 * MINUTE_MS)
+            // The read of the refresh's window: the Changes API reports nothing, so it is the run's only sleep-session read.
+            h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.Transient("binder died"))
+
+            assertEquals(SyncOutcome.SUCCESS, h.sync.run(inBackground = false).outcome)
+
+            assertEquals(NOON, h.lateDataPassAt(), "the request is not taken for answered: no night was read again")
+            h.clock.advanceBy(15 * MINUTE_MS)
+            assertEquals(
+                1,
+                h.sync
+                    .run(inBackground = false)
+                    .pipeline.inputChecks,
+                "the next run runs it again",
+            )
+            assertEquals(NOON + 30 * MINUTE_MS, h.lateDataPassAt())
+
+            // Without a request such a pass counts as complete: the next one comes 55 min later.
+            h.clock.advanceBy(HOUR_MS)
+            h.repository.failOn(Operation.READ_SLEEP_SESSIONS, HealthDataException.Transient("binder died"))
+            h.sync.run(inBackground = false)
+            assertEquals(NOON + 90 * MINUTE_MS, h.lateDataPassAt())
+        }
+
+    @Test
+    fun `a requested pass in which a night failed is run again by every run, for 55 minutes after the request`() =
+        harnessTest(dir) { h ->
+            val source = h.repository.addPartialNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            h.repository.addRestOfHeartRate(source)
+            h.estimator.failWhen = { IllegalStateException("estimator bug") }
+            h.clock.advanceBy(10 * MINUTE_MS)
+            h.syncState.updateSleepAsAndroidRequest(requestLateDataPassAtMs = h.clock.millis()) { it }
+            val checkedAtMin = mutableListOf<Int>()
+
+            repeat(9) {
+                h.clock.advanceBy(15 * MINUTE_MS)
+                val reads = h.repository.callCount(Operation.READ_HEART_RATE)
+                val report = h.sync.run(inBackground = false)
+                if (h.repository.callCount(Operation.READ_HEART_RATE) > reads) {
+                    assertEquals(SyncOutcome.PARTIAL_FAILURE, report.outcome)
+                    checkedAtMin += ((h.clock.millis() - NOON) / MINUTE_MS).toInt()
+                }
+            }
+
+            assertEquals(listOf(25, 40, 55, 70, 130), checkedAtMin, "stored at 70, 60 min after the request; then hourly")
+            assertEquals(NOON + 130 * MINUTE_MS, h.lateDataPassAt())
+            assertEquals(NightStatus.WRITTEN, h.singleNight().status)
+        }
+
+    @Test
     fun `a pass time after the run's start, after the clock was set back, does not hold off the pass`() =
         harnessTest(dir) { h ->
             h.sync.run(inBackground = false)
