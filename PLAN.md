@@ -398,8 +398,10 @@ from memory.
     13:19, 62 min after the final; 19 Oct v1002 at 08:57, 47 min after it). The streak's first check requests that
     pass (`late_data_pass_requested_at`, a timestamp, so a pass that started before the request does not consume it);
     it is waited for at most 60 min. Every write starts a new streak: it means an upload just arrived, and the morning
-    upload carries the previous night's late heart rate (a rewrite) together with the new provisional session. A
-    streak continues while its sessions only leave the scope (subset rule).
+    upload carries the previous night's late heart rate (a rewrite) together with the new provisional session. The
+    start of a backfill or a recompute starts a new streak too, so that the work sends nothing in the middle of one. A
+    streak continues while its sessions only leave the scope (subset rule). A requested pass that a failure left
+    incomplete does not count, and the next run repeats it.
   - **Constants and their evidence.** `SourceSettlement`: `SETTLE_TIMEOUT_MS` = 12 h (outlasts a provisional or
     intermediate version, about 2 and 2.5 h on 18 Oct, a sleep-in to 12:55, 5.5 h after a 07:29 cut, and a final
     published up to 2 h 56 min late, the bound for 17 Oct); `DATA_MARGIN_EXTRA_MS` = 30 min on top of `mergeGapMin`
@@ -442,10 +444,10 @@ from memory.
     session (not observed); an upload spread over more than 15 min (the log line "the nights changed while
     confirming" measures it); a manual "Sync now" while a provisional night is in Health Connect (18 Oct 07:34–12:17,
     19 Oct 07:55–08:10); the next morning's late heart rate rewrites only our record; check intervals over 12 h, where
-    sessions leave the scope before we process them; no new check without background access; a night that can never be
-    estimated, or a band taken off at the wake, holds every request until 12 h after its end; a process death between
-    a write and `recordRun` loses the request until the next write. A request whose session later changes is warned
-    about once in the log.
+    sessions leave the scope before we process them and our own request then exports the earlier version; no new
+    check without background access; a night that can never be estimated, or a band taken off at the wake, holds every
+    request until 12 h after its end; a process death between a write and `recordRun` loses the request until the next
+    write. A request whose session later changes is warned about once in the log.
   - **Confirmed vs not.** Confirmed on the development phone: the provisional, intermediate and final versions above,
     Sleep as Android keeping the 07:29 versions, and the repair (2026-10-19: the three nights deleted in Sleep as
     Android, two syncs started by the same request imported our final versions and attached their heart rate). From

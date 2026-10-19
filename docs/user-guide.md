@@ -1069,6 +1069,11 @@ compatibility”. Each request also runs Sleep as Android's backup and its other
   later, also when you have left the app, but without another check; if they are not complete yet, nothing more
   happens until the next run in the foreground. Tap "Estimate new" once the night is complete (1–2 hours after you
   wake up), or allow background access.
+- **Checks more than 12 hours apart.** The check of the nights looks only at sessions that ended or changed in the
+  last 12 hours. With "Check for new nights every" over 12 hours, the watch app's final version of a night can leave
+  that window before PulseStages has processed it; the request then goes out with PulseStages' night as it was before,
+  cut short, and Sleep as Android keeps it. With the request on, keep the interval well below 12 hours (the default
+  is 1 hour).
 - **What is sent.** Only the request: no night, no heart rate, no other data
   ([privacy.md §2](privacy.md#2-everything-stays-on-the-device)). It is sent only when Sleep as Android is installed,
   and a run that wrote nothing leaves no request.

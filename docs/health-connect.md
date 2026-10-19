@@ -414,12 +414,15 @@ pass ([architecture.md §6.7](architecture.md#67-what-a-sync-does),
 (its source now has its own stages, or a written night can no longer be estimated) is read once per pass, not on
 every check. A pass that stopped early (a quota error, a refused access) or ended with an exception (for example a
 Health Connect error of the retry's window read) is repeated by the next run; a transient error of the refresh's
-window read ends only the refresh, and the pass counts as done, so it is left to the next pass. "Estimate new" (`EstimateTrigger.NOW`, `userRequested`) runs the pass at once, also a few minutes after the
-last one, and the next scheduled pass comes at least 55 min after it. The sync request to Sleep as Android asks for a
-pass when the recent nights first look complete (`late_data_pass_requested_at` in `sync_state`), because a pass may
-still rewrite a night with the heart rate that made them look complete: the first run that starts at or after that
-time runs the pass, also within 55 min of the last one, unless a pass of a run that started at or after it has already
-completed ([8.3](#83-sleep-as-android)). Heart rate that arrives after these windows is used only by a recompute.
+window read ends only the refresh, and the pass counts as done, so it is left to the next pass. A pass that the sync
+request to Sleep as Android asked for (below) does not count when such an error stopped its refresh or a night failed
+in it: the next run repeats it, for up to 55 min after the request. "Estimate new" (`EstimateTrigger.NOW`,
+`userRequested`) runs the pass at once, also a few minutes after the last one, and the next scheduled pass comes at
+least 55 min after it. The sync request to Sleep as Android asks for a pass when the recent nights first look
+complete (`late_data_pass_requested_at` in `sync_state`), because a pass may still rewrite a night with the heart rate
+that made them look complete: the first run that starts at or after that time runs the pass, also within 55 min of the
+last one, unless a pass of a run that started at or after it has already completed ([8.3](#83-sleep-as-android)). Heart
+rate that arrives after these windows is used only by a recompute.
 
 ## 6. Deleting records
 
@@ -741,16 +744,21 @@ can be has not been measured), and a run that started after they first looked se
 late-data pass ([5](#5-changes-api)), which may still rewrite a night with the heart rate that settled it (it did on 18
 and 19 Oct, 62 and 47 min after the final version was written). The first settled check requests that pass
 (`late_data_pass_requested_at`), so the next run runs it even within 55 min of the last one; it is waited for at most
-60 min (`CHECK_WAIT_MS`, the default check interval). Every write starts the settled streak again (an upload has just
-arrived or a record changed); a session that leaves the 12-h scope does not. While the nights are not settled, the
-request is checked again in 15 min (`RECHECK_MS`, the shortest check interval), or at the time the session's heart rate
-must reach if that is later. A check that fails with a Health Connect error keeps the streak and is repeated in 15 min.
+60 min (`CHECK_WAIT_MS`, the default check interval). A requested pass whose refresh a transient read stopped, or in
+which a night failed, does not count, and the next run repeats it ([5](#5-changes-api)). Every write starts the settled
+streak again (an upload has just arrived or a record changed), and so does the start of a backfill or a recompute,
+which rewrite records Sleep as Android would import while their sources stay as they are, so that no request goes out
+in the middle of one; a session that leaves the 12-h scope does not. While the nights are not settled, the request is
+checked again in 15 min (`RECHECK_MS`, the shortest check interval), or at the time the session's heart rate must reach
+if that is later. A check that fails with a Health Connect error keeps the streak and is repeated in 15 min.
 A request owed for 24 h (`MAX_OWED_MS`) without a write or a request is dropped with an info line ("sync request to
 Sleep as Android dropped: …"; a warning when the last check failed): every hold other than a failing check ends 12 h
 after the last change of a session, and check intervals up to 24 h are allowed. Two requests are at least 10 min apart
 (`FOLLOW_UP_DELAY_MS`), because Sleep as Android skips a request that arrives while it syncs. When the clock was set
-back (an owed, sent or streak time later than now), those times count as now, the streak starts again and the next
-check is at most 15 min away.
+back (an owed, sent or streak time later than now, or a due time further away than any check waits: the heart-rate
+margin past an end 5 min ahead, or 60 min), those times count as now, the streak starts again and the next check is at
+most 15 min away; a late-data pass stored ahead of now does not count, and a new request for a pass replaces a later
+one.
 
 **Expected delay.** With 15-minute checks the request goes out about 15–30 min after heart rate from an hour past the
 wake reaches Health Connect, with hourly checks up to an hour later: usually one to two hours after waking up. For 18
@@ -804,7 +812,9 @@ against a "Sync now" in the morning. Further limits, documented rather than gate
   min): …" measures it);
 - late heart rate of the previous night, uploaded the next morning, still changes only PulseStages' record of it:
   Sleep as Android gets the heart rate but keeps the stages it imported;
-- with a check interval over 12 h a session can leave the scope before PulseStages has processed it;
+- with a check interval over 12 h a session can leave the scope before PulseStages has processed it; the request
+  owed for an earlier version of it then goes out, and Sleep as Android imports PulseStages' record of that version
+  (for example a night cut at 07:29);
 - without background access the request is sent without a new check (above);
 - a night that can never be estimated, or a band taken off at the wake (no heart rate after the end), holds every
   request until 12 h after its end;
