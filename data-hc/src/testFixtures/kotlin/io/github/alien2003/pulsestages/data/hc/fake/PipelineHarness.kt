@@ -16,6 +16,7 @@ import io.github.alien2003.pulsestages.data.hc.pipeline.NightPipeline
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightRecomputer
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightWindowReader
 import io.github.alien2003.pulsestages.data.hc.pipeline.SourceScanner
+import io.github.alien2003.pulsestages.data.hc.pipeline.SourceSettlement
 import io.github.alien2003.pulsestages.data.hc.pipeline.ZoneOffsetProvider
 import io.github.alien2003.pulsestages.data.hc.usecase.HomeStatusAggregator
 import io.github.alien2003.pulsestages.data.hc.usecase.HybridModelProvider
@@ -101,6 +102,9 @@ class PipelineHarness(
 
     /** Changes-API sync. */
     val sync: NewNightsSync = NewNightsSync(health, settings, syncState, windowReader, pipeline, logger, clock)
+
+    /** Whether the source sessions other readers import are settled (reads through [health], like the pipeline). */
+    val settlement: SourceSettlement = SourceSettlement(health, nightLedger, windowReader, clock)
 
     /** Backfill. */
     val backfill: BackfillEngine = BackfillEngine(health, settings, ledger.backfillDao, windowReader, pipeline, logger, clock)

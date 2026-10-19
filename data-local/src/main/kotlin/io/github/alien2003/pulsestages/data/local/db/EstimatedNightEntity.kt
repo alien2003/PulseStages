@@ -143,6 +143,14 @@ data class EstimatedNightEntity(
     val skippedNap: Boolean get() = isSkippedNap(status, statusReason)
 
     /**
+     * A night without an output that data may still give one: [NightStatus.NOT_ESTIMATED] or [NightStatus.FAILED], but
+     * not a [skippedNap]. Its heart rate may arrive after the sleep session, and a failure may have been transient; the
+     * outcome of a skipped nap depends on the settings only.
+     */
+    val awaitsEstimate: Boolean
+        get() = (status == NightStatus.NOT_ESTIMATED || status == NightStatus.FAILED) && !skippedNap
+
+    /**
      * True when this night is [NightStatus.WRITTEN], or a [skippedNap], with a different algorithm version or params
      * hash: processing it again with the current settings may give another result.
      */

@@ -20,6 +20,7 @@ import io.github.alien2003.pulsestages.data.hc.pipeline.NightEstimator
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightPipeline
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightRecomputer
 import io.github.alien2003.pulsestages.data.hc.pipeline.SourceScanner
+import io.github.alien2003.pulsestages.data.hc.pipeline.SourceSettlement
 import io.github.alien2003.pulsestages.data.local.db.PulseStagesDatabase
 import io.github.alien2003.pulsestages.data.local.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
@@ -79,6 +80,8 @@ class DataHcModuleTest {
 
     @Inject lateinit var scanner: SourceScanner
 
+    @Inject lateinit var settlement: SourceSettlement
+
     @Inject lateinit var guard: HealthAccessGuard
 
     @Inject lateinit var titles: DefaultTitleProvider
@@ -112,6 +115,6 @@ class DataHcModuleTest {
         assertSame("one recomputer, so that erasing reaches the running recompute", recomputer, otherRecomputer)
         assertTrue(ownPackage, ownPackage.startsWith("io.github.alien2003.pulsestages.data.hc"))
         assertTrue(titles.defaultTitleTemplate().isNotBlank())
-        listOf(pipeline, sync, recomputer, eraser, scanner, guard).forEach { assertNotNull(it) }
+        listOf(pipeline, sync, recomputer, eraser, scanner, settlement, guard).forEach { assertNotNull(it) }
     }
 }
