@@ -28,9 +28,10 @@ import java.io.File
 /**
  * Check intervals shorter than an hour ([NewNightsSync.MIN_RECHECK_GAP_MS]): every run follows the Changes API, but the
  * late-data pass (the retry and the refresh of recent nights) keeps its hourly cadence, whatever its attempts record, so
- * a 15- or 30-minute interval adds only one change-log read per run; a run the user asked for runs the pass at once. The
- * Health Connect calls are those [io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository] logs behind the
- * production background rule: one entry per repository call (getSdkStatus is not logged).
+ * a 15- or 30-minute interval adds only one change-log read per run; a run the user asked for runs the pass at once, and
+ * so does the first run after a pass was requested. The Health Connect calls are those
+ * [io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository] logs behind the production background rule: one
+ * entry per repository call (getSdkStatus is not logged).
  */
 class ShortCheckIntervalTest {
     @TempDir
@@ -300,6 +301,48 @@ class ShortCheckIntervalTest {
             assertEquals(NOON + 30 * MINUTE_MS, h.lateDataPassAt())
             val checkedAtMin = h.syncEvery(intervalMin = 15, runs = 6, fromMs = NOON)
             assertEquals(listOf(90), checkedAtMin, "not at 60 (30 min after the requested pass), but 60 min after it")
+        }
+
+    @Test
+    fun `a requested pass runs at the first run after the request, also within 55 minutes of the last one`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            h.clock.advanceBy(10 * MINUTE_MS)
+            h.syncState.updateSleepAsAndroidRequest(requestLateDataPassAtMs = h.clock.millis()) { it }
+
+            val checkedAtMin = h.syncEvery(intervalMin = 15, runs = 8, fromMs = NOON)
+
+            assertEquals(listOf(25, 85), checkedAtMin, "at once, then 55 min after that pass (not at 55 and 115)")
+            val state = h.syncState.state.first()
+            assertEquals(NOON + 85 * MINUTE_MS, state.lateDataPassAtMs)
+            assertEquals(NOON + 10 * MINUTE_MS, state.lateDataPassRequestedAtMs, "nothing is cleared: the pass at 25 satisfied it")
+        }
+
+    @Test
+    fun `a pass requested during a run that ran its own pass is run again by the following run`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            // The time of a request made while the run at 60 min runs, after its pass read the stored state.
+            h.clock.advanceBy(45 * MINUTE_MS)
+            h.syncState.updateSleepAsAndroidRequest(requestLateDataPassAtMs = NOON + 61 * MINUTE_MS) { it }
+
+            val checkedAtMin = h.syncEvery(intervalMin = 15, runs = 4, fromMs = NOON)
+
+            assertEquals(listOf(60, 75), checkedAtMin, "the pass at 60 started before the request")
+        }
+
+    @Test
+    fun `a requested time after the run's start, as a clock set back leaves it, forces no pass until the clock reaches it`() =
+        harnessTest(dir) { h ->
+            h.repository.addNight(OHEALTH, nightStart(0))
+            h.sync.run(inBackground = false)
+            h.syncState.updateSleepAsAndroidRequest(requestLateDataPassAtMs = NOON + 100 * MINUTE_MS) { it }
+
+            val checkedAtMin = h.syncEvery(intervalMin = 15, runs = 10, fromMs = NOON)
+
+            assertEquals(listOf(60, 105), checkedAtMin, "hourly, plus one pass at the first run that starts after the requested time")
         }
 
     @Test

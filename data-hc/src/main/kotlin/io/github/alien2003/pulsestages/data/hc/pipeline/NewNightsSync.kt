@@ -11,6 +11,7 @@ import io.github.alien2003.pulsestages.data.local.settings.OverwritePolicy
 import io.github.alien2003.pulsestages.data.local.settings.SettingsRepository
 import io.github.alien2003.pulsestages.data.local.sync.ChangesTokenState
 import io.github.alien2003.pulsestages.data.local.sync.SyncOutcome
+import io.github.alien2003.pulsestages.data.local.sync.SyncState
 import io.github.alien2003.pulsestages.data.local.sync.SyncStateStore
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
@@ -75,7 +76,9 @@ data class SyncReport(
  * - The retry and the refresh form one late-data pass, which runs at most every [MIN_RECHECK_GAP_MS] (55 min, measured
  *   from the start of the run whose pass last completed, kept in [SyncStateStore]): about hourly also with a 15- or
  *   30-minute check interval, whatever an attempt records, so that each pass does what one hourly run does. A run the
- *   user asked for ("Estimate new now") runs it at once.
+ *   user asked for ("Estimate new now") runs it at once, and so does the first run that starts after a pass was
+ *   requested ([SyncState.lateDataPassRequestedAtMs]: the Sleep as Android sync request waits for one before it takes
+ *   the recent nights for complete).
  * - Runs in the background never read without READ_HEALTH_DATA_IN_BACKGROUND ([HealthAccessGuard]).
  *
  * [run] never throws except for cancellation; every failure is reported in [SyncReport]. The sessions it writes are
@@ -181,8 +184,9 @@ class NewNightsSync
 
         /**
          * The late-data pass of a run that started at [runStartMs]: [retryUnfinished], then [refreshWritten]. It runs when
-         * [userRequested], when no pass has completed yet, or when the last one was at least [MIN_RECHECK_GAP_MS] ago; a
-         * stored time after [runStartMs] (the clock was set back) does not hold it off either. A pass in which neither part
+         * [userRequested], when a pass was requested since the run of the last one started ([requestedSince]), when no
+         * pass has completed yet, or when the last one was at least [MIN_RECHECK_GAP_MS] ago; a stored time after
+         * [runStartMs] (the clock was set back) does not hold it off either. A pass in which neither part
          * stopped early is stored as complete; one that stopped early (a quota error, a refused access) or ended with an
          * exception (for example a Health Connect error of the retry's window read) is tried again by the next run. A
          * transient or invalid read of the refresh's window ends only the refresh ([refreshStopped]) and the pass counts
@@ -197,8 +201,14 @@ class NewNightsSync
             userRequested: Boolean,
             writes: WriteCount,
         ): PipelineReport {
-            val last = syncState.state.first().lateDataPassAtMs
-            val due = userRequested || last == null || last > runStartMs || runStartMs - last >= MIN_RECHECK_GAP_MS
+            val state = syncState.state.first()
+            val last = state.lateDataPassAtMs
+            val due =
+                userRequested ||
+                    requestedSince(last, state.lateDataPassRequestedAtMs, runStartMs) ||
+                    last == null ||
+                    last > runStartMs ||
+                    runStartMs - last >= MIN_RECHECK_GAP_MS
             if (!due) return PipelineReport()
             val retried = retryUnfinished(settings, granted, runStartMs, writes)
             val refreshed = if (retried.stoppedEarly) PipelineReport() else refreshWritten(settings, granted, runStartMs, writes)
@@ -206,6 +216,18 @@ class NewNightsSync
             if (!report.stoppedEarly) syncState.markLateDataPass(runStartMs)
             return report
         }
+
+        /**
+         * Whether a late-data pass was [requested] after the run of the [last] pass started and no later than [runStartMs]:
+         * a pass whose run started at or after the request satisfies it, so nothing needs to be cleared, and a request made
+         * during a run is left to the next run, whose pass reads what came after it. A request time after [runStartMs] left
+         * by a clock that was set back therefore forces no pass until the clock reaches it.
+         */
+        private fun requestedSince(
+            last: Long?,
+            requested: Long?,
+            runStartMs: Long,
+        ): Boolean = requested != null && requested <= runStartMs && (last == null || requested > last)
 
         /** Follows the Changes API with the stored token, or re-reads by time range when there is no usable token. */
         private suspend fun syncChanges(

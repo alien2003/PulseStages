@@ -146,7 +146,7 @@ class SleepAsAndroidSyncRequests
                 }
 
                 !settings.write.requestSleepAsAndroidSync -> {
-                    syncState.clearSleepAsAndroidFollowUp()
+                    syncState.setSleepAsAndroidFollowUpDue(null)
                     logger.d(TAG, "follow-up sync request dropped: the option is off")
                     false
                 }
@@ -160,7 +160,7 @@ class SleepAsAndroidSyncRequests
 
                 else -> {
                     // At most one follow-up per request, even when the work runs again (a retry, process death).
-                    syncState.clearSleepAsAndroidFollowUp()
+                    syncState.setSleepAsAndroidFollowUpDue(null)
                     sendDueFollowUp()
                 }
             }
@@ -194,7 +194,7 @@ class SleepAsAndroidSyncRequests
 
         /** Forgets the pending follow-up and cancels its work. */
         private suspend fun dropFollowUp() {
-            syncState.clearSleepAsAndroidFollowUp()
+            syncState.setSleepAsAndroidFollowUpDue(null)
             followUps.cancel()
         }
 
