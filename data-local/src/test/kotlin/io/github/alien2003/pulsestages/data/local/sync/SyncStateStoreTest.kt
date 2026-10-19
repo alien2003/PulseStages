@@ -273,23 +273,23 @@ class SyncStateStoreTest {
         }
 
     @Test
-    fun `a late-data pass request keeps the later of the stored and the requested time`() =
+    fun `a late-data pass request replaces the stored one, also an earlier time after the clock was set back`() =
         runTest {
             withStore { store ->
                 assertNull(store.state.first().lateDataPassRequestedAtMs, "none requested yet")
                 store.updateSleepAsAndroidRequest(requestLateDataPassAtMs = 5_000L) { it.copy(settledSinceMs = 5_000L) }
-                store.updateSleepAsAndroidRequest(requestLateDataPassAtMs = 3_000L) { it }
-                assertEquals(5_000L, store.state.first().lateDataPassRequestedAtMs, "an earlier time does not replace a later one")
                 store.updateSleepAsAndroidRequest { it.copy(dueAtMs = 9_000L) }
                 assertEquals(5_000L, store.state.first().lateDataPassRequestedAtMs, "an update without a request keeps it")
                 store.markLateDataPass(6_000L)
                 assertEquals(5_000L, store.state.first().lateDataPassRequestedAtMs, "a completed pass clears nothing")
-
                 store.updateSleepAsAndroidRequest(requestLateDataPassAtMs = 8_000L) { it }
+                assertEquals(8_000L, store.state.first().lateDataPassRequestedAtMs)
+
+                store.updateSleepAsAndroidRequest(requestLateDataPassAtMs = 3_000L) { it }
             }
             withStore { store ->
                 val state = store.state.first()
-                assertEquals(8_000L, state.lateDataPassRequestedAtMs)
+                assertEquals(3_000L, state.lateDataPassRequestedAtMs, "a later stored time would force no pass until 8 000")
                 assertEquals(6_000L, state.lateDataPassAtMs)
                 assertEquals(SleepAsAndroidRequestState(dueAtMs = 9_000L, settledSinceMs = 5_000L), state.sleepAsAndroidRequest)
             }

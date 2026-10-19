@@ -109,7 +109,7 @@ data class SleepAsAndroidRequestState(
  * @property sleepAsAndroidRequest the sync request owed to Sleep as Android and how long the nights have looked settled.
  * @property lateDataPassAtMs start of the run whose late-data pass (the retry and the refresh of recent nights, at most
  *   every `NewNightsSync.MIN_RECHECK_GAP_MS`) last completed, or null if none has yet.
- * @property lateDataPassRequestedAtMs the latest time at which a late-data pass was asked for, or null if none was: a run
+ * @property lateDataPassRequestedAtMs the time at which a late-data pass was last asked for, or null if none was: a run
  *   that starts at or after it runs the pass even within `NewNightsSync.MIN_RECHECK_GAP_MS` of the last one, unless a
  *   pass of a run that started at or after it has already completed.
  */
@@ -213,7 +213,9 @@ class SyncStateStore
         /**
          * Replaces the Sleep as Android request state with [transform] of the stored one in one edit, which also removes
          * the follow-up time of 0.4.0 (a state read from it is stored under the new keys). A request for a late-data pass
-         * at [requestLateDataPassAtMs] is stored in the same edit; the later of it and a stored request is kept.
+         * at [requestLateDataPassAtMs] is stored in the same edit and replaces a stored one: the requests are made at the
+         * current time, so a stored request is later only when the clock was set back, and it would then force no pass
+         * until the clock reached it.
          */
         suspend fun updateSleepAsAndroidRequest(
             requestLateDataPassAtMs: Long? = null,
@@ -221,10 +223,7 @@ class SyncStateStore
         ) {
             dataStore.edit { prefs ->
                 prefs.writeSleepAsAndroidRequest(transform(prefs.readSleepAsAndroidRequest()))
-                if (requestLateDataPassAtMs != null) {
-                    prefs[LATE_DATA_PASS_REQUESTED_AT] =
-                        maxOf(prefs[LATE_DATA_PASS_REQUESTED_AT] ?: Long.MIN_VALUE, requestLateDataPassAtMs)
-                }
+                if (requestLateDataPassAtMs != null) prefs[LATE_DATA_PASS_REQUESTED_AT] = requestLateDataPassAtMs
             }
         }
 

@@ -130,11 +130,12 @@ class EstimateNewNightsRunner
     }
 
 /**
- * The work of BackfillWorker, without WorkManager: [BackfillEngine.run] (resumes a RUNNING / WAITING_RETRY state from
- * its persisted cursor, stops between nights after [cancel], does not start when it was cancelled after it was
- * requested) → [SleepAsAndroidSyncRequests.recordRun] with the sessions this run wrote (also when it stopped early or
- * was cancelled) → after a completed backfill, [SleepAsAndroidSyncRequests.trySend] → outcome. Never throws except for
- * cancellation.
+ * The work of BackfillWorker, without WorkManager: [SleepAsAndroidSyncRequests.holdForRun] (no request goes out on the
+ * nights confirmed before the backfill while it rewrites them) → [BackfillEngine.run] (resumes a RUNNING /
+ * WAITING_RETRY state from its persisted cursor, stops between nights after [cancel], does not start when it was
+ * cancelled after it was requested) → [SleepAsAndroidSyncRequests.recordRun] with the sessions this run wrote (also
+ * when it stopped early or was cancelled) → after a completed backfill, [SleepAsAndroidSyncRequests.trySend] → outcome.
+ * Never throws except for cancellation.
  */
 class BackfillRunner
     @Inject
@@ -153,6 +154,7 @@ class BackfillRunner
             onProgress: suspend (BackfillStateEntity) -> Unit = {},
         ): WorkOutcome =
             guardedRun(logger, TAG) {
+                sleepAsAndroid.holdForRun()
                 sleepAsAndroid.requestSyncAfter { outcomeOf(engine.run(inBackground, requestedAtMs, it, onProgress)) }
             }
 
@@ -224,9 +226,11 @@ sealed interface RecomputeRequest {
 }
 
 /**
- * The work of RecomputeWorker, without WorkManager: [NightRecomputer] → [SleepAsAndroidSyncRequests.recordRun] with the
- * sessions it rewrote (also when it stopped early, a Health Connect error ended it or it was cancelled) → after a
- * completed recompute, [SleepAsAndroidSyncRequests.trySend] → outcome. Never throws except for cancellation.
+ * The work of RecomputeWorker, without WorkManager: [SleepAsAndroidSyncRequests.holdForRun] (no request goes out on the
+ * nights confirmed before the recompute while it rewrites them) → [NightRecomputer] →
+ * [SleepAsAndroidSyncRequests.recordRun] with the sessions it rewrote (also when it stopped early, a Health Connect error
+ * ended it or it was cancelled) → after a completed recompute, [SleepAsAndroidSyncRequests.trySend] → outcome. Never
+ * throws except for cancellation.
  */
 class RecomputeRunner
     @Inject
@@ -245,6 +249,7 @@ class RecomputeRunner
             onProgress: suspend (RecomputeProgress) -> Unit = {},
         ): WorkOutcome =
             guardedRun(logger, TAG, classifyDenial = { guard.reasonForDenial() }) {
+                sleepAsAndroid.holdForRun()
                 sleepAsAndroid.requestSyncAfter { outcomeOf(recompute(request, inBackground, it, onProgress)) }
             }
 

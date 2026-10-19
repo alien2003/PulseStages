@@ -9,6 +9,7 @@ import io.github.alien2003.pulsestages.data.hc.fake.PipelineHarness
 import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeProgress
 import io.github.alien2003.pulsestages.data.hc.pipeline.RecomputeScope
+import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.NOON
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
@@ -383,6 +384,59 @@ class BackfillAndRecomputeRunnerTest {
             h.clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
             assertEquals(SleepAsAndroidRequest.SENT, requests.onWork())
             assertEquals(1, sender.sent)
+        }
+
+    /**
+     * A request owed since an earlier write whose nights have looked settled for an hour (the work would send it now),
+     * and [requests] over [sender]; the work's check runs during the first estimate of the next run ([duringRun]).
+     */
+    private suspend fun PipelineHarness.confirmedRequest(
+        requests: SleepAsAndroidSyncRequests,
+        duringRun: MutableList<SleepAsAndroidRequest>,
+    ) {
+        requests.recordRun(written = 1, rewritten = 0)
+        assertEquals(SleepAsAndroidRequest.DEFERRED, requests.trySend())
+        clock.advanceBy(SleepAsAndroidSyncRequests.CHECK_WAIT_MS)
+        estimator.beforeEstimate = { if (duringRun.isEmpty()) duringRun += requests.onWork() }
+    }
+
+    @Test
+    fun `the work sends no request in the middle of a recompute, which may still rewrite the nights it would import`() =
+        harnessTest(dir) { h ->
+            h.addNights(listOf(20, 10, 1))
+            h.backfill.run(inBackground = false)
+            val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
+            val duringRun = mutableListOf<SleepAsAndroidRequest>()
+            h.confirmedRequest(requests, duringRun)
+
+            val outcome =
+                assertInstanceOf(
+                    WorkOutcome.Completed::class.java,
+                    h.recomputeRunner(requests).run(RecomputeRequest.All(RecomputeScope.ALL, h.clock.millis()), inBackground = false),
+                )
+
+            assertEquals(listOf(SleepAsAndroidRequest.DEFERRED), duringRun, "the nights are confirmed again first")
+            assertEquals(0, sender.sent)
+            assertTrue(outcome.summary.sleepAsAndroidSyncDeferred)
+        }
+
+    @Test
+    fun `the work sends no request in the middle of a backfill`() =
+        harnessTest(dir) { h ->
+            // Written to Health Connect over 12 hours ago: out of the scope of the check, which finds the nights settled.
+            h.clock.nowMs = NOON - 13 * HOUR_MS
+            h.addNights(20 downTo 1)
+            h.clock.nowMs = NOON
+            val sender = RecordingSyncRequestSender()
+            val requests = h.sleepAsAndroidRequests(sender)
+            val duringRun = mutableListOf<SleepAsAndroidRequest>()
+            h.confirmedRequest(requests, duringRun)
+
+            assertInstanceOf(WorkOutcome.Completed::class.java, h.backfillRunner(requests).run(inBackground = false))
+
+            assertEquals(listOf(SleepAsAndroidRequest.DEFERRED), duringRun)
+            assertEquals(0, sender.sent)
         }
 
     @Test

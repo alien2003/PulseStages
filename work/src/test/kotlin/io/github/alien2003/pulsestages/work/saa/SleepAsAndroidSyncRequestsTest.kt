@@ -438,6 +438,82 @@ class SleepAsAndroidSyncRequestsTest {
         }
 
     @Test
+    fun `a clock set back behind the last request drops a streak that began before now, so the follow-up is confirmed again`() =
+        worldTest { w ->
+            w.sendAtQuarterPast()
+            w.h.clock.nowMs = NOON + 10 * MINUTE_MS
+
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork())
+
+            assertNull(w.request().settledSinceMs, "the streak began at 12:00, but the request it sent lies ahead")
+            w.h.clock.nowMs = NOON + 25 * MINUTE_MS
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork(), "a new streak, not the follow-up")
+            assertEquals(1, w.sender.sent)
+        }
+
+    @Test
+    fun `a due time further away than any deferral waits is taken for a clock that was set back`() =
+        worldTest { w ->
+            w.requests.recordRun(written = 1, rewritten = 0)
+            // At 15:05 a check deferred the request to 15:15; then the clock went back 3 hours. The time it is owed since,
+            // 12:00, is still past: only the due time shows the change.
+            w.h.syncState.updateSleepAsAndroidRequest { it.copy(dueAtMs = NOON + 3 * HOUR_MS + 15 * MINUTE_MS) }
+            w.h.clock.nowMs = NOON + 5 * MINUTE_MS
+
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork())
+
+            assertEquals(NOON + 20 * MINUTE_MS, w.request().dueAtMs, "checked within 15 min")
+            assertEquals(Scheduled(15 * MINUTE_MS, ScheduleSettings()), w.followUps.scheduledFromWork.last())
+            assertEquals(0, w.sender.attempts)
+
+            // The longest deferral with the default merge gap: heart rate 60 min past a session that ends 5 min from now.
+            w.h.syncState.updateSleepAsAndroidRequest { it.copy(dueAtMs = NOON + 70 * MINUTE_MS) }
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork())
+            assertEquals(NOON + 70 * MINUTE_MS, w.request().dueAtMs, "kept")
+        }
+
+    @Test
+    fun `a late-data pass stored ahead of now by a clock that was set back does not count for a new streak`() =
+        worldTest { w ->
+            // Before the clock went back, a run that started at 12:45 completed its pass.
+            w.pass(NOON + 45 * MINUTE_MS)
+            w.requests.recordRun(written = 1, rewritten = 0)
+            w.requests.trySend()
+            w.h.clock.nowMs = NOON + 15 * MINUTE_MS
+
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork(), "no run has started since the nights looked settled")
+
+            assertEquals(0, w.sender.attempts)
+            w.pass(NOON + 15 * MINUTE_MS)
+            w.h.clock.nowMs = NOON + 30 * MINUTE_MS
+            assertEquals(SleepAsAndroidRequest.SENT, w.requests.onWork())
+        }
+
+    @Test
+    fun `a backfill or a recompute that starts ends the settled streak of an owed request, reading nothing`() =
+        worldTest { w ->
+            w.requests.holdForRun()
+            assertEquals(SleepAsAndroidRequestState(), w.request(), "nothing owed: nothing stored")
+            w.requests.recordRun(written = 1, rewritten = 0)
+            w.requests.trySend()
+            w.h.clock.nowMs = NOON + 15 * MINUTE_MS
+            w.pass(NOON + 10 * MINUTE_MS)
+            w.h.repository.clearCalls()
+
+            w.requests.holdForRun()
+
+            assertNull(w.request().settledSinceMs)
+            assertEquals(NOON + 15 * MINUTE_MS, w.request().dueAtMs, "still owed")
+            assertTrue(
+                w.h.repository.calls
+                    .isEmpty(),
+                "${w.h.repository.calls}",
+            )
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork(), "confirmed again from now")
+            assertEquals(0, w.sender.attempts)
+        }
+
+    @Test
     fun `a sender that throws clears the request, is logged as a warning and schedules no follow-up`() =
         worldTest { w ->
             w.sender.failure = SecurityException("not allowed")

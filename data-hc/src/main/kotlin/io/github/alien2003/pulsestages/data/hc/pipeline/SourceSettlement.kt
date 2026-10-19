@@ -299,7 +299,7 @@ class SourceSettlement
 
         /** Rule 3, per package with recent sessions: its heart rate after their ends; [Settlement.Settled] when it suffices. */
         private suspend fun dataAfterEnd(scope: Scope): Settlement {
-            val marginMs = scope.settings.sources.mergeGapMin * MINUTE_MS + DATA_MARGIN_EXTRA_MS
+            val marginMs = dataMarginMs(scope.settings)
             val latest = sortedMapOf<String, Long>()
             for ((packageName, sessions) in scope.recent.groupBy { it.packageName }.toSortedMap()) {
                 val heartRate = repository.readHeartRate(sessions.minOf { it.startMs }, scope.now + CLOCK_TOLERANCE_MS, setOf(packageName))
@@ -405,5 +405,8 @@ class SourceSettlement
              * yet; the same order as the heart-rate margin.
              */
             const val QUIET_MS: Long = 60L * 60 * 1000
+
+            /** The margin after a session's end that its source's heart rate must reach with [settings] ([DATA_MARGIN_EXTRA_MS]). */
+            fun dataMarginMs(settings: AppSettings): Long = settings.sources.mergeGapMin * MINUTE_MS + DATA_MARGIN_EXTRA_MS
         }
     }

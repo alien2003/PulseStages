@@ -45,7 +45,9 @@ enum class SleepAsAndroidRequest {
  *   it had before a sync;
  * - an owed request (the follow-up too) is sent only when [SourceSettlement] has found the sessions in Sleep as
  *   Android's window settled at every check for [CONFIRM_MS], and a run that started after they first looked settled
- *   has completed its late-data pass (requested at that moment; it is waited for at most [CHECK_WAIT_MS]);
+ *   has completed its late-data pass (requested at that moment; it is waited for at most [CHECK_WAIT_MS]); a backfill or
+ *   a recompute ends the settled streak when it starts ([holdForRun]), since it rewrites records that Sleep as Android
+ *   would import while their sources stay as they are;
  * - the checks run after a completed run ([trySend]) and in a one-time work ([onWork], [SleepAsAndroidFollowUps]): runs
  *   schedule it with REPLACE, the work schedules itself with APPEND_OR_REPLACE and never cancels itself; a deferral
  *   stores when to check again, and nothing is read before then;
@@ -155,6 +157,25 @@ class SleepAsAndroidSyncRequests
             }
         }
 
+        /**
+         * Called by a backfill or a recompute before it starts (they can run for minutes, rewriting the records Sleep as
+         * Android would import while their sources stay as they are): an owed request's settled streak ends, so that the
+         * work does not send it in the middle of the run, and the nights are confirmed again from the next check. It reads
+         * nothing from Health Connect; the run's [recordRun] then owes a request for what it wrote.
+         */
+        suspend fun holdForRun() {
+            mutex.withLock {
+                guarded("could not hold the sync request to Sleep as Android") {
+                    val state = syncState.state.first().sleepAsAndroidRequest
+                    if (state.dueAtMs != null && state.settledSinceMs != null) {
+                        syncState.updateSleepAsAndroidRequest { it.copy(settledKey = null, settledSinceMs = null) }
+                        logger.d(TAG, "a backfill or a recompute starts: the nights are confirmed again")
+                    }
+                    SleepAsAndroidRequest.NONE
+                }
+            }
+        }
+
         /** Checks an owed request after a run (cancellable: the scheduled work covers a cancelled one) and sends it if due. */
         suspend fun trySend(): SleepAsAndroidRequest = attempt(fromWork = false)
 
@@ -172,7 +193,7 @@ class SleepAsAndroidSyncRequests
             when {
                 !settings.write.requestSleepAsAndroidSync -> drop("the option is off", cancel = true)
                 !sender.isInstalled() -> drop("Sleep as Android is not installed", cancel = true)
-                else -> owe(written, rewritten, settings.schedule)
+                else -> owe(written, rewritten, settings)
             }
         }
 
@@ -180,14 +201,14 @@ class SleepAsAndroidSyncRequests
         private suspend fun owe(
             written: Int,
             rewritten: Int,
-            schedule: ScheduleSettings,
+            settings: AppSettings,
         ) {
             val now = clock.millis()
             val state =
                 syncState.state
                     .first()
                     .sleepAsAndroidRequest
-                    .adjustedTo(now)
+                    .adjustedTo(now, longestWaitMs(settings))
             val due = if (written > 0) now else state.dueAtMs ?: now
             val owed =
                 state.copy(
@@ -200,15 +221,15 @@ class SleepAsAndroidSyncRequests
             syncState.updateSleepAsAndroidRequest { owed }
             loggedHold = null
             logger.d(TAG, "a sync request is owed (written=$written rewritten=$rewritten)")
-            followUps.schedule(if (due > now) due - now else RECHECK_MS, schedule)
+            followUps.schedule(if (due > now) due - now else RECHECK_MS, settings.schedule)
         }
 
         /** Whether anything is owed, the option, the age, the due time and the gap after the last request; then [check]. */
         private suspend fun owed(fromWork: Boolean): SleepAsAndroidRequest {
             val sync = syncState.state.first()
             val now = clock.millis()
-            val state = sync.sleepAsAndroidRequest.adjustedTo(now)
             val settings = settingsRepository.settings.first()
+            val state = sync.sleepAsAndroidRequest.adjustedTo(now, longestWaitMs(settings))
             val due = state.dueAtMs
             val gapLeftMs = state.lastSentAtMs?.let { it + FOLLOW_UP_DELAY_MS - now }
             return when {
@@ -241,8 +262,9 @@ class SleepAsAndroidSyncRequests
                     defer(Action.Defer(now + gapLeftMs, HOLD_GAP, detail), now, fromWork, settings.schedule)
                 }
 
+                // A pass time later than now, left by a clock that was set back, shows no pass after the streak began.
                 else -> {
-                    check(state, settings, now, fromWork, sync.lateDataPassAtMs)
+                    check(state, settings, now, fromWork, sync.lateDataPassAtMs?.takeIf { it <= now })
                 }
             }
         }
@@ -414,8 +436,8 @@ class SleepAsAndroidSyncRequests
 
             /**
              * The longest wait, after the nights first looked settled, for a run that started after that and completed its
-             * late-data pass (which may still rewrite a night): the default check interval. Only a backfill, a recompute
-             * or a check interval over an hour waits that long.
+             * late-data pass (which may still rewrite a night): the default check interval. With hourly or longer check
+             * intervals the request may wait this long.
              */
             const val CHECK_WAIT_MS: Long = 60L * 60 * 1000
 
@@ -590,13 +612,18 @@ class SleepAsAndroidSyncRequests
 
             /**
              * This state with the times a clock that was set back left in the future fixed: when the latest write or
-             * request, the last request or the start of the streak is later than [nowMs], those are taken as [nowMs], the
-             * streak is dropped and the due time is at most [RECHECK_MS] away. A due time far ahead alone is no sign of
-             * that: a deferral waits for the time a session's data must reach, up to its heart-rate margin after its end.
+             * request, the last request or the start of the streak is later than [nowMs], or the due time is further
+             * away than any deferral waits ([longestWaitMs]; a set-back smaller than the time since the last write or
+             * request shows only there), those are taken as [nowMs], the streak is dropped and the due time is at most
+             * [RECHECK_MS] away.
              */
-            private fun SleepAsAndroidRequestState.adjustedTo(nowMs: Long): SleepAsAndroidRequestState {
-                val since = settledSinceMs
-                val setBack = listOfNotNull(owedSinceMs, lastSentAtMs, since).any { it > nowMs }
+            private fun SleepAsAndroidRequestState.adjustedTo(
+                nowMs: Long,
+                longestWaitMs: Long,
+            ): SleepAsAndroidRequestState {
+                val setBack =
+                    listOfNotNull(owedSinceMs, lastSentAtMs, settledSinceMs).any { it > nowMs } ||
+                        (dueAtMs ?: nowMs) - nowMs > longestWaitMs
                 return if (!setBack) {
                     this
                 } else {
@@ -604,11 +631,20 @@ class SleepAsAndroidSyncRequests
                         dueAtMs = dueAtMs?.coerceAtMost(nowMs + RECHECK_MS),
                         owedSinceMs = owedSinceMs?.coerceAtMost(nowMs),
                         lastSentAtMs = lastSentAtMs?.coerceAtMost(nowMs),
-                        settledKey = settledKey.takeIf { since == null || since <= nowMs },
-                        settledSinceMs = since?.takeIf { it <= nowMs },
+                        settledKey = null,
+                        settledSinceMs = null,
                     )
                 }
             }
+
+            /**
+             * The longest a deferral with [settings] waits: until the heart rate of a session that ends up to
+             * [SourceSettlement.CLOCK_TOLERANCE_MS] from now must reach its margin past the end, or until a session that
+             * changed now has been unchanged for [SourceSettlement.QUIET_MS]; a confirmation, a recheck and the gap
+             * after a request are shorter.
+             */
+            private fun longestWaitMs(settings: AppSettings): Long =
+                maxOf(SourceSettlement.QUIET_MS, SourceSettlement.CLOCK_TOLERANCE_MS + SourceSettlement.dataMarginMs(settings))
 
             /** The warning about a session of the last request ([state]'s sent key) that now has another start or end. */
             private fun falsification(
