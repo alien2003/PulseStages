@@ -17,6 +17,7 @@ import io.github.alien2003.pulsestages.data.hc.HealthConnectRepository
 import io.github.alien2003.pulsestages.data.hc.HealthPermissions
 import io.github.alien2003.pulsestages.data.hc.pipeline.NewNightsSync
 import io.github.alien2003.pulsestages.data.hc.pipeline.NightPipeline
+import io.github.alien2003.pulsestages.data.hc.pipeline.SourceSettlement
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
 import io.github.alien2003.pulsestages.data.local.settings.SettingsRepository
 import io.github.alien2003.pulsestages.work.estimate.AndroidModelAssetSource
@@ -53,8 +54,8 @@ import java.io.File
  * HiltWorkerFactory and that factory itself (not WorkManager's reflective fallback, which cannot build these workers)
  * creates every worker; the worker chain reaches BackgroundRuleHealthRepository over the real HealthConnectRepository
  * and SleepStagerNightEstimator with the bundled model read through the app's AssetManager; the sync requests to Sleep
- * as Android are one singleton over the broadcast sender and the WorkManager follow-up; the app logger mirrors to
- * logcat with the tag "PulseStages".
+ * as Android are one singleton over the broadcast sender and the WorkManager follow-up, and check that the nights are
+ * complete through BackgroundRuleHealthRepository; the app logger mirrors to logcat with the tag "PulseStages".
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = PulseStagesApp::class)
@@ -136,6 +137,11 @@ class RealAppGraphTest {
         assertTrue("pipeline repository is ${repository.javaClass}", repository is BackgroundRuleHealthRepository)
         assertTrue(field<Any>(repository, "delegate") is HealthConnectRepository)
         assertTrue(field<Any>(sync, "repository") is BackgroundRuleHealthRepository)
+        // The check that the nights are complete before a request reads Health Connect under the background rule too.
+        val settlement = field<SourceSettlement>(requests, "settlement")
+        val settlementRepository = field<Any>(settlement, "repository")
+        assertTrue("settlement repository is ${settlementRepository.javaClass}", settlementRepository is BackgroundRuleHealthRepository)
+        assertTrue(field<Any>(settlementRepository, "delegate") is HealthConnectRepository)
 
         val estimator = field<Any>(pipeline, "estimator")
         assertTrue("estimator is ${estimator.javaClass}", estimator is SleepStagerNightEstimator)

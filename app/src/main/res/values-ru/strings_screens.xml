@@ -26,6 +26,7 @@
     <string name="result_with_refreshed">%1$s %2$s</string>
     <string name="result_with_saa_sync">%1$s %2$s</string>
     <string name="result_saa_sync_requested">В Sleep as Android отправлен запрос на синхронизацию.</string>
+    <string name="result_saa_sync_deferred">Sleep as Android попросят синхронизироваться, когда ночи будут завершены.</string>
 
     <string name="model_global">Глобальная модель</string>
     <string name="model_personal_calibrated">Личная модель (откалибрована по эталонным ночам)</string>

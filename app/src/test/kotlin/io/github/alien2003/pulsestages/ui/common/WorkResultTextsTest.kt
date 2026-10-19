@@ -19,8 +19,8 @@ import java.util.Locale
 /**
  * Resolves the result of "Estimate new" with nights that the automatic refresh rewrote against the app's real
  * resources, in English and Russian: every plural form of the refreshed sentence formats, it follows the summary as a
- * second sentence (before the failed nights), the sync request to Sleep as Android comes after it, and no format
- * placeholder is left.
+ * second sentence (before the failed nights), the sync request to Sleep as Android, sent or waiting for complete
+ * nights, comes after it, and no format placeholder is left.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -92,6 +92,27 @@ class WorkResultTextsTest(
             assertEquals(
                 "Estimate new: 1 night estimated (found 3, skipped 1). 2 nights updated with late data. " +
                     "Sleep as Android was asked to sync. 1 night failed, see the log.",
+                text,
+            )
+        }
+    }
+
+    @Test
+    fun `a sync request to Sleep as Android that waits for complete nights is said in its place`() {
+        val summary = summaryText(found = 3, skipped = 1)
+        val deferred = resources.getString(R.string.result_saa_sync_deferred)
+
+        assertEquals("$summary $deferred", resolved(RunSummary(found = 3, estimated = 1, skipped = 1, sleepAsAndroidSyncDeferred = true)))
+        val text =
+            resolved(RunSummary(found = 3, estimated = 1, skipped = 1, failed = 1, refreshed = 2, sleepAsAndroidSyncDeferred = true))
+
+        val refreshed = resources.getQuantityString(R.plurals.result_refreshed, 2, 2)
+        assertEquals("$summary $refreshed $deferred ${resources.getQuantityString(R.plurals.result_failed_nights, 1, 1)}", text)
+        assertFalse("[$language] unfilled placeholder in \"$text\"", PLACEHOLDER.containsMatchIn(text))
+        if (language == "en") {
+            assertEquals(
+                "Estimate new: 1 night estimated (found 3, skipped 1). 2 nights updated with late data. " +
+                    "Sleep as Android will be asked to sync once the nights are complete. 1 night failed, see the log.",
                 text,
             )
         }

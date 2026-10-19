@@ -26,6 +26,7 @@
     <string name="result_with_refreshed">%1$s %2$s</string>
     <string name="result_with_saa_sync">%1$s %2$s</string>
     <string name="result_saa_sync_requested">Sleep as Android was asked to sync.</string>
+    <string name="result_saa_sync_deferred">Sleep as Android will be asked to sync once the nights are complete.</string>
 
     <string name="model_global">Global model</string>
     <string name="model_personal_calibrated">Personal model (calibrated on reference nights)</string>

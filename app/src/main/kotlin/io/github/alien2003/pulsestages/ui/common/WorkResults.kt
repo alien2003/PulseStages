@@ -179,10 +179,13 @@ object WorkResultText {
             } else {
                 main
             }
-        // The sync request to Sleep as Android after a run that wrote (write.requestSleepAsAndroidSync, on by default).
+        // The sync request to Sleep as Android (write.requestSleepAsAndroidSync, on by default): sent after the run, or,
+        // after a run that wrote, owed until the nights are complete.
         val withSaaSync =
             if (summary.sleepAsAndroidSyncRequested) {
                 UiText.of(R.string.result_with_saa_sync, withRefreshed, UiText.of(R.string.result_saa_sync_requested))
+            } else if (summary.sleepAsAndroidSyncDeferred) {
+                UiText.of(R.string.result_with_saa_sync, withRefreshed, UiText.of(R.string.result_saa_sync_deferred))
             } else {
                 withRefreshed
             }
