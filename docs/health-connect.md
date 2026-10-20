@@ -766,6 +766,15 @@ wake reaches Health Connect, with hourly checks up to an hour later: usually one
 Oct (final 12:15) that is about 13:30–14:45, for 19 Oct (final 08:03) about 09:20–10:35 (estimated from the log). A
 recompute waits as well, at least 15 min.
 
+**On the development phone** (test builds 0.4.1-alpha.1 and -alpha.2, 19 and 20 Oct 2026): after a recompute at 20:27
+the log said "not asked yet: the nights look complete; asking in 15 min if nothing changes"; Android deferred the
+work while the phone was idle, the request went out at 21:11 after a late-data pass and the follow-up at 21:21, and
+Sleep as Android started its Health Connect sync after each. On 20 Oct OHealth again published the night cut at
+07:29 (written at 07:30), then extended it to 07:52 and to 07:59 (written at 08:10); PulseStages wrote all three
+versions (07:45, 08:00, 08:23) and asked Sleep as Android nothing ("not asked yet: no heart rate from
+com.heytap.health.international from 60 min after the session's end yet"); at 09:18 OHealth's heart rate still ended
+at 08:07. Sleep as Android's import of that night after the wait is not yet confirmed.
+
 **The work.** Every later check, and the follow-up, is made by the one-time unique work `sleep-as-android-follow-up`
 (`SleepAsAndroidSyncWorker`, battery-not-low like the scheduled works), unless a run comes first. A run that wrote
 schedules it with `ExistingWorkPolicy.REPLACE` for the due time, or for a check in 15 min, as soon as its writes are
