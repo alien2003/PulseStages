@@ -787,7 +787,8 @@ to the pure `decide`:
   leaves the 12-hour scope ends no streak); otherwise a new one starts now and requests a late-data pass in the same
   edit. The request is sent once the streak is `CONFIRM_MS` = 15 min old and a late-data pass of a run that started at
   or after the streak's start has completed (`lateDataPassAtMs`), or `CHECK_WAIT_MS` = 60 min have passed; until then
-  it is deferred to the end of the confirmation or to the next check.
+  it is deferred to the end of the confirmation or to the next check. A confirmed streak that was not sent yet is
+  checked by the run that completes such a pass even before that stored time; a follow-up keeps its time.
 - `Unsettled`: the streak ends; deferred by `RECHECK_MS`, or to the time the session's heart rate must reach if that is
   later.
 - `Unreadable` (the background rule refused the read, [6.5](#65-the-background-permission-guard)): sent without a new

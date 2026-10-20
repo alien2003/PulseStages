@@ -232,6 +232,8 @@ class SleepAsAndroidSyncRequests
             val state = sync.sleepAsAndroidRequest.adjustedTo(now, longestWaitMs(settings))
             val due = state.dueAtMs
             val gapLeftMs = state.lastSentAtMs?.let { it + FOLLOW_UP_DELAY_MS - now }
+            // A pass time later than now, left by a clock that was set back, shows no pass after the streak began.
+            val lateDataPassAtMs = sync.lateDataPassAtMs?.takeIf { it <= now }
             return when {
                 due == null -> {
                     SleepAsAndroidRequest.NONE
@@ -249,7 +251,7 @@ class SleepAsAndroidSyncRequests
                     expire(cancel = !fromWork)
                 }
 
-                due > now -> {
+                due > now && !state.passArrived(lateDataPassAtMs, now) -> {
                     if (state != sync.sleepAsAndroidRequest) syncState.updateSleepAsAndroidRequest { state }
                     // A work that runs early (one of 0.4.0, or after a clock change) waits for the due time.
                     if (fromWork) followUps.scheduleFromWork(due - now, settings.schedule)
@@ -262,11 +264,25 @@ class SleepAsAndroidSyncRequests
                     defer(Action.Defer(now + gapLeftMs, HOLD_GAP, detail), now, fromWork, settings.schedule)
                 }
 
-                // A pass time later than now, left by a clock that was set back, shows no pass after the streak began.
                 else -> {
-                    check(state, settings, now, fromWork, sync.lateDataPassAtMs?.takeIf { it <= now })
+                    check(state, settings, now, fromWork, lateDataPassAtMs)
                 }
             }
+        }
+
+        /**
+         * Whether this request waits only for a run's late-data pass that has completed since: its settled streak is
+         * [CONFIRM_MS] old, not sent yet, and a pass that started at or after its start completed. The run that completed
+         * the pass then checks at once instead of at the stored time (up to [RECHECK_MS] later, more when Android defers
+         * the work). A follow-up, sent after the streak's start, keeps its time.
+         */
+        private fun SleepAsAndroidRequestState.passArrived(
+            lateDataPassAtMs: Long?,
+            nowMs: Long,
+        ): Boolean {
+            val sinceMs = settledSinceMs ?: return false
+            val unsent = lastSentAtMs?.let { it < sinceMs } ?: true
+            return unsent && nowMs - sinceMs >= CONFIRM_MS && lateDataPassAtMs != null && lateDataPassAtMs >= sinceMs
         }
 
         /** Checks the sessions, stores what [decide] concludes in one edit, logs it, then sends or schedules. */

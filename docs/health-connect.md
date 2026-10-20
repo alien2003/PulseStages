@@ -743,8 +743,9 @@ hold the request while PulseStages' own record of a night is not up to date.
 can be has not been measured), and a run that started after they first looked settled must have completed its
 late-data pass ([5](#5-changes-api)), which may still rewrite a night with the heart rate that settled it (it did on 18
 and 19 Oct, 62 and 47 min after the final version was written). The first settled check requests that pass
-(`late_data_pass_requested_at`), so the next run runs it even within 55 min of the last one; it is waited for at most
-60 min (`CHECK_WAIT_MS`, the default check interval). A requested pass whose refresh a transient read stopped, or in
+(`late_data_pass_requested_at`), so the next run runs it even within 55 min of the last one, and that run checks the
+request right after it instead of at the time stored for the next check; it is waited for at most 60 min
+(`CHECK_WAIT_MS`, the default check interval). A requested pass whose refresh a transient read stopped, or in
 which a night failed, does not count, and the next run repeats it ([5](#5-changes-api)). Every write starts the settled
 streak again (an upload has just arrived or a record changed), and so does the start of a backfill or a recompute,
 which rewrite records Sleep as Android would import while their sources stay as they are, so that no request goes out

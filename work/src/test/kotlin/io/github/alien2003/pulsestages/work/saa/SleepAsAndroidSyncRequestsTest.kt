@@ -231,6 +231,56 @@ class SleepAsAndroidSyncRequestsTest {
         }
 
     @Test
+    fun `the run that completes the awaited late-data pass sends at once instead of at the stored time`() =
+        worldTest { w ->
+            w.requests.recordRun(written = 1, rewritten = 0)
+            w.requests.trySend()
+            w.pass(NOON - MINUTE_MS)
+            w.h.clock.nowMs = NOON + 29 * MINUTE_MS
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.onWork(), "confirmed, no pass since 12:00")
+            assertEquals(NOON + 44 * MINUTE_MS, w.request().dueAtMs)
+
+            // As on the development phone (19 Oct 2026, 20:56): a run starts a second later and completes its pass.
+            w.h.clock.nowMs = NOON + 29 * MINUTE_MS + 1_000
+            w.pass(w.h.clock.nowMs)
+
+            assertEquals(SleepAsAndroidRequest.SENT, w.requests.trySend())
+            assertEquals(1, w.sender.sent)
+            assertEquals(NOON + 39 * MINUTE_MS + 1_000, w.request().dueAtMs, "the follow-up keeps its 10 minutes")
+
+            // A run within those 10 minutes neither sends the follow-up nor checks: it was sent after the streak began.
+            w.h.clock.advanceBy(5 * MINUTE_MS)
+            w.pass(w.h.clock.nowMs)
+            w.h.repository.clearCalls()
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.trySend())
+            assertTrue(
+                w.h.repository.calls
+                    .isEmpty(),
+                "nothing read: ${w.h.repository.calls}",
+            )
+            assertEquals(1, w.sender.sent)
+        }
+
+    @Test
+    fun `while the nights are still being confirmed a completed pass does not bring the request forward`() =
+        worldTest { w ->
+            w.requests.recordRun(written = 1, rewritten = 0)
+            w.requests.trySend()
+            w.h.clock.nowMs = NOON + 5 * MINUTE_MS
+            w.pass(w.h.clock.nowMs)
+            w.h.repository.clearCalls()
+
+            assertEquals(SleepAsAndroidRequest.DEFERRED, w.requests.trySend())
+            assertTrue(
+                w.h.repository.calls
+                    .isEmpty(),
+                "nothing read before 12:15: ${w.h.repository.calls}",
+            )
+            assertEquals(NOON + 15 * MINUTE_MS, w.request().dueAtMs)
+            assertEquals(0, w.sender.attempts)
+        }
+
+    @Test
     fun `without a late-data pass the request goes out an hour after the nights first looked settled`() =
         worldTest { w ->
             w.requests.recordRun(written = 1, rewritten = 0)
