@@ -361,7 +361,7 @@ from memory.
     as not sent; once the request is out, a failure to schedule its follow-up is logged on its own and the request
     still counts as sent. Android reports nothing back, so a request to a stopped Sleep as Android counts as
     sent.
-- **The sync request waits for complete nights (`SourceSettlement`; unreleased).** Sleep as Android imports a night
+- **The sync request waits for complete nights (`SourceSettlement`, 0.4.1).** Sleep as Android imports a night
   once and never updates it (§4), and OHealth publishes a night in steps, so 0.4.0's request right after the first
   write locked provisional nights in.
   - **What happened** (confirmed on the development phone, from PulseStages' log and Sleep as Android's screen and
@@ -381,8 +381,9 @@ from memory.
     30-day window, not only the nights we wrote (a held or not-estimated night, a skipped nap or another app's session
     would be imported just the same), except Sleep as Android's own.
   - **No new setting.** There is no case in which a request before the nights are complete helps: Sleep as Android
-    keeps an early import for good, while waiting costs one or two hours before the night appears there. The existing
-    option already turns the requests off, and the wait is bounded (`CHECK_WAIT_MS`, `MAX_OWED_MS`).
+    keeps an early import for good, while waiting only delays the night until the source's heart rate covers about an
+    hour past the wake (with OHealth usually until the user opens it; next decision). The existing option already
+    turns the requests off, and the wait is bounded (`CHECK_WAIT_MS`, `MAX_OWED_MS`).
   - **The check** (`SourceSettlement.check`, read-only, Health Connect first and the ledger second, no `LedgerLock`: a
     run that changes both in between shows up as a mismatch, which only defers). The first finding wins: a recent
     ledger night whose source session is gone before the deletion was applied; per session in scope, not processed as
@@ -410,14 +411,17 @@ from memory.
     phone clock; later samples ignored); `QUIET_MS` = 60 min (no evidence; the order of the margin).
     `SleepAsAndroid.SYNC_WINDOW_MS` = 30 days (its sync window). `SleepAsAndroidSyncRequests`: `RECHECK_MS` = 15 min
     (periodic runs come every 15–16 min); `CONFIRM_MS` = 15 min (OHealth wrote a session again 0–16 min after its
-    final; the spread of one upload is unmeasured); `CHECK_WAIT_MS` = 60 min (the default check interval);
+    final; one OHealth pull reaches Health Connect within seconds, so only separate pulls can be further apart, such
+    as 07:53, 08:00 and 08:10 on 20 Oct); `CHECK_WAIT_MS` = 60 min (the default check interval);
     `FOLLOW_UP_DELAY_MS` = 10 min, now also the shortest gap between two requests (Sleep as Android skips a request
     that arrives while it syncs); `MAX_OWED_MS` = 24 h (every hold other than a failing check ends 12 h after the last
     change, and check intervals up to 24 h are allowed). The heart-rate rule itself rests on the log: between OHealth's
     uploads no heart rate or steps past a provisional end reached Health Connect for at least 1.5 h, and the one upload
-    seen during sleep also extended the session. Expected delay: about 15–30 min after heart rate from an hour past
-    the wake arrives with 15-minute checks, up to 60 min more with hourly ones (18 Oct about 13:30–14:45, 19 Oct about
-    09:20–10:35).
+    seen during sleep also extended the session. Expected delay: about 15–60 min after heart rate from an hour past
+    the wake arrives with 15-minute checks (52 min on 20 Oct, where PulseStages' rewrite at 14:14, most likely the
+    refresh with that heart rate, started the confirmation again), up to 60 min more with hourly ones (had it come as
+    soon as it covered the margin: 18 Oct about 13:30–15:15, 19 Oct about 09:20–11:05); when that heart rate arrives
+    is up to the source (next decision).
   - **Without background access** the work cannot read other apps' data, and the background rule refuses before the
     call. Sending by the age of the session instead would export our stale record (no run has processed the final
     version: the 17 Oct mechanism), so the request is sent without a new check only once a settled streak that a
@@ -441,20 +445,64 @@ from memory.
     15 min); checking all 30 days for unprocessed sessions (sessions never read, without a backfill, would block for
     good); a no-background variant of the run message (the user guide covers it).
   - **Residual risks, documented rather than gated.** A heart-rate upload during a sleep-in that does not extend the
-    session (not observed); an upload spread over more than 15 min (the log line "the nights changed while
-    confirming" measures it); a manual "Sync now" while a provisional night is in Health Connect (18 Oct 07:34–12:17,
-    19 Oct 07:55–08:10); the next morning's late heart rate rewrites only our record; check intervals over 12 h, where
-    sessions leave the scope before we process them and our own request then exports the earlier version; no new
-    check without background access; a night that can never be estimated, or a band taken off at the wake, holds every
-    request until 12 h after its end; a process death between a write and `recordRun` loses the request until the next
-    write. A request whose session later changes is warned about once in the log.
+    session (possible in OHealth's code, not observed; next decision); an upload spread over more than 15 min (one
+    OHealth pull reaches Health Connect within seconds, so only separate pulls can be that far apart; the log line "the
+    nights changed while confirming" measures it); a manual "Sync now" while a provisional night is in Health Connect
+    (18 Oct 07:34–12:17, 19 Oct 07:55–08:10); the next morning's late heart rate rewrites only our record; check
+    intervals over 12 h, where sessions leave the scope before we process them and our own request then exports the
+    earlier version; no new check without background access; a night that can never be estimated, or a band taken off at
+    the wake, holds every request until 12 h after its end; a process death between a write and `recordRun` loses the
+    request until the next write. A request whose session later changes is warned about once in the log.
   - **Confirmed vs not.** Confirmed on the development phone: the provisional, intermediate and final versions above,
     Sleep as Android keeping the 07:29 versions, and the repair (2026-10-19: the three nights deleted in Sleep as
     Android, two syncs started by the same request imported our final versions and attached their heart rate). From
     Sleep as Android 20261006's code, not confirmed: its undo writes a deleted record back, and its Health Connect
     screen's sync reads 5 years. The gate is tested with replays of 18 and 19 Oct (`SourceSettlementTest`,
-    `SleepAsAndroidGateScenarioTest` with a fake Sleep as Android that imports like the real one) but has not yet run
-    on the phone.
+    `SleepAsAndroidGateScenarioTest` with a fake Sleep as Android that imports like the real one), and on the phone
+    (0.4.1-alpha.2, 20 Oct 2026) it held back the 07:29 and 07:52 versions, and Sleep as Android got the final
+    2:03–7:59 (confirmed by the user).
+- **OHealth's uploads set the delay; no trigger of our own (2026-10-20).** With the gate the request waits until the
+  source's own heart rate covers end + margin (above). On 20 Oct OHealth published the final version at 08:10 with
+  heart rate to 08:07 and then wrote nothing to Health Connect until the user opened it at 13:55, so Sleep as Android
+  got the night at about 14:47.
+  - **How OHealth uploads** (OHealth 4.62.7 decompiled with jadx; on the development phone Health Connect's "Recent
+    access" list, its rate limiter in `dumpsys healthconnect`, whose per-app `lastUpdate` is the time of the app's last
+    write, usage statistics, alarms, jobs and OHealth's logcat; health-connect.md §8.3). The export to Health Connect
+    is a side effect of OHealth storing watch data in its own database: each stored heart-rate batch is written at
+    once, and each pull with new sleep data recomputes the day's nights and upserts them (`clientRecordId` = the
+    night's start, version = now, no stages). Data reach that database only when OHealth pulls them from the watch:
+    on a reconnect (all types), on the watch's wake-up report (sleep and heart rate), on the watch's data-changed
+    report (only the reported type; heart rate alone for heart rate; not observed), when its main screen is created,
+    on a return at least 5 min after OHealth was left from its main screen, and on a pull-down on its first tab,
+    "Home" (headed "Health"; by the code also on its "Health" tab). The coded 2-hour background pull never runs: the
+    service that would arm it is missing from the manifest, and no such alarm existed on the phone since it last
+    started; a 2-hourly clock sync with the watch starts a full pull only when the watch's clock is off by 10 s or
+    more. No OHealth setting controls the pulls (when the watch sends its reports was not examined), and the phone
+    exempted OHealth from battery optimization and standby limits.
+  - **Measured.** Health Connect's "Recent access" list, read at 19:01 on 20 Oct with entries back to 19 Oct 19:24,
+    shows OHealth writing at 07:30, 07:53, 08:00, 08:10 and 13:55 (opened by the user) and at no other time; the tests
+    after it added writes only after actions in OHealth's screens. The write followed the user's action by 2–3 s
+    (pull-down 19:05:18.6, write 19:05:21; main screen 13:55:07, write 13:55:09).
+  - **Chosen by the project owner (2026-10-20): the user's habit, no code.** The user guide advises opening OHealth 75
+    minutes or more after waking up (a little more than the margin: the newest sample of a pull is a few minutes old)
+    and pulling down on its "Home" tab; the setting's hint, the guide, the README and the privacy notes no longer
+    promise "1–2 hours after you wake up".
+  - **Offered, not built.** A notification once the margin has passed without the source's heart rate, whose tap opens
+    OHealth fresh (a new task, so that its main screen is created and pulls everything) and schedules a check: the
+    night would reach Sleep as Android 15–60 min after the tap with 15-minute checks, up to 60 min more with hourly
+    ones, at the cost of a tap, a notification and resetting OHealth's open screens.
+  - **Rejected.** Relaxing the gate on other evidence: until OHealth pulls again nothing shows that the night is final
+    (a back-to-sleep fragment appears only with OHealth's next pull of sleep data, extending the session or, after a gap
+    of more than about 20 min, as a new session), so the margin stays. A silent trigger of OHealth's pull: none exists
+    (every component that could start one from another app checks the caller's signature or identity; only its launcher
+    and router activities, which open its UI, are open to other apps). Opening OHealth from the background: Android
+    blocks activity starts from the background, and it would put OHealth's UI on the screen. Forcing a reconnect by
+    toggling Bluetooth: too invasive. Battery settings of OHealth or ColorOS: no effect, there is no regular background
+    schedule to delay.
+  - **Residual risk found in the code.** A heart-rate-only pull (the watch's data-changed report for heart rate)
+    during a sleep-in brings heart rate past a provisional end without recomputing the night, which then looks final.
+    Not observed (no such pull on 20 Oct between 08:10 and 13:55); when the watch sends that report is unknown. It
+    stays a documented risk (health-connect.md §8.3).
 
 ## 3. Versions (verified latest stable, `gradle/libs.versions.toml`)
 
@@ -630,9 +678,10 @@ Attribution notice for produced works (ODC-By §4.3) is in README and in the app
 - Whether the sync request starts Sleep as Android's Health Connect sync on the phone, and whether repeated syncs add
   heart-rate values to a night (two syncs back to back: its log line "Record - added N HR" non-zero both times for
   the same night).
-- How spread out one OHealth upload is (can heart rate past the old end reach Health Connect minutes before the
-  extended session?), whether it uploads heart rate during a sleep-in without extending the session, and what its
-  writes with unchanged times change. The sync request's log line "the nights changed while confirming" measures the
-  first; `CONFIRM_MS` = 15 min is the guess until then.
+- When the watch sends its data-changed report for heart rate, the one way OHealth uploads heart rate during a
+  sleep-in without extending the session (its code; not observed). One OHealth pull reaches Health Connect within
+  seconds, and a pull with new sleep data writes the day's nights again with a new version even when their times are
+  unchanged (its code); whether `CONFIRM_MS` = 15 min covers the spread of separate pulls is measured by the log line
+  "the nights changed while confirming".
 - Whether a source without heart rate in its sessions, or a band taken off at the wake, is served well by
   `SourceSettlement.QUIET_MS` = 60 min and the 12-hour fallback (no evidence yet).

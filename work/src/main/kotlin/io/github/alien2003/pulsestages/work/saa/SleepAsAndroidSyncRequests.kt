@@ -445,8 +445,8 @@ class SleepAsAndroidSyncRequests
 
             /**
              * How long the nights must have looked settled at every check before a request is sent: OHealth wrote a
-             * session again 0–16 min after its final version (18 and 19 Oct 2026), and how spread out one of its uploads
-             * can be has not been measured.
+             * session again 0–16 min after its final version (18 and 19 Oct 2026); one of its pulls reaches Health
+             * Connect within seconds, so only separate pulls are further apart (07:53, 08:00 and 08:10 on 20 Oct 2026).
              */
             const val CONFIRM_MS: Long = 15L * 60 * 1000
 

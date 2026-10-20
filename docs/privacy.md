@@ -86,10 +86,11 @@ Android, which is on by default:
 - The system log (logcat), which receives a copy of the app's log ([5](#5-logs)).
 - With Settings → "Written sessions" → "Ask Sleep as Android to sync" (on by default) and Sleep as Android
   installed: a broadcast to Sleep as Android (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) once the
-  nights that a run wrote or updated are complete (usually 1–2 hours after waking up), and once more 10 minutes later
-  after a new or recomputed one. Nothing is sent when Sleep as Android is not installed. It carries no extras and no
-  data: it tells Sleep as Android only that a sync is wanted, and with that roughly when PulseStages' recent nights
-  became complete. Sleep as Android then reads Health Connect with its own permissions, like after its own "Sync now"
+  nights that a run wrote or updated are complete (once the watch app's heart rate reaches about an hour past the
+  wake), and once more 10 minutes later after a new or recomputed one. Nothing is sent when Sleep as Android is not
+  installed. It carries no extras and no data: it tells Sleep as Android only that a sync is wanted, and with that
+  roughly when PulseStages' recent nights became complete. Sleep as Android then reads Health Connect with its own
+  permissions, like after its own "Sync now"
   ([health-connect.md §8.3](health-connect.md#83-sleep-as-android)). To stop it, turn the setting off.
 
 What Health Connect and other apps do with data they hold is outside PulseStages' control.

@@ -519,7 +519,7 @@ The settings most people use:
 | "Existing sessions" (Written sessions) | "Skip up-to-date nights" | What runs do with nights that already have a session ([overwrite policy](#existing-sessions)) |
 | "Write awake as light sleep" (Written sessions) | off | For apps that show awakenings poorly; changes the written data |
 | "Sleep as Android compatibility" (Written sessions) | off | Starts each written session 1 second before the source session, for Sleep as Android, which imports only the session that starts first ([Sleep as Android compatibility](#sleep-as-android-compatibility)); changes the written data |
-| "Ask Sleep as Android to sync" (Written sessions) | on | Once the nights PulseStages wrote or updated are complete (usually 1–2 hours after you wake up), asks Sleep as Android to sync with Health Connect, and once more 10 minutes later after a new or recomputed night, so that Sleep as Android adds its heart rate and SpO2 ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)); does nothing while Sleep as Android is not installed; changes nothing that is written |
+| "Ask Sleep as Android to sync" (Written sessions) | on | Once the nights PulseStages wrote or updated are complete (the watch app must have uploaded heart rate covering about the first hour after you wake up; OHealth does that when you open it and pull down on its Home tab), asks Sleep as Android to sync with Health Connect, and once more 10 minutes later after a new or recomputed night, so that Sleep as Android adds its heart rate and SpO2 ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)); does nothing while Sleep as Android is not installed; changes nothing that is written |
 | "Estimator" (Algorithm) | "Hybrid" | "Hybrid", "HMM" or "Rules" |
 | "Nap threshold" (Naps) | 180 min | Shorter sessions are naps; 0 = no naps |
 | "Written for a nap" (Naps) | "Asleep / awake" | "Asleep / awake" (only sleep and awakenings), "Stages" or "Nothing" ([Nights and naps](#nights-and-naps)) |
@@ -749,10 +749,12 @@ PulseStages uses Android's WorkManager for all background work:
   sessions, its message says "… nights updated with late data."
 - **Sleep as Android.** With "Ask Sleep as Android to sync" on (the default) and Sleep as Android installed, every run
   that wrote or updated a session (including a backfill or a recompute, and one that stopped after writing) leaves a
-  sync request for Sleep as Android, which PulseStages sends once the recent nights are complete, usually 1–2 hours
-  after you wake up; a new or recomputed session gets a second request 10 minutes after the first. While a request
-  waits, the automatic runs also look for late heart rate once more after the nights first look complete, even within
-  the hour ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)).
+  sync request for Sleep as Android, which PulseStages sends once the recent nights are complete: once the watch app
+  has uploaded heart rate covering about the first hour after you wake up, with OHealth usually only after you open
+  it ([When the night comes with OHealth](#ask-sleep-as-android-to-sync)); a new or recomputed session gets a second
+  request 10 minutes after the first. While a request waits, the automatic runs also look for late heart rate once
+  more after the nights first look complete, even within the hour
+  ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)).
 - **Errors.** Health Connect rate-limit and transient errors are retried later with a growing delay (from 30 seconds,
   doubling up to 5 hours). A failure on one night is logged and does not stop the others.
 
@@ -1017,8 +1019,9 @@ Nights Sleep as Android has already imported must be deleted there and synced ag
 ### Ask Sleep as Android to sync
 
 Settings → "Written sessions" → "Ask Sleep as Android to sync" (on by default): "Once the nights PulseStages wrote or
-updated are complete (usually 1–2 hours after you wake up), asks Sleep as Android to sync with Health Connect, and
-once more 10 minutes later so that Sleep as Android adds their heart rate and SpO2. Works with “Sleep as Android
+updated are complete (the watch app must have uploaded heart rate covering about the first hour after you wake up;
+OHealth does that when you open it and pull down on its Home tab), asks Sleep as Android to sync with Health Connect,
+and once more 10 minutes later so that Sleep as Android adds their heart rate and SpO2. Works with “Sleep as Android
 compatibility”. Each request also runs Sleep as Android's backup and its other syncs."
 
 - **What it does.** Sleep as Android has no periodic import, and a night it imports gets its heart rate and SpO2 only
@@ -1043,9 +1046,29 @@ compatibility”. Each request also runs Sleep as Android's backup and its other
   once, but asks Sleep as Android only when the recent nights look complete: PulseStages has processed every recent
   session of the watch app as it is now, and the watch app's heart rate reaches about an hour past the session's end
   (with the default "Merge gap" of 30 minutes), uploaded after the session last changed. The nights must stay like that
-  for 15 minutes and through one more look for late heart rate, which PulseStages then makes at its next check. This is
-  usually 1–2 hours after you wake up, with checks every hour up to an hour more; a recompute waits at least 15 minutes.
-  The message of a run you started says so: "Sleep as Android will be asked to sync once the nights are complete."
+  for 15 minutes and through one more look for late heart rate, which PulseStages then makes at its next check. So the
+  request goes out, with checks every 15 minutes, usually 15–60 minutes after that heart rate arrived, with checks every
+  hour up to an hour more; a recompute waits at least 15 minutes. The message of a run you started says that it waits:
+  "Sleep as Android will be asked to sync once the nights are complete." With OHealth the heart rate usually arrives
+  only when you open OHealth (next point).
+- **When the night comes with OHealth.** OHealth puts heart rate into Health Connect only when it pulls it from the
+  watch: when the watch reconnects to the phone, when the watch reports that you woke up, and when you open OHealth
+  (its code also pulls heart rate when the watch reports new heart-rate data, which was not observed). It has no
+  regular schedule in the background, and no setting of OHealth or of the phone's battery management changes that
+  (OHealth 4.62.7 with an OPPO Watch X3 on the development phone;
+  [health-connect.md §8.3](health-connect.md#83-sleep-as-android)). On the development phone the night's last upload
+  came minutes after the wake-up, and then nothing until OHealth was opened almost six hours later (20 October 2026:
+  08:10 and 13:55), so Sleep as Android got the night only in the afternoon. To get it sooner, open OHealth 75 minutes
+  or more after you wake up (with the default "Merge gap" of 30 minutes) and, on its first tab, "Home" (the screen
+  headed "Health", with the "Heart rate" card), pull down until it shows "Updating data...". The heart rate is in
+  Health Connect seconds later, and with checks every 15 minutes Sleep as Android usually gets the night 15–60
+  minutes after that (52 minutes on the development phone), with the default hourly checks up to an hour more.
+  Opening OHealth less than 75 minutes after waking up may not be enough on its own: open it and pull down again later.
+  If OHealth opens on another of its screens where you left it (for example a watch setting), neither that screen nor
+  going back from it to the main screen pulls heart rate; the pull-down does. If you do not open OHealth, the night
+  still comes, when the watch reconnects or, at the latest, a little over 12 hours after it ended. PulseStages does
+  not do this for you: Android does not let an app in the background open another app, and OHealth offers no way for
+  another app to start its sync without opening OHealth on the screen.
 - **No "Sync now" in the morning.** Until PulseStages has asked, do not tap "Sync now" in Sleep as Android, and do
   not add or edit a record there (that syncs too): such a sync imports whatever Health Connect holds at that moment,
   possibly a night that is cut short or the watch app's session without stages, and Sleep as Android keeps it. The
@@ -1067,8 +1090,8 @@ compatibility”. Each request also runs Sleep as Android's backup and its other
   and PulseStages cannot check the nights in the background either. It checks them only when it runs in the
   foreground, for example for "Estimate new": if the nights are complete then, the request goes out about 15 minutes
   later, also when you have left the app, but without another check; if they are not complete yet, nothing more
-  happens until the next run in the foreground. Tap "Estimate new" once the night is complete (1–2 hours after you
-  wake up), or allow background access.
+  happens until the next run in the foreground. Tap "Estimate new" once the night is complete (with OHealth, after you
+  have opened it and pulled down 75 minutes or more after waking up), or allow background access.
 - **Checks more than 12 hours apart.** The check of the nights looks only at sessions that ended or changed in the
   last 12 hours. With "Check for new nights every" over 12 hours, the watch app's final version of a night can leave
   that window before PulseStages has processed it; the request then goes out with PulseStages' night as it was before,
@@ -1088,10 +1111,12 @@ compatibility”. Each request also runs Sleep as Android's backup and its other
   and Sleep as Android keeps it. Open Sleep as Android at least once after installing it: Android delivers nothing to
   an app that was never opened or was force-stopped, and PulseStages cannot tell. Sleep as Android must also be allowed
   to run in the background ([Battery and background restrictions](#battery-and-background-restrictions)).
-- **What you see.** A new night appears in Sleep as Android once it is complete, usually 1–2 hours after you wake up
-  (Sleep as Android starts its Health Connect sync about 10 seconds after the request), and its heart rate (and SpO2,
-  if the watch writes it) about 10 minutes later. The message of a run you started adds "Sleep as Android was asked to
-  sync." or, while the request waits, "Sleep as Android will be asked to sync once the nights are complete."
+- **What you see.** A new night appears in Sleep as Android once it is complete. With OHealth and checks every 15
+  minutes, that is usually 15–60 minutes after you have opened OHealth and pulled down 75 minutes or more after waking
+  up, with the default hourly checks up to an hour more (Sleep as Android starts its Health Connect sync about 10
+  seconds after the request). Its heart rate (and SpO2, if the watch writes it) follows about 10 minutes later. The
+  message of a run you started adds "Sleep as Android was asked to sync." or, while the request waits, "Sleep as Android
+  will be asked to sync once the nights are complete."
   PulseStages' [Log](#log) has "not asked yet: …" with what the request waits for (for example "no heart rate from …
   from 60 min after the session's end yet"), "asked Sleep as Android to sync (…)" and, for the second request, "asked
   Sleep as Android to sync again: heart rate and SpO2 for the nights it imported". A warning that ends with "Sleep as
@@ -1111,7 +1136,9 @@ compatibility”. Each request also runs Sleep as Android's backup and its other
   rate again for nights that already have it. Observed with Sleep as Android 20261006 but not yet confirmed on the
   development phone: the other side effects above. Its documentation describes the request only as a
   backup sync, so the Health Connect part may change in any version. The wait for complete nights is tested with the
-  nights of 18 and 19 October replayed in PulseStages' tests; it has not yet run on the development phone.
+  nights of 18 and 19 October replayed in PulseStages' tests, and on the development phone (a test build of 0.4.1, 20
+  October 2026) it held back the versions cut at 07:29 and 07:52, and Sleep as Android got the whole night, 2:03–7:59
+  (confirmed by the user).
 - **How to check.** A night imported this way has the cloud icon, as after "Sync now", and gets a heart-rate chart
   after the second request. Such nights are never exported back to Health Connect as Sleep as Android's own sessions.
   With adb, Sleep as Android's log (`adb logcat -s SleepAsAndroid`) has the line "HealthConnect sessions found:
@@ -1203,8 +1230,10 @@ Automatic runs depend on Android letting PulseStages run in the background.
   wake-up costs a little battery, and Android may delay frequent background work of an "Optimized" app. Late heart
   rate is still looked for at most about once an hour ([Automatic runs](#automatic-runs)), so a shorter interval
   mainly brings new nights sooner.
-- **The watch app.** The same applies to OHealth: if it cannot sync to Health Connect in the background, PulseStages
-  has nothing new to read.
+- **The watch app.** The same applies to it: if it cannot sync to Health Connect in the background, PulseStages has
+  nothing new to read. OHealth, however, writes to Health Connect only when it pulls data from the watch (mainly when
+  the watch reconnects or reports the wake-up, and when you open OHealth); allowing it more in the background adds no
+  schedule of uploads ([When the night comes with OHealth](#ask-sleep-as-android-to-sync)).
 - **Sleep as Android.** With [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync) (on by default),
   PulseStages checks whether the nights are complete, and sends the request, in background work of its own, and Sleep
   as Android's sync runs in its own background work, so the same applies to both.
@@ -1257,7 +1286,7 @@ the app is open.
 | A nap shows in Sleep as Android as a time span without phases | "Written for a nap" is "Asleep / awake", and Sleep as Android drops Health Connect's generic "sleeping" stage, so only the awake parts, if any, are left (with "Write awake as light sleep" not even those); or, without "Sleep as Android compatibility", it imported the watch app's nap session, which has no stages | Expected. To see nap phases, set "Written for a nap" to "Stages" (not validated) and turn on "Sleep as Android compatibility", recompute, then delete the nap in Sleep as Android (cloud icon; only naps of the last 29 days come back) and tap "Sync now" ([Recommended setup](#recommended-setup), steps 3 and 4). |
 | Sleep as Android shows a night starting one minute earlier than the watch app (3:03 instead of 3:04) | With "Sleep as Android compatibility" the session starts 1 second before the watch app's (3:03:59), and Sleep as Android shows whole minutes | Expected ([Sleep as Android compatibility](#sleep-as-android-compatibility)). |
 | Sleep as Android imports nothing any more, and Health Connect lists none of its permissions | The "Health Connect" row in its Settings → Services was tapped while it said "Connected": the row is a switch, so the integration was turned off and Sleep as Android revoked all its Health Connect permissions | Turn "Health Connect" on again there and grant the permissions, switch on "Access past data" again in Health Connect → "App permissions" → "Sleep" → "Additional access", and sync with "Sync now" from then on ([Recommended setup](#recommended-setup)). |
-| Sleep as Android does not import new nights by itself although "Ask Sleep as Android to sync" is on | The nights are not complete yet: PulseStages asks only once the watch app's heart rate reaches about an hour past the night's end, usually 1–2 hours after you wake up; PulseStages has no background access, so it checks only when it runs in the foreground; Sleep as Android's Health Connect integration is off; Sleep as Android was not opened since it was installed, or it was force-stopped (Android then delivers no request to it); a battery restriction of either app; or no PulseStages run wrote a night yet | PulseStages' [Log](#log) has "not asked yet: …" with what the request waits for, and "asked Sleep as Android to sync (…)" once it was sent. Without background access tap "Estimate new" once the night is complete, or tap "Allow background" ([Permissions](#permissions)). Open Sleep as Android once and check that Settings → Services lists "Health Connect" as connected (do not tap that row); allow both apps to run in the background ([Battery and background restrictions](#battery-and-background-restrictions)). Tap "Sync now" in Sleep as Android yourself only in the afternoon, once the night is complete. |
+| Sleep as Android does not import new nights by itself although "Ask Sleep as Android to sync" is on | The nights are not complete yet: PulseStages asks only once the watch app's heart rate reaches about an hour past the night's end, and OHealth usually uploads it only after you open it; PulseStages has no background access, so it checks only when it runs in the foreground; Sleep as Android's Health Connect integration is off; Sleep as Android was not opened since it was installed, or it was force-stopped (Android then delivers no request to it); a battery restriction of either app; or no PulseStages run wrote a night yet | PulseStages' [Log](#log) has "not asked yet: …" with what the request waits for, and "asked Sleep as Android to sync (…)" once it was sent. 75 minutes or more after waking up, open OHealth and pull down on its "Home" tab (the screen headed "Health") until it shows "Updating data..." ([When the night comes with OHealth](#ask-sleep-as-android-to-sync)). Without background access tap "Estimate new" once the night is complete, or tap "Allow background" ([Permissions](#permissions)). Open Sleep as Android once and check that Settings → Services lists "Health Connect" as connected (do not tap that row); allow both apps to run in the background ([Battery and background restrictions](#battery-and-background-restrictions)). Tap "Sync now" in Sleep as Android yourself only in the afternoon, once the night is complete. |
 | A night in Sleep as Android has stages but no heart rate | Sleep as Android adds heart rate only on the sync after the one that imported the night (or Health Connect has no heart rate of that night) | Tap "Sync now" there again; with [Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync) this happens by itself about 10 minutes after the first request for a new night. |
 | Sleep as Android shows awake stretches over PulseStages' stages once a night has heart rate | Probably its own heart-rate awake detection, which runs when heart rate is added to a night (not yet confirmed on the development phone) | PulseStages' Nights tab shows the stages as written. To avoid it, lower or turn off Sleep as Android → Settings → "Sleep tracking" → "Awake detection" → "Heart rate monitoring" ("Disabled"). |
 | The release APK does not install over an installed version | The installed build is a debug build (or a self-built one) with another signing key | Uninstall first ([Release or debug APK](#release-or-debug-apk)). |
@@ -1292,8 +1321,10 @@ their stages.
 
 **Does PulseStages tell Sleep as Android when a night is ready?** Yes, with "Ask Sleep as Android to sync" (on by
 default; turn it off in Settings → "Written sessions"): once the nights PulseStages wrote or updated are complete,
-usually 1–2 hours after you wake up, it asks Sleep as Android to sync, and after a new or recomputed night asks again
-10 minutes later so that the night also gets its heart rate and SpO2
+that is once the watch app has uploaded heart rate covering about the first hour after you wake up (with OHealth,
+open it 75 minutes or more after waking up and pull down on its "Home" tab:
+[When the night comes with OHealth](#ask-sleep-as-android-to-sync)), it asks Sleep as Android to sync, and after a
+new or recomputed night asks again 10 minutes later so that the night also gets its heart rate and SpO2
 ([Ask Sleep as Android to sync](#ask-sleep-as-android-to-sync)). It waits because Sleep as Android keeps the first
 version of a night it imports, and the watch app may publish a night that ends too early before the whole night.
 Turn on "Sleep as Android compatibility" as well, or Sleep as Android imports the watch app's session without stages.

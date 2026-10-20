@@ -10,6 +10,20 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+### Changed
+
+- **When Sleep as Android gets a night with OHealth.** The hint of "Ask Sleep as Android to sync", the user guide,
+  the README and the privacy notes no longer say that the request usually comes 1–2 hours after you wake up. It comes
+  once the watch app's heart rate in Health Connect reaches about an hour past the wake, and OHealth uploads heart
+  rate only when it pulls it from the watch: when the watch reconnects, when the watch reports the wake-up or (not
+  observed) new heart-rate data, and when OHealth is opened. It has no regular schedule in the background, and no
+  OHealth setting changes that (OHealth 4.62.7 on the development phone, 19–20 October 2026: after the night's last
+  upload at 08:10 nothing reached Health Connect until the user opened OHealth at 13:55). The user guide now advises
+  opening OHealth 75 minutes or more after waking up and pulling down on its "Home" tab (the screen headed "Health");
+  with checks every 15 minutes Sleep as Android then usually gets the night 15–60 minutes later, with the default
+  hourly checks up to an hour more ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync),
+  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+
 ## [0.4.1] - 2026-10-20
 
 "Ask Sleep as Android to sync" now waits until a night is complete before it asks Sleep as Android to import it, so
