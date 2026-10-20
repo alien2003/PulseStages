@@ -773,7 +773,10 @@ Sleep as Android started its Health Connect sync after each. On 20 Oct OHealth a
 07:29 (written at 07:30), then extended it to 07:52 and to 07:59 (written at 08:10); PulseStages wrote all three
 versions (07:45, 08:00, 08:23) and asked Sleep as Android nothing ("not asked yet: no heart rate from
 com.heytap.health.international from 60 min after the session's end yet"); at 09:18 OHealth's heart rate still ended
-at 08:07. Sleep as Android's import of that night after the wait is not yet confirmed.
+at 08:07, and OHealth uploaded none past 08:07 until at least 12:09, so the request still waited then. In the evening
+Sleep as Android showed the night as 2:03–7:59, the final version (confirmed by the user); the time of the request
+was not captured. When OHealth uploads no heart rate for hours after the wake, the night reaches Sleep as Android
+that much later, at the latest after the 12-h limit.
 
 **The work.** Every later check, and the follow-up, is made by the one-time unique work `sleep-as-android-follow-up`
 (`SleepAsAndroidSyncWorker`, battery-not-low like the scheduled works), unless a run comes first. A run that wrote

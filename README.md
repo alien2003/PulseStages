@@ -283,8 +283,8 @@ already in Health Connect keep their stages until they are recomputed. The
   and Sleep as Android kept the 07:29 versions (confirmed on the development phone), most likely imported through
   0.4.0's request, which was sent right after the first write. The request now waits for complete nights: on the
   development phone a night published cut at 07:29 and extended twice got no request until OHealth's heart rate passed
-  its end (Sleep as Android's import after the wait is not yet confirmed); a "Sync now" in Sleep as Android in the
-  morning can still import a night cut short.
+  its end, and Sleep as Android then showed it with its final end; a "Sync now" in Sleep as Android in the morning can
+  still import a night cut short.
 - **Not verified yet.** Whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the
   behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
