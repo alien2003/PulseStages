@@ -10,6 +10,13 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-20
+
+"Ask Sleep as Android to sync" now waits until a night is complete before it asks Sleep as Android to import it, so
+Sleep as Android no longer keeps a night that OHealth published cut short while you were still asleep. Install it
+over 0.4.0 like any update (same signing key): the app keeps its data and settings, and no night becomes stale.
+Nights Sleep as Android already holds cut short must be deleted there once (below).
+
 ### Fixed
 
 - **Sleep as Android kept nights that were cut short.** OHealth publishes a night in steps: on the development phone it
@@ -32,10 +39,13 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   as "Estimate new" found the nights complete, and otherwise waits for such a run. Nights that Sleep as Android
   already holds cut short stay as they are: delete them there (cloud icon; do not undo the deletion), then tap
   "Recompute" on them in PulseStages, or "Sync now" twice in Sleep as Android in the afternoon (confirmed on the
-  development phone for three nights); do not tap "Sync now" there in the morning. The wait itself is not yet
-  confirmed on the development phone
-  ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync),
-  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+  development phone for three nights); do not tap "Sync now" there in the morning. On the development phone,
+  with test builds of this version, OHealth published the night of 20 October cut at 07:29 and extended it twice;
+  PulseStages wrote all three versions and asked Sleep as Android nothing while OHealth's heart rate had not passed
+  the end, and a request after a recompute went out after the wait, followed by the second one 10 minutes later.
+  Sleep as Android's import of a night after the wait is not yet confirmed
+  ([user guide](https://github.com/alien2003/PulseStages/blob/v0.4.1/docs/user-guide.md#ask-sleep-as-android-to-sync),
+  [health-connect.md §8.3](https://github.com/alien2003/PulseStages/blob/v0.4.1/docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.4.1/PLAN.md#2-decisions)).
 
 ## [0.4.0] - 2026-10-17
 
@@ -453,7 +463,8 @@ for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epoc
   and of the debug signing certificate.
 - **Licence**: WTFPL.
 
-[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/alien2003/PulseStages/releases/tag/v0.4.1
 [0.4.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.4.0
 [0.3.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.2.0

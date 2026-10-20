@@ -35,9 +35,9 @@ readonly OUT_ROOT="${REPO_ROOT}/tools/device-test/out"
 MAIN_PID="$BASHPID"
 readonly MAIN_PID
 
-# The installed app: the v0.4.0 release's debug build.
-EXPECTED_VERSION_CODE="${EXPECTED_VERSION_CODE:-40099}"
-EXPECTED_VERSION_NAME="${EXPECTED_VERSION_NAME:-0.4.0}"
+# The installed app: the v0.4.1 release's debug build.
+EXPECTED_VERSION_CODE="${EXPECTED_VERSION_CODE:-40199}"
+EXPECTED_VERSION_NAME="${EXPECTED_VERSION_NAME:-0.4.1}"
 
 # Health Connect read calls one run may make (ReadBudget.DEFAULT_TOTAL), less what earlier runs on the same phone
 # made in the last 24 hours; a run with less than MIN_RUN_BUDGET left does not start.
