@@ -5,6 +5,16 @@
     <string name="work_estimate_title">Estimating new nights</string>
     <string name="work_backfill_title">Processing the sleep history</string>
     <string name="work_recompute_title">Recomputing nights</string>
+    <string name="work_saa_channel_name">Nights in Sleep as Android</string>
+    <string name="work_saa_channel_description">A night that changed after Sleep as Android was asked to import it, and how to fix it there</string>
+    <string name="work_saa_changed_title">Check a night in Sleep as Android</string>
+    <string name="work_saa_changed_text">%1$s: the night now lasts %2$s–%3$s. When Sleep as Android was last asked to sync, it lasted %4$s–%5$s, and Sleep as Android never updates a night it imported.</string>
+    <string name="work_saa_changed_text_several">%1$s: the night now lasts %2$s–%3$s. When Sleep as Android was last asked to sync, it was separate nights (%4$s), and Sleep as Android never updates a night it imported.</string>
+    <string name="work_saa_span">%1$s–%2$s</string>
+    <string name="work_saa_changed_steps">If Sleep as Android shows other times for this night, delete there every record with the cloud icon between %1$s and %2$s, and do not undo the deletion. Then tap “Recompute” on this night in PulseStages: once the night is complete, PulseStages asks Sleep as Android to import it again.</string>
+    <string name="work_saa_changed_steps_never">If Sleep as Android shows other times for this night, delete there every record with the cloud icon between %1$s and %2$s, and do not undo the deletion. Then tap “Sync now” in its Settings → Services, and again a few minutes later for the heart rate: with “Existing sessions” set to “Never overwrite”, “Recompute” in PulseStages rewrites nothing and so does not ask Sleep as Android to sync.</string>
+    <string name="work_saa_changed_public">A night in Sleep as Android may be out of date</string>
+    <string name="work_saa_open_app">Open Sleep as Android</string>
     <plurals name="work_backfill_progress">
         <item quantity="one">Week %1$d of %2$d · %3$d night estimated</item>
         <item quantity="other">Week %1$d of %2$d · %3$d nights estimated</item>

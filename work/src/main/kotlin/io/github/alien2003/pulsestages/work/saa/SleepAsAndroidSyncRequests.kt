@@ -8,13 +8,16 @@ import io.github.alien2003.pulsestages.data.hc.pipeline.keyOf
 import io.github.alien2003.pulsestages.data.local.log.AppLogger
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
 import io.github.alien2003.pulsestages.data.local.settings.LogLevel
+import io.github.alien2003.pulsestages.data.local.settings.OverwritePolicy
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
 import io.github.alien2003.pulsestages.data.local.settings.SettingsRepository
 import io.github.alien2003.pulsestages.data.local.sync.SleepAsAndroidRequestState
 import io.github.alien2003.pulsestages.data.local.sync.SyncStateStore
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -55,12 +58,20 @@ enum class SleepAsAndroidRequest {
  *   check in the foreground stored is [CONFIRM_MS] old, and otherwise leaves the check to the next run in the
  *   foreground;
  * - two requests are at least [FOLLOW_UP_DELAY_MS] apart (Sleep as Android skips a request that arrives while it
- *   syncs), and an owed request is dropped after [MAX_OWED_MS] without a write or a request.
+ *   syncs), and an owed request is dropped after [MAX_OWED_MS] without a write or a request;
+ * - a request stores the WRITTEN nights of its sessions ([SentNights.keyOf]); a night of them that PulseStages then
+ *   writes with another start or end (in place, or as the night that took it over) is notified
+ *   ([SleepAsAndroidNotices]; not again while a notice shows that version), at the check of the request that the write
+ *   makes owed ([SentNights.check]): Sleep as Android keeps the version it imported, and the user can delete it there
+ *   and recompute the night (under "Never overwrite", which rewrites nothing, sync in Sleep as Android instead). A
+ *   notice whose night is back at the span sent is withdrawn at such a check.
  *
- * The state is stored in [SyncStateStore] before anything is sent or scheduled, so a work that runs again sends nothing
- * twice. Calls are serialized; never throws except for cancellation: a failure is logged and counts as not sent.
+ * The state is stored in [SyncStateStore] before anything is sent, scheduled or notified, so a work that runs again
+ * sends and notifies nothing twice. Calls are serialized; never throws except for cancellation: a failure is logged and
+ * counts as not sent.
  */
 @Singleton
+@Suppress("LongParameterList") // One collaborator per concern; built by Hilt and by PipelineHarness.sleepAsAndroidRequests.
 class SleepAsAndroidSyncRequests
     @Inject
     constructor(
@@ -71,6 +82,8 @@ class SleepAsAndroidSyncRequests
         private val clock: Clock,
         private val logger: AppLogger,
         private val settlement: SourceSettlement,
+        private val sentNights: SentNights,
+        private val notices: SleepAsAndroidNotices,
     ) {
         private val mutex = Mutex()
 
@@ -285,7 +298,13 @@ class SleepAsAndroidSyncRequests
             return unsent && nowMs - sinceMs >= CONFIRM_MS && lateDataPassAtMs != null && lateDataPassAtMs >= sinceMs
         }
 
-        /** Checks the sessions, stores what [decide] concludes in one edit, logs it, then sends or schedules. */
+        /**
+         * Checks the sessions and compares the nights of the last request with the ledger ([SentNights.check]), stores
+         * in one edit what [decide] concludes, the nights of a request it sends (which replace the compared ones and
+         * clear the notified versions) or else the versions the notices show now ([SentNights.noticedAfter]), logs
+         * it, then sends or schedules, and last withdraws and notifies: a process death can lose a notice but never
+         * repeat it, and a failure to notify cannot undo or lose the request.
+         */
         private suspend fun check(
             state: SleepAsAndroidRequestState,
             settings: AppSettings,
@@ -296,14 +315,103 @@ class SleepAsAndroidSyncRequests
             val verdict = settlement.check(settings, setOf(SleepAsAndroid.PACKAGE), SleepAsAndroid.SYNC_WINDOW_MS)
             failedCheck = (verdict as? Settlement.Failed)?.let { it.error.message.orEmpty() }
             val step = decide(state, verdict, now, lateDataPassAtMs)
-            syncState.updateSleepAsAndroidRequest(step.requestLateDataPassAtMs) { step.state }
+            val found = checkNights(state)
+            val sending = step.action is Action.Send
+            val stored =
+                step.state.copy(
+                    sentNightsKey = if (sending) nightsOf(step.state.sentKey) else step.state.sentNightsKey,
+                    noticedKey = if (sending) null else SentNights.noticedAfter(state.noticedKey, found),
+                )
+            // Not cancellable: a stop while the edit commits would skip the request and the notices it stores as done.
+            // Nothing suspends between the edit and the `try`, whose `finally` posts the notices.
+            withContext(NonCancellable) { syncState.updateSleepAsAndroidRequest(step.requestLateDataPassAtMs) { stored } }
             step.falsified?.let { logger.w(TAG, it) }
             step.changed?.let { logger.i(TAG, it) }
-            return when (val action = step.action) {
-                is Action.Send -> send(step, sentLine(state, step, verdict, now), fromWork, settings.schedule)
-                is Action.Defer -> defer(action, now, fromWork, settings.schedule)
-                is Action.Wait -> logHold(HOLD_UNREADABLE, "not asked yet: ${action.detail}")
+            return try {
+                when (val action = step.action) {
+                    is Action.Send -> send(step.copy(state = stored), sentLine(state, step, verdict, now), fromWork, settings.schedule)
+                    is Action.Defer -> defer(action, now, fromWork, settings.schedule)
+                    is Action.Wait -> logHold(HOLD_UNREADABLE, "not asked yet: ${action.detail}")
+                }
+            } finally {
+                found.withdrawnTags.forEach(::withdraw)
+                val neverOverwrite = settings.write.overwritePolicy == OverwritePolicy.NEVER
+                found.changes.forEach { notice(it.copy(neverOverwrite = neverOverwrite), state.lastSentAtMs, now) }
             }
+        }
+
+        /** [SentNights.check] of the last request in [state]; nothing when the ledger cannot be read (logged). */
+        @Suppress("TooGenericExceptionCaught") // The comparison is best effort: the request goes on without it.
+        private suspend fun checkNights(state: SleepAsAndroidRequestState): SentNightsCheck =
+            try {
+                sentNights.check(state.sentNightsKey, state.noticedKey)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "could not compare the nights of the last request with the ledger", throwable = e)
+                SentNightsCheck.NONE
+            }
+
+        /** Withdraws the notice of the night [clientRecordId], which is back at the span sent, and logs it in its Log. */
+        @Suppress("TooGenericExceptionCaught") // Best effort, as a notice: its failure must not fail the check.
+        private fun withdraw(clientRecordId: String) {
+            val failure =
+                try {
+                    notices.withdraw(clientRecordId)
+                    null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    e
+                }
+            val result = failure?.let { "could not remove it: ${it.message ?: it.javaClass.simpleName}" } ?: "notification removed"
+            logger.log(
+                if (failure == null) LogLevel.INFO else LogLevel.WARN,
+                TAG,
+                "this night is back at the times Sleep as Android was last asked to sync with ($result)",
+                clientRecordId,
+                throwable = failure,
+            )
+        }
+
+        /** The WRITTEN nights of the sessions in [sentKey] ([SentNights.keyOf]); null when the ledger cannot be read (logged). */
+        @Suppress("TooGenericExceptionCaught") // The request goes out without them: only its notices are lost.
+        private suspend fun nightsOf(sentKey: String?): String? =
+            try {
+                sentNights.keyOf(timesOf(sentKey.orEmpty()).map { it.uuid })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "could not store the nights of this request", throwable = e)
+                null
+            }
+
+        /**
+         * Shows the notice of [change] and logs it with the night's key: at INFO when it was shown, at WARN when not
+         * (notifications off, the channel off, or any error of the notifier).
+         */
+        @Suppress("TooGenericExceptionCaught") // A notice is best effort: its failure must not fail the check.
+        private fun notice(
+            change: ChangedNight,
+            lastSentAtMs: Long?,
+            now: Long,
+        ) {
+            val result =
+                try {
+                    Result.success(notices.show(change))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            val level = if (result.getOrNull() == NoticeResult.SHOWN) LogLevel.INFO else LogLevel.WARN
+            val text =
+                result.fold(
+                    { if (it == NoticeResult.SHOWN && change.silent) SHOWN_SILENTLY else it.logText },
+                    { "could not show the notification: ${it.message ?: it.javaClass.simpleName}" },
+                )
+            val line = noticeLine(change, lastSentAtMs, now, text)
+            logger.log(level, TAG, line, change.night.clientRecordId, throwable = result.exceptionOrNull())
         }
 
         /** Sends the request [step] stored, logs [line] and, as the last call, schedules the follow-up it owes. */
@@ -503,6 +611,9 @@ class SleepAsAndroidSyncRequests
             /** Added to the line of a request sent without a new check. */
             private const val NO_CHECK = "without a new check: no background access"
 
+            /** What a silent notice ([ChangedNight.silent]) did when it was shown. */
+            private const val SHOWN_SILENTLY = "notification shown without a new alert: an earlier one had these times"
+
             /**
              * What a check of the owed request in [state] at [nowMs] concludes from [verdict], given the start of the run
              * whose late-data pass last completed ([lateDataPassAtMs]). Pure: the caller stores [Step.state] (and the
@@ -518,7 +629,9 @@ class SleepAsAndroidSyncRequests
              * - Failed: the streak is kept; checked again in [RECHECK_MS].
              *
              * Whatever the verdict, a session sent with the last request that now has another start or end is warned about
-             * once (Sleep as Android keeps the version it imported).
+             * once (Sleep as Android keeps the version it imported): a diagnostic of the sources, also for sessions that
+             * PulseStages has not processed or does not rewrite. The nights PulseStages changed are notified by the
+             * caller ([SentNights.check]).
              */
             fun decide(
                 state: SleepAsAndroidRequestState,
@@ -694,6 +807,27 @@ class SleepAsAndroidSyncRequests
                     }
                 return "Sleep as Android was asked to sync ${minutes(nowMs - (state.lastSentAtMs ?: nowMs))} min ago; " +
                     "a session of ${now.packageName} then $moved than it does now: Sleep as Android may keep the earlier version"
+            }
+
+            /**
+             * The log line of the notice of [change] at [nowMs], after the last request at [lastSentAtMs], with what
+             * [SleepAsAndroidNotices.show] did ([result]).
+             */
+            private fun noticeLine(
+                change: ChangedNight,
+                lastSentAtMs: Long?,
+                nowMs: Long,
+                result: String,
+            ): String {
+                val shifts =
+                    listOfNotNull(
+                        (change.night.sessionStartMs - change.sentStartMs).takeIf { it != 0L }?.let { "start ${signed(it)}" },
+                        (change.night.sessionEndMs - change.sentEndMs).takeIf { it != 0L }?.let { "end ${signed(it)}" },
+                        "now with other source sessions".takeIf { change.otherSources },
+                        "${change.sentSpans.size} nights of the request merged".takeIf { change.sentSpans.size > 1 },
+                    ).joinToString(", ")
+                return "Sleep as Android was asked to sync ${minutes(nowMs - (lastSentAtMs ?: nowMs))} min ago; " +
+                    "PulseStages then changed this night ($shifts): Sleep as Android may keep the earlier version ($result)"
             }
 
             /** The log line about the streak of [state] that [verdict]'s sessions ended: each new or changed session. */

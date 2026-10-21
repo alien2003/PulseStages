@@ -35,7 +35,8 @@
         - the Health Connect APK, so that getSdkStatus can see it on Android 9–13;
         - OHealth, the default sleep source;
         - Sleep as Android, only to check that it and its REQUEST_SYNC receiver are installed before the sync request
-          ("Ask Sleep as Android to sync", on by default); sending the broadcast itself needs no visibility;
+          ("Ask Sleep as Android to sync", on by default) and to open it from the notice "Check a night in Sleep as
+          Android" (getLaunchIntentForPackage); sending the broadcast itself needs no visibility;
         - every Health Connect client: each one declares the permission-rationale activity (ACTION_SHOW_PERMISSIONS_RATIONALE
           up to Android 13, VIEW_PERMISSION_USAGE + HEALTH_PERMISSIONS on Android 14+), so the apps that wrote the data
           are visible and the Sources, Home and Compare screens can show their label and icon from PackageManager.
@@ -67,10 +68,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PulseStages">
 
-        <!-- adjustResize: the edge-to-edge window receives IME insets (imePadding) instead of being panned. -->
+        <!--
+            adjustResize: the edge-to-edge window receives IME insets (imePadding) instead of being panned.
+            singleTop: while MainActivity is on top of its task, an intent that is not equal to the task's base intent
+            (on Android 9–13 the progress notification's, which names the package; Android 14+ ignore the package)
+            reaches it instead of stacking a second one. Only then: with another screen on top (the rationale, Health
+            Connect's permission screen), such an intent still stacks one on Android 9–13. The notification of a night
+            therefore opens MainActivity with the launcher's identity (OpenNight), so that a task its tap starts has
+            the launcher's base intent; an existing task keeps the intent that started it.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.PulseStages"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

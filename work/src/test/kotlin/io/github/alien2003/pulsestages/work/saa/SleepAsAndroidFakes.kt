@@ -145,12 +145,58 @@ class RecordingFollowUps : SleepAsAndroidFollowUps {
     }
 }
 
-/** The production [SleepAsAndroidSyncRequests] over this harness's settings, sync state, clock, log and [settlement]. */
+/**
+ * A [SleepAsAndroidNotices] that records the notices and returns [result] (or throws [failure]); [onShow] runs first, e.g.
+ * to read what was stored before the notice. [shade] holds the notices as Android would show them.
+ */
+class RecordingNotices(
+    @Volatile var result: NoticeResult = NoticeResult.SHOWN,
+    @Volatile var failure: Exception? = null,
+) : SleepAsAndroidNotices {
+    /** Every notice asked for, shown or not, in order. */
+    val shown: MutableList<ChangedNight> = mutableListOf()
+
+    /** Every notice withdrawn, by tag, in order. */
+    val withdrawn: MutableList<String> = mutableListOf()
+
+    /** The notices shown now, by tag: a notice cancels those of the nights it replaced and replaces its own tag. */
+    val shade: MutableMap<String, ChangedNight> = linkedMapOf()
+
+    /** The tags of the notices in [shade], in the order they were posted. */
+    val shownTags: List<String> get() = shade.keys.toList()
+
+    /** Runs at the start of every [show]. */
+    @Volatile var onShow: (ChangedNight) -> Unit = {}
+
+    override fun show(change: ChangedNight): NoticeResult {
+        onShow(change)
+        shown += change
+        failure?.let { throw it }
+        if (result == NoticeResult.SHOWN) {
+            change.replaced.forEach { shade.remove(it) }
+            shade[change.night.clientRecordId] = change
+        }
+        return result
+    }
+
+    override fun withdraw(clientRecordId: String) {
+        withdrawn += clientRecordId
+        shade.remove(clientRecordId)
+    }
+}
+
+/**
+ * The production [SleepAsAndroidSyncRequests] over this harness's settings, sync state, clock, log, [settlement] and
+ * ledger ([sentNights]).
+ */
 fun PipelineHarness.sleepAsAndroidRequests(
     sender: SyncRequestSender = RecordingSyncRequestSender(),
     followUps: SleepAsAndroidFollowUps = RecordingFollowUps(),
     settlement: SourceSettlement = this.settlement,
-): SleepAsAndroidSyncRequests = SleepAsAndroidSyncRequests(settings, syncState, sender, followUps, clock, logger, settlement)
+    sentNights: SentNights = SentNights(ledger.nightDao),
+    notices: SleepAsAndroidNotices = RecordingNotices(),
+): SleepAsAndroidSyncRequests =
+    SleepAsAndroidSyncRequests(settings, syncState, sender, followUps, clock, logger, settlement, sentNights, notices)
 
 /** Turns `write.requestSleepAsAndroidSync` (on by default) on or off. */
 suspend fun PipelineHarness.requestSleepAsAndroidSync(on: Boolean = true) {

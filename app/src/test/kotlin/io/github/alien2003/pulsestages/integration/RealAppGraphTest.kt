@@ -23,9 +23,11 @@ import io.github.alien2003.pulsestages.data.local.settings.SettingsRepository
 import io.github.alien2003.pulsestages.work.estimate.AndroidModelAssetSource
 import io.github.alien2003.pulsestages.work.estimate.BundledHybridModelProvider
 import io.github.alien2003.pulsestages.work.estimate.SleepStagerNightEstimator
+import io.github.alien2003.pulsestages.work.notify.SleepAsAndroidNotifications
 import io.github.alien2003.pulsestages.work.run.EstimateNewNightsRunner
 import io.github.alien2003.pulsestages.work.run.RecomputeRequest
 import io.github.alien2003.pulsestages.work.saa.BroadcastSyncRequestSender
+import io.github.alien2003.pulsestages.work.saa.SentNights
 import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidSyncRequests
 import io.github.alien2003.pulsestages.work.saa.WorkManagerSleepAsAndroidFollowUps
 import io.github.alien2003.pulsestages.work.schedule.WorkManagerWorkScheduler
@@ -54,8 +56,9 @@ import java.io.File
  * HiltWorkerFactory and that factory itself (not WorkManager's reflective fallback, which cannot build these workers)
  * creates every worker; the worker chain reaches BackgroundRuleHealthRepository over the real HealthConnectRepository
  * and SleepStagerNightEstimator with the bundled model read through the app's AssetManager; the sync requests to Sleep
- * as Android are one singleton over the broadcast sender and the WorkManager follow-up, and check that the nights are
- * complete through BackgroundRuleHealthRepository; the app logger mirrors to logcat with the tag "PulseStages".
+ * as Android are one singleton over the broadcast sender, the WorkManager follow-up, the ledger's nights and the
+ * notification of a changed night, and check that the nights are complete through BackgroundRuleHealthRepository; the
+ * app logger mirrors to logcat with the tag "PulseStages".
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = PulseStagesApp::class)
@@ -128,6 +131,8 @@ class RealAppGraphTest {
         val requests = field<SleepAsAndroidSyncRequests>(followUp, "requests")
         assertTrue(field<Any>(requests, "sender") is BroadcastSyncRequestSender)
         assertTrue(field<Any>(requests, "followUps") is WorkManagerSleepAsAndroidFollowUps)
+        assertTrue(field<Any>(requests, "notices") is SleepAsAndroidNotifications)
+        assertTrue(field<Any>(requests, "sentNights") is SentNights)
 
         val runner = field<EstimateNewNightsRunner>(estimate, "runner")
         assertTrue("one shared instance (its lock and state)", field<Any>(runner, "sleepAsAndroid") === requests)

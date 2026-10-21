@@ -213,6 +213,8 @@ class SyncStateStoreTest {
                     settledSinceMs = 2_000L,
                     lastSentAtMs = 500L,
                     sentKey = "a:1:2:0",
+                    sentNightsKey = "ps:0a:1:2;ps:0b:4:5",
+                    noticedKey = "ps:0a:1:3",
                 )
             withStore { store ->
                 assertEquals(SleepAsAndroidRequestState(), store.state.first().sleepAsAndroidRequest, "nothing owed initially")
@@ -232,6 +234,41 @@ class SyncStateStoreTest {
                 setOf("changes_token", "changes_token_packages", "changes_token_created_at", "changes_token_updated_at"),
                 storedKeys(),
             )
+        }
+
+    @Test
+    fun `the nights of the last request and the notified versions are kept by updates and removed when null`() =
+        runTest {
+            withStore { store ->
+                store.updateSleepAsAndroidRequest {
+                    it.copy(lastSentAtMs = 500L, sentNightsKey = "ps:0a:1:2", noticedKey = "ps:0a:1:3")
+                }
+                store.updateSleepAsAndroidRequest { it.copy(dueAtMs = 900L, settledKey = "a:1:3:4", settledSinceMs = 800L) }
+                assertEquals(
+                    SleepAsAndroidRequestState(
+                        dueAtMs = 900L,
+                        settledKey = "a:1:3:4",
+                        settledSinceMs = 800L,
+                        lastSentAtMs = 500L,
+                        sentNightsKey = "ps:0a:1:2",
+                        noticedKey = "ps:0a:1:3",
+                    ),
+                    store.state.first().sleepAsAndroidRequest,
+                    "an update of the other fields keeps them",
+                )
+
+                store.updateSleepAsAndroidRequest { it.copy(noticedKey = null) }
+                val withoutNoticed = store.state.first().sleepAsAndroidRequest
+                assertEquals("ps:0a:1:2" to null, withoutNoticed.sentNightsKey to withoutNoticed.noticedKey)
+                store.updateSleepAsAndroidRequest { it.copy(sentNightsKey = null) }
+                assertEquals(
+                    SleepAsAndroidRequestState(dueAtMs = 900L, settledKey = "a:1:3:4", settledSinceMs = 800L, lastSentAtMs = 500L),
+                    store.state.first().sleepAsAndroidRequest,
+                )
+            }
+            val keys = storedKeys()
+            assertFalse("sleep_as_android_sent_nights" in keys, "$keys")
+            assertFalse("sleep_as_android_noticed" in keys, "$keys")
         }
 
     @Test
@@ -325,13 +362,22 @@ class SyncStateStoreTest {
                     it[stringPreferencesKey("sleep_as_android_settled_key")] = "a:1:2:3"
                     it[longPreferencesKey("sleep_as_android_last_sent_at")] = 300_000L
                     it[stringPreferencesKey("sleep_as_android_sent_key")] = "a:1:2:0"
+                    it[stringPreferencesKey("sleep_as_android_sent_nights")] = "ps:0a:1:2"
+                    it[stringPreferencesKey("sleep_as_android_noticed")] = "ps:0a:1:3"
                 }
             }
             withStore { store ->
                 assertEquals(
-                    SleepAsAndroidRequestState(dueAtMs = 601_000L, owedSinceMs = 601_000L, lastSentAtMs = 300_000L, sentKey = "a:1:2:0"),
+                    SleepAsAndroidRequestState(
+                        dueAtMs = 601_000L,
+                        owedSinceMs = 601_000L,
+                        lastSentAtMs = 300_000L,
+                        sentKey = "a:1:2:0",
+                        sentNightsKey = "ps:0a:1:2",
+                        noticedKey = "ps:0a:1:3",
+                    ),
                     store.state.first().sleepAsAndroidRequest,
-                    "a write of 0.4.0 left it: the streak of an earlier version starts again",
+                    "a write of 0.4.0 left it: the streak of an earlier version starts again; the nights of the request stay",
                 )
             }
             withDataStore { dataStore ->
@@ -343,7 +389,17 @@ class SyncStateStoreTest {
             }
             withStore { store ->
                 assertEquals(
-                    SleepAsAndroidRequestState(900_000L, true, 800_000L, "a:1:2:3", 400_000L, 300_000L, "a:1:2:0"),
+                    SleepAsAndroidRequestState(
+                        dueAtMs = 900_000L,
+                        followUp = true,
+                        owedSinceMs = 800_000L,
+                        settledKey = "a:1:2:3",
+                        settledSinceMs = 400_000L,
+                        lastSentAtMs = 300_000L,
+                        sentKey = "a:1:2:0",
+                        sentNightsKey = "ps:0a:1:2",
+                        noticedKey = "ps:0a:1:3",
+                    ),
                     store.state.first().sleepAsAndroidRequest,
                 )
             }

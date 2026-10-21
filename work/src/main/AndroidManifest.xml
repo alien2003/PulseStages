@@ -6,6 +6,7 @@
         Backfills, recomputes and "estimate now" run as a WorkManager foreground service of type dataSync with a
         progress notification, so that their Health Connect reads stay foreground reads when the user leaves the app.
         POST_NOTIFICATIONS is requested at runtime on Android 13+; without it the work still runs.
+        POST_NOTIFICATIONS also shows the notice of a night that changed after Sleep as Android was asked to sync.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

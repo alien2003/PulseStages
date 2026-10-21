@@ -297,7 +297,10 @@ class HomeViewModel
             message(UiText.of(R.string.error_no_app_for_action))
         }
 
-        /** Reports that notifications were not allowed (the backfill still runs, without a visible notification). */
+        /**
+         * Reports that notifications were not allowed (the runs still work, without progress; a night to check in Sleep as
+         * Android is only logged).
+         */
         fun onNotificationsDenied() {
             message(UiText.of(R.string.home_notifications_denied))
         }

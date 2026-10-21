@@ -5,6 +5,16 @@
     <string name="work_estimate_title">Оценка новых ночей</string>
     <string name="work_backfill_title">Обработка истории сна</string>
     <string name="work_recompute_title">Пересчёт ночей</string>
+    <string name="work_saa_channel_name">Ночи в Sleep as Android</string>
+    <string name="work_saa_channel_description">Ночь, изменившаяся после того, как Sleep as Android попросили её импортировать, и как это исправить</string>
+    <string name="work_saa_changed_title">Проверьте ночь в Sleep as Android</string>
+    <string name="work_saa_changed_text">%1$s: ночь теперь длится с %2$s до %3$s. Когда Sleep as Android в последний раз попросили синхронизироваться, она длилась с %4$s до %5$s, а импортированную ночь Sleep as Android не обновляет.</string>
+    <string name="work_saa_changed_text_several">%1$s: ночь теперь длится с %2$s до %3$s. Когда Sleep as Android в последний раз попросили синхронизироваться, это были отдельные ночи (%4$s), а импортированную ночь Sleep as Android не обновляет.</string>
+    <string name="work_saa_span">%1$s–%2$s</string>
+    <string name="work_saa_changed_steps">Если в Sleep as Android у этой ночи другое время, удалите там все записи со значком облака с %1$s до %2$s и не отменяйте удаление. Затем нажмите «Пересчитать» у этой ночи в PulseStages: когда ночь будет завершена, PulseStages попросит Sleep as Android импортировать её заново.</string>
+    <string name="work_saa_changed_steps_never">Если в Sleep as Android у этой ночи другое время, удалите там все записи со значком облака с %1$s до %2$s и не отменяйте удаление. Затем откройте в нём Настройки → Сервисы и нажмите «Синхронизировать сейчас» (Sync now), а через несколько минут ещё раз — для пульса: когда для «Существующие сессии» выбрано «Никогда не перезаписывать», «Пересчитать» в PulseStages ничего не перезаписывает и поэтому не просит Sleep as Android синхронизироваться.</string>
+    <string name="work_saa_changed_public">Ночь в Sleep as Android может быть устаревшей</string>
+    <string name="work_saa_open_app">Открыть Sleep as Android</string>
     <plurals name="work_backfill_progress">
         <item quantity="one">Неделя %1$d из %2$d · оценена %3$d ночь</item>
         <item quantity="few">Неделя %1$d из %2$d · оценены %3$d ночи</item>

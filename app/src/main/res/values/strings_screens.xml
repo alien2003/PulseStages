@@ -50,9 +50,9 @@
     <string name="home_permissions_unknown_detail">Health Connect did not answer. Try again.</string>
     <string name="home_permissions_blocked">Health Connect no longer shows the permission dialog. Open its settings to grant the permissions.</string>
     <string name="home_permissions_blocked_detail">The permission request was cancelled twice, so Health Connect will not show it again. Grant the permissions in Health Connect\'s settings.</string>
-    <string name="home_notifications_title">Notifications (backfill progress)</string>
-    <string name="home_notifications_missing">Not allowed: the backfill runs without a progress notification.</string>
-    <string name="home_notifications_denied">Notifications stay off; the backfill still runs, without a progress notification.</string>
+    <string name="home_notifications_title">Notifications (progress, Sleep as Android)</string>
+    <string name="home_notifications_missing">Not allowed: long runs show no progress, and a night to check in Sleep as Android is noted only in the Log.</string>
+    <string name="home_notifications_denied">Notifications stay off; the runs still work, without progress, and a night to check in Sleep as Android is noted only in the Log.</string>
     <string name="home_action_open_hc_settings">Open Health Connect settings</string>
     <string name="home_action_allow_notifications">Allow notifications</string>
     <string name="home_action_notification_settings">Notification settings</string>

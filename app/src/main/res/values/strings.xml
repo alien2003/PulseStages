@@ -195,7 +195,7 @@
     <string name="rationale_read_title">What is read</string>
     <string name="rationale_read_sleep">Sleep sessions of the apps you select (by default OHealth), to know when you slept.</string>
     <string name="rationale_read_heart_rate">Heart rate during and around each night — the main signal of the estimate.</string>
-    <string name="rationale_read_steps">Steps, as a measure of movement during the night.</string>
+    <string name="rationale_read_steps">Steps, as a measure of movement during the night; with “Ask Sleep as Android to sync”, also after the night: a minute of walking shows that you are up.</string>
     <string name="rationale_read_optional">Optionally blood oxygen (SpO2), respiratory rate and heart-rate variability, when they exist and you allow them.</string>
     <string name="rationale_read_history">Access to data older than 30 days before PulseStages was first given access, to estimate past nights when you start a backfill.</string>
     <string name="rationale_read_background">Background access, so that new nights are estimated automatically while the app is closed.</string>
@@ -205,7 +205,7 @@
     <string name="rationale_device_title">Nothing leaves your device</string>
     <string name="rationale_device_no_internet">PulseStages has no internet permission: it cannot send your data anywhere.</string>
     <string name="rationale_device_local">All processing happens on the phone. Its own records (settings, log, which nights were estimated) stay in the app\'s private storage.</string>
-    <string name="rationale_device_saa_request">With “Ask Sleep as Android to sync” (on by default; Settings → Written sessions), once a night it wrote is complete, it asks Sleep as Android, if installed, to sync with Health Connect. The request carries no data.</string>
+    <string name="rationale_device_saa_request">With “Ask Sleep as Android to sync” (on by default; Settings → Written sessions), once a night it wrote is complete, it asks Sleep as Android, if installed, to sync with Health Connect. The request carries no data. If such a night changes afterwards, a notification on this phone says how to update it in Sleep as Android.</string>
     <string name="rationale_delete_title">How to delete its data</string>
     <string name="rationale_delete_in_app">In the app: Home → “Delete my sessions from Health Connect” removes every session PulseStages wrote.</string>
     <string name="rationale_delete_health_connect">In Health Connect: App permissions → PulseStages → Delete app data; there you can also revoke every permission.</string>

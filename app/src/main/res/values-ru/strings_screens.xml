@@ -50,9 +50,9 @@
     <string name="home_permissions_unknown_detail">Health Connect не ответил. Попробуйте ещё раз.</string>
     <string name="home_permissions_blocked">Health Connect больше не показывает окно разрешений. Откройте его настройки, чтобы выдать разрешения.</string>
     <string name="home_permissions_blocked_detail">Запрос разрешений дважды отменён, поэтому Health Connect больше его не покажет. Выдайте разрешения в настройках Health Connect.</string>
-    <string name="home_notifications_title">Уведомления (прогресс бэкфилла)</string>
-    <string name="home_notifications_missing">Не разрешены: бэкфилл идёт без уведомления о прогрессе.</string>
-    <string name="home_notifications_denied">Уведомления выключены; бэкфилл всё равно работает, но без уведомления о прогрессе.</string>
+    <string name="home_notifications_title">Уведомления (прогресс, Sleep as Android)</string>
+    <string name="home_notifications_missing">Не разрешены: долгие запуски идут без уведомления о прогрессе, а о ночи, которую нужно проверить в Sleep as Android, сообщит только «Лог».</string>
+    <string name="home_notifications_denied">Уведомления выключены; запуски всё равно работают, но без прогресса, а о ночи, которую нужно проверить в Sleep as Android, сообщит только «Лог».</string>
     <string name="home_action_open_hc_settings">Открыть настройки Health Connect</string>
     <string name="home_action_allow_notifications">Разрешить уведомления</string>
     <string name="home_action_notification_settings">Настройки уведомлений</string>

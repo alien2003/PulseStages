@@ -52,6 +52,9 @@ class InMemoryLedger {
     /** `personal_models`. */
     val personalModelDao: PersonalModelDao = PersonalModels()
 
+    /** While set, every read of this ledger throws it (a database that cannot be read). */
+    @Volatile var readFailure: Exception? = null
+
     /** Snapshot of every personal model row, by id. */
     fun allModels(): List<PersonalModelEntity> = read { models.values.sortedBy { it.id } }
 
@@ -78,7 +81,10 @@ class InMemoryLedger {
         }
     }
 
-    private fun <T> read(block: () -> T): T = synchronized(lock) { block() }
+    private fun <T> read(block: () -> T): T {
+        readFailure?.let { throw it }
+        return synchronized(lock) { block() }
+    }
 
     private fun <T> write(block: () -> T): T =
         synchronized(lock) {

@@ -17,6 +17,8 @@ import io.github.alien2003.pulsestages.data.local.settings.LogLevel
 import io.github.alien2003.pulsestages.data.local.settings.ScheduleSettings
 import io.github.alien2003.pulsestages.data.local.sync.SyncStateStore
 import io.github.alien2003.pulsestages.work.run.EstimateNewNightsRunner
+import io.github.alien2003.pulsestages.work.run.RecomputeRequest
+import io.github.alien2003.pulsestages.work.run.RecomputeRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -72,9 +74,10 @@ private class SimulatedWork(
 
 /**
  * The phone: PulseStages' scheduled runs at [runTimes] ([EstimateNewNightsRunner], in the background with background
- * access; with [inApp], "Estimate new" in the app instead, while the app is otherwise in the background) and its request
- * work, and Sleep as Android, which imports 10 s after every request ([ImportingSleepAsAndroid]; observed with Sleep as
- * Android 20261006). OHealth is the test, which writes to [h]'s Health Connect between the steps.
+ * access; with [inApp], "Estimate new" in the app instead, while the app is otherwise in the background), its request
+ * work and its notices of changed nights ([notices]), and Sleep as Android, which imports 10 s after every request
+ * ([ImportingSleepAsAndroid]; observed with Sleep as Android 20261006). OHealth is the test, which writes to [h]'s Health
+ * Connect between the steps.
  */
 private class Phone(
     val h: PipelineHarness,
@@ -83,8 +86,15 @@ private class Phone(
 ) {
     val saa = ImportingSleepAsAndroid(h.repository, importDelayMs = 10_000L) { h.clock.millis() }
     val work = SimulatedWork { h.clock.millis() }
-    val requests = h.sleepAsAndroidRequests(saa, work)
+    val notices = RecordingNotices()
+    val requests = h.sleepAsAndroidRequests(saa, work, notices = notices)
     private val runner = EstimateNewNightsRunner(h.sync, h.personalization, requests, h.logger)
+    private val recomputer = RecomputeRunner(h.recomputer, h.health, requests, h.logger)
+
+    /** "Recompute" on the night [clientRecordId] in the app, now. */
+    suspend fun recompute(clientRecordId: String) {
+        recomputer.run(RecomputeRequest.Nights(listOf(clientRecordId), h.clock.millis()), inBackground = false)
+    }
 
     /**
      * Lets the time pass until [untilMs]: Sleep as Android's imports, the runs and the work at their times, in order (in
@@ -269,6 +279,7 @@ class SleepAsAndroidGateScenarioTest {
                 phone.saa.requestTimes,
                 "not before heart rate an hour after the wake; the request and its follow-up",
             )
+            assertEquals(emptyList<ChangedNight>(), phone.notices.shown, "nothing changed after the request")
         }
 
     /** With [walks], OHealth also writes one-minute steps, and the requests go out at the same times. */
@@ -283,7 +294,102 @@ class SleepAsAndroidGateScenarioTest {
 
             phone.assertImportedFinal(source.startMs, time(8, 3))
             assertEquals(listOf(time(9, 33), time(9, 43)), phone.saa.requestTimes, "after 09:12")
+            assertEquals(emptyList<ChangedNight>(), phone.notices.shown, "nothing changed after the request")
         }
+
+    /**
+     * A day in bed: Sleep as Android imports the night of 19 Oct at 09:33, then the user sleeps again until 10:20, and
+     * OHealth publishes that at 10:25: it extends the session, or, with [fragment], adds one from 08:28, 25 min after its
+     * end, which PulseStages merges into a new night. Sleep as Android keeps its earlier version, so the user is notified,
+     * once. After the user deletes it in Sleep as Android and recomputes the night, Sleep as Android imports the final
+     * night, and nothing else is notified.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `a day in bed - a night that changes after the request is notified once, and the repair brings the final night`(fragment: Boolean) =
+        scenario(time(7, 30)) { h ->
+            val phone = Phone(h, every(15 * MINUTE_MS, time(7, 55), time(16, 0)))
+            val source = phone.replay19Oct()
+            phone.advanceTo(time(10, 25))
+            assertEquals(time(8, 3), phone.saa.recordOf(source.startMs, time(8, 3)).endMs, "imported at 09:33")
+            val sent =
+                h.ledger.nightDao
+                    .findBySourceUuids(listOf(source.uuid))
+                    .single()
+
+            val wake = time(10, 20)
+            h.heartRate(source.startMs, time(9, 12), time(10, 25))
+            if (fragment) {
+                h.repository.addSleepSession(OHEALTH, time(8, 28), wake)
+            } else {
+                h.repository.updateSleepSession(source.uuid) { it.copy(endMs = wake) }
+            }
+            phone.advanceTo(time(11, 35))
+            h.heartRate(source.startMs, time(10, 25), time(11, 35))
+            phone.advanceTo(time(13, 0))
+
+            val notice = phone.notices.shown.single()
+            assertEquals(time(8, 3), notice.sentEndMs)
+            assertEquals(wake, notice.night.sessionEndMs)
+            assertEquals(if (fragment) setOf(sent.clientRecordId) else emptySet(), notice.replaced)
+            assertTrue(phone.saa.requestTimes.size > 2, "asked again for the new version: ${phone.saa.requestTimes}")
+            assertEquals(time(8, 3), phone.saa.recordOf(source.startMs, wake).endMs, "Sleep as Android keeps the earlier version")
+
+            // The repair: the user deletes the night in Sleep as Android and taps Recompute on it.
+            phone.saa.imported.clear()
+            phone.recompute(notice.night.clientRecordId)
+            phone.advanceTo(time(16, 0))
+
+            phone.assertImportedFinal(source.startMs, wake)
+            assertEquals(1, phone.notices.shown.size, "no second notice")
+        }
+
+    /**
+     * A day in bed in two parts that Sleep as Android imported apart: after the night of 19 Oct the user sleeps again from
+     * 08:40, and Sleep as Android imports that session too; at 12:30 OHealth moves the end of the night to 08:15, 25 min
+     * before it, and PulseStages merges the two. With [secondNight] the session lasts to 10:15 and is a night of
+     * PulseStages of its own, sent with the night in one request; otherwise it lasts to 09:10, under "Minimum session
+     * length", and Sleep as Android holds OHealth's session. Sleep as Android skips a night that overlaps any record it
+     * holds, so the repair the notification gives deletes every record between the start and the end of the merged
+     * night; deleting only the record of the night would leave the merged night out.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `a day in bed - a merge with a session Sleep as Android imported is repaired by deleting every record it covers`(
+        secondNight: Boolean,
+    ) = scenario(time(7, 30)) { h ->
+        val phone = Phone(h, every(15 * MINUTE_MS, time(7, 55), time(17, 0)))
+        val source = phone.replay19Oct()
+        val secondEnd = if (secondNight) time(10, 15) else time(9, 10)
+        phone.advanceTo(if (secondNight) time(10, 25) else time(9, 12))
+        h.repository.addSleepSession(OHEALTH, time(8, 40), secondEnd)
+        phone.advanceTo(time(10, 25))
+        h.heartRate(source.startMs, time(9, 12), time(10, 25))
+        phone.advanceTo(time(11, 35))
+        h.heartRate(source.startMs, time(10, 25), time(11, 35))
+        phone.advanceTo(time(12, 30))
+        assertEquals(2, phone.saa.imported.size, "the night and the later session: ${phone.saa.imported}")
+        assertEquals(emptyList<ChangedNight>(), phone.notices.shown)
+
+        h.repository.updateSleepSession(source.uuid) { it.copy(endMs = time(8, 15)) }
+        phone.advanceTo(time(13, 0))
+        h.heartRate(source.startMs, time(11, 35), time(13, 0))
+        phone.advanceTo(time(14, 0))
+
+        val notice = phone.notices.shown.single()
+        assertEquals(source.startMs to secondEnd, notice.night.sessionStartMs to notice.night.sessionEndMs, "merged")
+        assertEquals(if (secondNight) 2 else 1, notice.sentSpans.size, "the nights of the request it covers")
+        assertEquals(source.startMs to secondEnd, notice.repairStartMs to notice.repairEndMs)
+        assertEquals(2, phone.saa.imported.size, "Sleep as Android skipped the merged night")
+
+        // The repair as the notification gives it: every record between the two times, then Recompute.
+        phone.saa.imported.removeAll { it.startMs <= notice.repairEndMs && notice.repairStartMs <= it.endMs }
+        phone.recompute(notice.night.clientRecordId)
+        phone.advanceTo(time(17, 0))
+
+        phone.assertImportedFinal(source.startMs, secondEnd)
+        assertEquals(1, phone.notices.shown.size, "no second notice")
+    }
 
     /**
      * A sleep-in: OHealth publishes the night cut at 07:29 at 07:30 while the user still sleeps, then uploads heart rate

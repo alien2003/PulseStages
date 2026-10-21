@@ -13,9 +13,11 @@ import io.github.alien2003.pulsestages.work.estimate.AndroidModelAssetSource
 import io.github.alien2003.pulsestages.work.estimate.BundledHybridModelProvider
 import io.github.alien2003.pulsestages.work.estimate.ModelAssetSource
 import io.github.alien2003.pulsestages.work.estimate.SleepStagerNightEstimator
+import io.github.alien2003.pulsestages.work.notify.SleepAsAndroidNotifications
 import io.github.alien2003.pulsestages.work.run.RetryLimits
 import io.github.alien2003.pulsestages.work.saa.BroadcastSyncRequestSender
 import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidFollowUps
+import io.github.alien2003.pulsestages.work.saa.SleepAsAndroidNotices
 import io.github.alien2003.pulsestages.work.saa.SyncRequestSender
 import io.github.alien2003.pulsestages.work.saa.WorkManagerSleepAsAndroidFollowUps
 import io.github.alien2003.pulsestages.work.schedule.LocalZone
@@ -34,7 +36,8 @@ annotation class WorkIoDispatcher
 /**
  * Interface bindings of the background-work layer: the production [NightEstimator] (core-algo's SleepStager with the
  * bundled hybrid model and the active personal model), the bundled-model provider, the WorkManager scheduler and the
- * sync requests to Sleep as Android (a broadcast, the follow-up as a work).
+ * sync requests to Sleep as Android (a broadcast, the follow-up as a work, the notice of a changed night as a
+ * notification).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -58,6 +61,10 @@ abstract class WorkBindingsModule {
     /** The work of the sync request to Sleep as Android (its checks and its follow-up) as a WorkManager work. */
     @Binds
     abstract fun bindSleepAsAndroidFollowUps(implementation: WorkManagerSleepAsAndroidFollowUps): SleepAsAndroidFollowUps
+
+    /** The notice of a night that changed after Sleep as Android was asked to sync, as a notification. */
+    @Binds
+    abstract fun bindSleepAsAndroidNotices(implementation: SleepAsAndroidNotifications): SleepAsAndroidNotices
 }
 
 /** Values of the background-work layer. */

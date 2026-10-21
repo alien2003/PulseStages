@@ -67,7 +67,7 @@ import io.github.alien2003.pulsestages.ui.common.isWideLayout
 import io.github.alien2003.pulsestages.ui.theme.PulseStagesTheme
 import io.github.alien2003.pulsestages.ui.theme.spacing
 
-/** Whether the app may post notifications (backfill progress); runtime permission on Android 13+. */
+/** Whether the app may post notifications (progress, Sleep as Android notice); runtime permission on Android 13+. */
 enum class NotificationAccess {
     /** Android 12 and lower: no runtime permission. */
     NOT_NEEDED,
@@ -75,7 +75,7 @@ enum class NotificationAccess {
     /** Granted. */
     GRANTED,
 
-    /** Not granted (the backfill still runs, without a visible notification). */
+    /** Not granted (the runs still work, without progress; a night to check in Sleep as Android is only logged). */
     NOT_GRANTED,
 }
 

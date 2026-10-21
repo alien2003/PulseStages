@@ -84,7 +84,14 @@ enum class SyncOutcome {
  * @property settledSinceMs the first settled evaluation of the current streak, or null when there is no streak.
  * @property lastSentAtMs when a request was last sent, or null if none was sent yet.
  * @property sentKey [settledKey] when the last request was sent: a later version of one of its sessions with another
- *   start or end may not reach Sleep as Android, which is warned about once; null when there is nothing to check.
+ *   start or end may not reach Sleep as Android, which is logged once; null when there is nothing to check. The nights
+ *   PulseStages changes are compared through [sentNightsKey].
+ * @property sentNightsKey the WRITTEN nights of the ledger linked to the sessions of the last request when it was sent,
+ *   as `clientRecordId:sessionStartMs:sessionEndMs` sorted and joined by `;`: a later night of one of them with another
+ *   start or end is notified (Sleep as Android keeps the version it imported); null when there is none.
+ * @property noticedKey the version of those nights that each notice shown since the last request now shows, in the same
+ *   format (a version that a newer notice replaced or that was withdrawn since is no longer in it); null when there is
+ *   none.
  */
 data class SleepAsAndroidRequestState(
     val dueAtMs: Long? = null,
@@ -94,6 +101,8 @@ data class SleepAsAndroidRequestState(
     val settledSinceMs: Long? = null,
     val lastSentAtMs: Long? = null,
     val sentKey: String? = null,
+    val sentNightsKey: String? = null,
+    val noticedKey: String? = null,
 )
 
 /**
@@ -256,6 +265,8 @@ class SyncStateStore
             private val SAA_SETTLED_SINCE = longPreferencesKey("sleep_as_android_settled_since")
             private val SAA_LAST_SENT_AT = longPreferencesKey("sleep_as_android_last_sent_at")
             private val SAA_SENT_KEY = stringPreferencesKey("sleep_as_android_sent_key")
+            private val SAA_SENT_NIGHTS = stringPreferencesKey("sleep_as_android_sent_nights")
+            private val SAA_NOTICED = stringPreferencesKey("sleep_as_android_noticed")
             private val LATE_DATA_PASS_AT = longPreferencesKey("late_data_pass_at")
             private val LATE_DATA_PASS_REQUESTED_AT = longPreferencesKey("late_data_pass_requested_at")
 
@@ -317,6 +328,8 @@ class SyncStateStore
                         settledSinceMs = this[SAA_SETTLED_SINCE],
                         lastSentAtMs = this[SAA_LAST_SENT_AT],
                         sentKey = this[SAA_SENT_KEY],
+                        sentNightsKey = this[SAA_SENT_NIGHTS],
+                        noticedKey = this[SAA_NOTICED],
                     )
                 val legacyDueAt = this[SAA_FOLLOW_UP_DUE_AT]
                 val state =
@@ -343,6 +356,8 @@ class SyncStateStore
                 setOrRemove(SAA_SETTLED_SINCE, state.settledSinceMs)
                 setOrRemove(SAA_LAST_SENT_AT, state.lastSentAtMs)
                 setOrRemove(SAA_SENT_KEY, state.sentKey)
+                setOrRemove(SAA_SENT_NIGHTS, state.sentNightsKey)
+                setOrRemove(SAA_NOTICED, state.noticedKey)
                 remove(SAA_FOLLOW_UP_DUE_AT)
             }
 

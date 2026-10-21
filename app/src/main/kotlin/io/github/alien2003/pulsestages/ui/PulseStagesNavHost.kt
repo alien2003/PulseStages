@@ -8,8 +8,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -39,12 +41,18 @@ import io.github.alien2003.pulsestages.ui.sources.SourcesRoute
 /**
  * The app shell: a Material 3 NavigationBar with the four tabs and the navigation graph. Every tab keeps its own back
  * stack (state is saved and restored when switching tabs); Sources and Log belong to the Settings tab, the night
- * detail to the Nights tab.
+ * detail to the Nights tab. [openNight] (a notification's night) is opened in the Nights tab, then [onNightOpened] is
+ * called.
  */
 @Composable
-fun PulseStagesNavHost(modifier: Modifier = Modifier) {
+fun PulseStagesNavHost(
+    modifier: Modifier = Modifier,
+    openNight: String? = null,
+    onNightOpened: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentOnNightOpened by rememberUpdatedState(onNightOpened)
     val destination = backStackEntry?.destination
     Scaffold(
         modifier = modifier,
@@ -110,11 +118,26 @@ fun PulseStagesNavHost(modifier: Modifier = Modifier) {
                 }
             }
         }
+        LaunchedEffect(openNight) {
+            val clientRecordId = openNight ?: return@LaunchedEffect
+            navController.openNight(clientRecordId)
+            currentOnNightOpened()
+        }
     }
 }
 
+/**
+ * Opens the night [clientRecordId] in the Nights tab: the tab first, so that the list's back stack entry (whose
+ * ViewModels the detail shares) is on the back stack, then the detail, in place of a detail already on top of the tab.
+ * A wide window moves the night into the list's pane; an unknown night shows "not found".
+ */
+internal fun NavHostController.openNight(clientRecordId: String) {
+    navigateToTab(TopLevelDestination.NIGHTS)
+    navigate(Route.NightDetail(clientRecordId)) { launchSingleTop = true }
+}
+
 /** Switches to [tab], keeping one copy of each tab on the back stack and restoring its saved state. */
-private fun NavHostController.navigateToTab(tab: TopLevelDestination) {
+internal fun NavHostController.navigateToTab(tab: TopLevelDestination) {
     navigate(tab.route) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true

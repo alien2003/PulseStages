@@ -84,7 +84,7 @@ class MergedManifestTest {
             assertTrue(OHEALTH_PACKAGE in packages, "$variant: <queries> lacks the default source $OHEALTH_PACKAGE: $packages")
             assertTrue(
                 SLEEP_AS_ANDROID_PACKAGE in packages,
-                "$variant: <queries> lacks $SLEEP_AS_ANDROID_PACKAGE (sync request): $packages",
+                "$variant: <queries> lacks $SLEEP_AS_ANDROID_PACKAGE (sync request, notice action): $packages",
             )
             val intents =
                 queries.flatMap { it.children("intent") }.map { intent ->
@@ -109,6 +109,15 @@ class MergedManifestTest {
             val activity = manifest.elements("activity").firstOrNull { qualified(it.androidAttr("name")) == MAIN_ACTIVITY }
             assertNotNull(activity, "$variant: $MAIN_ACTIVITY missing")
             assertEquals("adjustResize", checkNotNull(activity).androidAttr("windowSoftInputMode"), variant)
+        }
+    }
+
+    @Test
+    fun `the main activity is single top so that the launcher reuses the one a notification started`() {
+        forEachManifest { variant, manifest ->
+            val activity = manifest.elements("activity").firstOrNull { qualified(it.androidAttr("name")) == MAIN_ACTIVITY }
+            assertNotNull(activity, "$variant: $MAIN_ACTIVITY missing")
+            assertEquals("singleTop", checkNotNull(activity).androidAttr("launchMode"), variant)
         }
     }
 

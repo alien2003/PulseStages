@@ -194,7 +194,7 @@
     <string name="rationale_read_title">Что читается</string>
     <string name="rationale_read_sleep">Сеансы сна выбранных вами приложений (по умолчанию OHealth) — чтобы знать, когда вы спали.</string>
     <string name="rationale_read_heart_rate">Пульс во время каждой ночи и около неё — основной сигнал оценки.</string>
-    <string name="rationale_read_steps">Шаги — как мера движения ночью.</string>
+    <string name="rationale_read_steps">Шаги — как мера движения ночью, а с настройкой «Просить Sleep as Android синхронизироваться» — и после ночи: минута ходьбы показывает, что вы встали.</string>
     <string name="rationale_read_optional">По желанию — кислород в крови (SpO2), частота дыхания и вариабельность пульса, если они есть и вы их разрешили.</string>
     <string name="rationale_read_history">Доступ к данным старше 30 дней до первой выдачи доступа PulseStages — чтобы оценить прошлые ночи, когда вы запускаете бэкфилл.</string>
     <string name="rationale_read_background">Доступ в фоне — чтобы новые ночи оценивались автоматически, пока приложение закрыто.</string>
@@ -204,7 +204,7 @@
     <string name="rationale_device_title">Ничего не покидает устройство</string>
     <string name="rationale_device_no_internet">У PulseStages нет разрешения на доступ в интернет — оно не может никуда отправить ваши данные.</string>
     <string name="rationale_device_local">Вся обработка происходит на телефоне. Собственные записи (настройки, лог, какие ночи оценены) хранятся в закрытом хранилище приложения.</string>
-    <string name="rationale_device_saa_request">Настройка «Просить Sleep as Android синхронизироваться» (Настройки → Запись) включена по умолчанию: когда записанная ночь завершена, PulseStages просит Sleep as Android, если он установлен, синхронизироваться с Health Connect. Запрос не содержит данных.</string>
+    <string name="rationale_device_saa_request">Настройка «Просить Sleep as Android синхронизироваться» (Настройки → Запись) включена по умолчанию: когда записанная ночь завершена, PulseStages просит Sleep as Android, если он установлен, синхронизироваться с Health Connect. Запрос не содержит данных. Если такая ночь потом изменится, уведомление на этом телефоне подскажет, как обновить её в Sleep as Android.</string>
     <string name="rationale_delete_title">Как удалить данные приложения</string>
     <string name="rationale_delete_in_app">В приложении: «Главная» → «Удалить мои сессии из Health Connect» удаляет все сессии, записанные PulseStages.</string>
     <string name="rationale_delete_health_connect">В Health Connect: «Разрешения приложений» → PulseStages → «Удалить данные приложения»; там же можно отозвать все разрешения.</string>
