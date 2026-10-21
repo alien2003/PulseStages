@@ -8,12 +8,14 @@ import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.response.ChangesResponse
 import androidx.health.connect.client.units.Percentage
 import io.github.alien2003.pulsestages.algo.model.HrSample
+import io.github.alien2003.pulsestages.algo.model.StepsSample
 import io.github.alien2003.pulsestages.data.hc.fake.RecordingLogger
 import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
@@ -126,6 +128,47 @@ class HealthConnectRepositoryTest {
             assertNull(repo.oldestSleepSessionStartMs(start + 5 * 24 * HOUR_MS, start + 6 * 24 * HOUR_MS, setOf(OHEALTH)))
             assertNull(repo.oldestSleepSessionStartMs(0L, start, emptySet()))
             assertEquals(2, client.readRequests.size, "an empty package set reads nothing")
+        }
+
+    @Test
+    fun `the newest step record is found with one single-record request, without padding or pagination`() =
+        runTest {
+            fun steps(
+                from: Long,
+                minutes: Long,
+                count: Long,
+            ) = StepsRecord(
+                startTime = Instant.ofEpochMilli(from),
+                startZoneOffset = ZoneOffset.UTC,
+                endTime = Instant.ofEpochMilli(from + minutes * MINUTE_MS),
+                endZoneOffset = ZoneOffset.UTC,
+                count = count,
+                metadata = Metadata.unknownRecordingMethod(),
+            )
+            client.store(OHEALTH, steps(start - 2 * HOUR_MS, minutes = 1, count = 30))
+            client.store(OHEALTH, steps(start, minutes = 90, count = 400))
+            client.store(OHEALTH, steps(start - HOUR_MS, minutes = 1, count = 12))
+            client.store(OWN, steps(start + 30 * MINUTE_MS, minutes = 1, count = 50))
+            val repo = repository()
+            val newest = repo.newestSteps(start - 3 * HOUR_MS, start + HOUR_MS, setOf(OHEALTH))
+
+            assertEquals(StepsSample(start, start + 90 * MINUTE_MS, 400), newest, "by start, whatever its length")
+
+            val request = client.readRequests.single()
+            assertFalse(request.ascendingOrder)
+            assertEquals(1, request.pageSize)
+            assertNull(request.pageToken)
+            assertEquals(setOf(DataOrigin(OHEALTH)), request.dataOriginFilter)
+            assertEquals(Instant.ofEpochMilli(start - 3 * HOUR_MS), request.timeRangeFilter.startTime, "no left padding")
+            assertEquals(
+                StepsSample(start - HOUR_MS, start - HOUR_MS + MINUTE_MS, 12),
+                repo.newestSteps(start - 3 * HOUR_MS, start, setOf(OHEALTH)),
+                "a record that starts at the end is not in the window",
+            )
+            assertNull(repo.newestSteps(start + 2 * HOUR_MS, start + 3 * HOUR_MS, setOf(OHEALTH)))
+            assertNull(repo.newestSteps(start - 3 * HOUR_MS, start + HOUR_MS, emptySet()))
+            assertNull(repo.newestSteps(start, start, null))
+            assertEquals(3, client.readRequests.size, "an empty package set or window reads nothing")
         }
 
     @Test

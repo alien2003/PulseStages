@@ -22,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -143,13 +144,33 @@ private fun PipelineHarness.heartRate(
 ) = repository.addHeartRate(OHEALTH, fromMs, toMs, bpm = cyclingBpm(startMs))
 
 /**
+ * A walk as OHealth writes it: a one-minute step record of [count] steps every 5 minutes from [fromMs] until before
+ * [untilMs] (it writes a record only for a minute with steps).
+ */
+private fun PipelineHarness.walk(
+    fromMs: Long,
+    untilMs: Long,
+    count: Long = 40,
+) {
+    (fromMs until untilMs step 5 * MINUTE_MS).forEach { repository.addSteps(OHEALTH, it, it + MINUTE_MS, count) }
+}
+
+/** OHealth's steps of the evening before the night of [day], 21:00–22:00: it writes fine-grained steps. */
+private fun PipelineHarness.eveningWalk(day: Int = 0) = walk(time(21, 0, day - 1), time(22, 0, day - 1))
+
+/**
  * 18 Oct 2026, after PulseStages' log on the development phone: at 07:30 OHealth publishes the night cut at 07:29 (in
  * two fragments), at 09:36 heart rate to 09:35 and at 09:37 an intermediate version ending at 08:15 ([beforeIntermediate]
  * runs just before it), at 12:16 the final version ending at the wake, 12:15, written again with unchanged times at
- * 12:33, and heart rate to 13:19 at 13:19.
+ * 12:33, and heart rate to 13:19 at 13:19. With [walks], OHealth also writes one-minute steps: the evening before, and
+ * from the wake on with the heart rate at 13:19.
  */
-private suspend fun Phone.replay18Oct(beforeIntermediate: suspend () -> Unit = {}): Long {
+private suspend fun Phone.replay18Oct(
+    walks: Boolean = false,
+    beforeIntermediate: suspend () -> Unit = {},
+): Long {
     val start = time(4, 21)
+    if (walks) h.eveningWalk()
     advanceTo(time(7, 30))
     h.repository.addSleepSession(OHEALTH, start, time(6, 8))
     val last = h.repository.addSleepSession(OHEALTH, time(6, 31), time(7, 29))
@@ -166,19 +187,23 @@ private suspend fun Phone.replay18Oct(beforeIntermediate: suspend () -> Unit = {
     h.repository.updateSleepSession(last.uuid) { it }
     advanceTo(time(13, 19))
     h.heartRate(start, time(12, 17), time(13, 19))
+    if (walks) h.walk(time(12, 20), time(13, 19))
     return start
 }
 
 /**
  * 19 Oct 2026 on [day], after PulseStages' log on the development phone: OHealth publishes the night cut at 07:29 at
  * [provisionalAtMs], the final version ending at the wake (08:03) at 08:05 with heart rate to 07:58, writes it again with
- * unchanged times at 08:20, and its heart rate reaches 08:52 at 08:54 and 09:10 at 09:12.
+ * unchanged times at 08:20, and its heart rate reaches 08:52 at 08:54 and 09:10 at 09:12. With [walks], OHealth also
+ * writes one-minute steps: the evening before, and from the wake on with the heart rate at 08:54 and 09:12.
  */
 private suspend fun Phone.replay19Oct(
     day: Int = 0,
     provisionalAtMs: Long = time(7, 30, day),
+    walks: Boolean = false,
 ): HcSleepSession {
     val start = time(2, 20, day)
+    if (walks) h.eveningWalk(day)
     advanceTo(provisionalAtMs)
     val source = h.repository.addSleepSession(OHEALTH, start, time(7, 29, day))
     h.heartRate(start, time(1, 50, day), time(7, 29, day))
@@ -189,8 +214,10 @@ private suspend fun Phone.replay19Oct(
     h.repository.updateSleepSession(source.uuid) { it }
     advanceTo(time(8, 54, day))
     h.heartRate(start, time(8, 0, day), time(8, 54, day))
+    if (walks) h.walk(time(8, 10, day), time(8, 54, day))
     advanceTo(time(9, 12, day))
     h.heartRate(start, time(8, 54, day), time(9, 12, day))
+    if (walks) h.walk(time(8, 55, day), time(9, 12, day))
     return source
 }
 
@@ -211,41 +238,100 @@ class SleepAsAndroidGateScenarioTest {
         block(h)
     }
 
-    @Test
-    fun `18 Oct - Sleep as Android gets the night once its final version is complete`() =
+    /**
+     * With [walks], OHealth also writes one-minute steps: the provisional version, which heart rate alone lets through at
+     * 09:36:30, then waits for a walk, and the requests go out at the same times.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `18 Oct - Sleep as Android gets the night once its final version is complete`(walks: Boolean) =
         scenario(time(7, 30)) { h ->
             // The runs come every 15 minutes; one comes at 09:36:30, between the heart rate and the intermediate version.
             val phone = Phone(h, every(15 * MINUTE_MS, time(7, 36, seconds = 30), time(16, 0)))
 
             val start =
-                phone.replay18Oct {
+                phone.replay18Oct(walks) {
                     val request =
                         h.syncState.state
                             .first()
                             .sleepAsAndroidRequest
-                    assertEquals(time(9, 36, seconds = 30), request.settledSinceMs, "the provisional version looks complete")
+                    if (walks) {
+                        assertNull(request.settledSinceMs, "the provisional version waits for a walk: the user still sleeps")
+                    } else {
+                        assertEquals(time(9, 36, seconds = 30), request.settledSinceMs, "the provisional version looks complete")
+                    }
                 }
             phone.advanceTo(time(16, 0))
 
             phone.assertImportedFinal(start, time(12, 15))
-            assertTrue(
-                phone.saa.requestTimes.all { it > time(13, 19) },
-                "not before heart rate an hour after the wake: ${phone.saa.requestTimes}",
+            assertEquals(
+                listOf(time(13, 45), time(13, 55)),
+                phone.saa.requestTimes,
+                "not before heart rate an hour after the wake; the request and its follow-up",
             )
-            assertEquals(2, phone.saa.requests, "the request and its follow-up")
         }
 
-    @Test
-    fun `19 Oct - Sleep as Android gets the night once heart rate an hour after the wake has arrived`() =
+    /** With [walks], OHealth also writes one-minute steps, and the requests go out at the same times. */
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `19 Oct - Sleep as Android gets the night once heart rate an hour after the wake has arrived`(walks: Boolean) =
         scenario(time(7, 30)) { h ->
             val phone = Phone(h, every(15 * MINUTE_MS, time(7, 55), time(12, 0)))
 
-            val source = phone.replay19Oct()
+            val source = phone.replay19Oct(walks = walks)
             phone.advanceTo(time(12, 0))
 
             phone.assertImportedFinal(source.startMs, time(8, 3))
-            assertTrue(phone.saa.requestTimes.all { it > time(9, 12) }, "${phone.saa.requestTimes}")
-            assertEquals(2, phone.saa.requests)
+            assertEquals(listOf(time(9, 33), time(9, 43)), phone.saa.requestTimes, "after 09:12")
+        }
+
+    /**
+     * A sleep-in: OHealth publishes the night cut at 07:29 at 07:30 while the user still sleeps, then uploads heart rate
+     * alone (the watch's heart-rate-only report) at 08:45 and 09:50, past the end + margin, without extending the session;
+     * the user turns over in bed at 08:50 (2 steps). The user wakes at 10:30; OHealth publishes the final version at 10:40,
+     * and heart rate and the steps of a walk an hour after the wake at 11:35. Heart rate alone would have sent the
+     * provisional version at about 09:00.
+     */
+    @Test
+    fun `a sleep-in - heart rate alone past the provisional end sends nothing, the walk after the final version does`() =
+        scenario(time(7, 30)) { h ->
+            val phone = Phone(h, every(15 * MINUTE_MS, time(7, 36, seconds = 30), time(14, 0)))
+            val start = time(0, 40)
+            h.eveningWalk()
+            val source = h.repository.addSleepSession(OHEALTH, start, time(7, 29))
+            h.heartRate(start, time(0, 10), time(7, 29))
+            phone.advanceTo(time(8, 45))
+            h.heartRate(start, time(7, 29), time(8, 45))
+            phone.advanceTo(time(8, 50))
+            h.repository.addSteps(OHEALTH, time(8, 50), time(8, 51), 2)
+            phone.advanceTo(time(9, 50))
+            h.heartRate(start, time(8, 45), time(9, 50))
+            phone.advanceTo(time(10, 40))
+
+            assertEquals(0, phone.saa.requests, "nothing sent while the user sleeps: ${phone.saa.requestTimes}")
+            assertTrue(
+                h.logger.lines.any {
+                    it.level == LogLevel.INFO &&
+                        it.message.startsWith(
+                            "not asked yet: no minute of 5 or more steps from $OHEALTH from 60 min after the session's end yet " +
+                                "(heart rate reaches 74 min after it; session last changed 1 min after its end)",
+                        )
+                },
+                "${h.logger.lines.map { it.message }}",
+            )
+            h.heartRate(start, time(9, 50), time(10, 40))
+            h.repository.updateSleepSession(source.uuid) { it.copy(endMs = time(10, 30)) }
+            phone.advanceTo(time(11, 35))
+            h.heartRate(start, time(10, 40), time(11, 35))
+            h.walk(time(10, 35), time(11, 35))
+            phone.advanceTo(time(14, 0))
+
+            phone.assertImportedFinal(start, time(10, 30))
+            assertEquals(
+                listOf(time(12, 0), time(12, 10)),
+                phone.saa.requestTimes,
+                "not before the walk an hour after the wake; the request and its follow-up",
+            )
         }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
 import io.github.alien2003.pulsestages.algo.model.HrSample
+import io.github.alien2003.pulsestages.algo.model.StepsSample
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.HealthDataException
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
@@ -66,7 +67,8 @@ enum class UnsettledReason {
 
     /**
      * The source has not written heart rate from long enough after the session's end yet (or, without heart rate of its
-     * own in the session, the session changed too recently): the session may still be extended.
+     * own in the session, the session changed too recently), or it has, but writes fine-grained steps and none of them
+     * show a walk since then ([Settlement.Unsettled.awaitingSteps]): the session may still be extended.
      */
     WAITING_FOR_DATA,
 }
@@ -97,6 +99,10 @@ sealed interface Settlement {
      *   heart rate of its own in the session ([ownHeartRate] false), the time of the clock from which it counts as final.
      * @property latestHeartRateMs [UnsettledReason.WAITING_FOR_DATA]: the latest heart-rate sample of the package, if any.
      * @property ownHeartRate [UnsettledReason.WAITING_FOR_DATA]: the package wrote heart rate in the session.
+     * @property awaitingSteps [UnsettledReason.WAITING_FOR_DATA]: the package's heart rate reached [thresholdMs], but it
+     *   writes fine-grained steps and none of its step records from [thresholdMs] on has
+     *   [SourceSettlement.AWAKE_STEPS_PER_MIN] steps a minute or more (heart rate alone may come from an upload while the
+     *   user still sleeps).
      */
     data class Unsettled(
         override val versions: List<SourceVersion>,
@@ -106,6 +112,7 @@ sealed interface Settlement {
         val thresholdMs: Long? = null,
         val latestHeartRateMs: Long? = null,
         val ownHeartRate: Boolean = true,
+        val awaitingSteps: Boolean = false,
     ) : Settlement
 
     /**
@@ -158,9 +165,19 @@ fun Settlement.keyOf(): String = versions.map { it.key }.sorted().joinToString("
  *    nothing about the source's next upload): a sample at or after the session's end + `mergeGapMin` +
  *    [DATA_MARGIN_EXTRA_MS], and at least [CLOCK_TOLERANCE_MS] after the session was last changed (samples stamped after
  *    the change can only come from a later upload). When the package wrote no heart rate in the session: the session
- *    unchanged for [QUIET_MS] and that margin past its end ([UnsettledReason.WAITING_FOR_DATA]).
+ *    unchanged for [QUIET_MS] and that margin past its end ([UnsettledReason.WAITING_FOR_DATA]). When it did and it
+ *    writes fine-grained steps (its newest step record that starts in the last [STEPS_LOOKBACK_MS] is at most that
+ *    margin long; OHealth writes one record per minute with steps), also a step record of the package that starts at
+ *    or after the time its heart rate must reach and has [AWAKE_STEPS_PER_MIN] steps a minute or more: OHealth may
+ *    upload heart rate alone while the user sleeps in, without extending the session
+ *    ([Settlement.Unsettled.awaitingSteps]).
  *
- * Cost: one sleep-session read, plus one heart-rate read per package with recent sessions once rules 1 and 2 hold.
+ * In rule 3, the heart rate of every package is checked before the steps of any: a wait for heart rate, whose threshold
+ * is when to check again, is returned before a wait for steps.
+ *
+ * Cost: one sleep-session read, plus one heart-rate read per package with recent sessions once rules 1 and 2 hold, and
+ * for a package whose heart rate reached the thresholds of all its recent sessions and that wrote heart rate in at least
+ * one of them, a one-record steps read and, when it writes fine-grained steps, one steps read.
  */
 class SourceSettlement
     @Inject
@@ -297,43 +314,98 @@ class SourceSettlement
                 }
             }
 
-        /** Rule 3, per package with recent sessions: its heart rate after their ends; [Settlement.Settled] when it suffices. */
+        /**
+         * Rule 3, per package with recent sessions: its heart rate after their ends and, for those with heart rate of its
+         * own, its steps; [Settlement.Settled] when they suffice. The heart rate of every package is checked before the
+         * steps of any: a wait for heart rate, rechecked at its threshold, is found before a wait for steps.
+         */
         private suspend fun dataAfterEnd(scope: Scope): Settlement {
             val marginMs = dataMarginMs(scope.settings)
             val latest = sortedMapOf<String, Long>()
+            val ownHolds = sortedMapOf<String, List<DataHold>>()
             for ((packageName, sessions) in scope.recent.groupBy { it.packageName }.toSortedMap()) {
                 val heartRate = repository.readHeartRate(sessions.minOf { it.startMs }, scope.now + CLOCK_TOLERANCE_MS, setOf(packageName))
                 val edge = heartRate.lastOrNull()?.timeMs
                 if (edge != null) latest[packageName] = edge
-                val waiting = sessions.firstNotNullOfOrNull { waitingForData(it, heartRate, edge, marginMs, scope) }
-                if (waiting != null) return waiting
+                val holds = sessions.map { holdOf(it, heartRate, marginMs) }
+                val waiting = holds.firstOrNull { !it.reachedBy(edge, scope.now) }
+                if (waiting != null) return waitingForData(waiting, edge, scope)
+                ownHolds[packageName] = holds.filter { it.own }
             }
-            return Settlement.Settled(scope.versions, latest)
+            val awaiting =
+                ownHolds.entries.firstNotNullOfOrNull { (packageName, holds) ->
+                    awaitingSteps(packageName, holds, latest[packageName], marginMs, scope)
+                }
+            return awaiting ?: Settlement.Settled(scope.versions, latest)
         }
 
         /**
-         * [UnsettledReason.WAITING_FOR_DATA] for [session], or null when its package's [heartRate] (latest sample [edge])
-         * or, without heart rate of its own in the session, the time since it last changed shows that it is final.
+         * What rule 3 asks of [session], given its package's [heartRate]: whether the package wrote heart rate in it, and
+         * from when its data counts.
          */
-        private fun waitingForData(
+        private fun holdOf(
             session: HcSleepSession,
             heartRate: List<HrSample>,
+            marginMs: Long,
+        ): DataHold {
+            val own = heartRate.any { it.timeMs in session.startMs until session.endMs }
+            val sinceChange = if (own) CLOCK_TOLERANCE_MS else QUIET_MS
+            return DataHold(session, own, maxOf(session.endMs + marginMs, session.lastModifiedMs + sinceChange))
+        }
+
+        /**
+         * The steps part of rule 3 for the sessions of [packageName] with heart rate of its own in them ([holds]), whose
+         * heart rate (latest sample [edge]) reached their thresholds: when the package writes fine-grained steps, each
+         * needs a step record of the package that starts at or after its threshold with [AWAKE_STEPS_PER_MIN] steps a
+         * minute or more. [UnsettledReason.WAITING_FOR_DATA] ([Settlement.Unsettled.awaitingSteps]) for the first one
+         * without, or null. Reads nothing when [holds] is empty.
+         */
+        private suspend fun awaitingSteps(
+            packageName: String,
+            holds: List<DataHold>,
             edge: Long?,
             marginMs: Long,
             scope: Scope,
-        ): Settlement? {
-            val own = heartRate.any { it.timeMs in session.startMs until session.endMs }
-            val sinceChange = if (own) CLOCK_TOLERANCE_MS else QUIET_MS
-            val threshold = maxOf(session.endMs + marginMs, session.lastModifiedMs + sinceChange)
-            val settled = if (own) edge != null && edge >= threshold else scope.now >= threshold
-            return if (settled) {
-                null
-            } else {
-                scope
-                    .unsettled(UnsettledReason.WAITING_FOR_DATA, session, scope.rows[session.uuid]?.nightClientRecordId)
-                    .copy(thresholdMs = threshold, latestHeartRateMs = edge, ownHeartRate = own)
-            }
+        ): Settlement.Unsettled? {
+            if (holds.isEmpty() || !writesFineGrainedSteps(packageName, marginMs, scope.now)) return null
+            // The read pads its window on the left and returns the records that overlap it (all of them start before its
+            // end) with their own times, not clipped: a record counts for a session only when it starts at or after its
+            // threshold.
+            val walks =
+                repository
+                    .readSteps(holds.minOf { it.thresholdMs }, scope.now + CLOCK_TOLERANCE_MS, setOf(packageName))
+                    .filter { it.isWalk() }
+            return holds
+                .firstOrNull { hold -> walks.none { it.startMs >= hold.thresholdMs } }
+                ?.let { waitingForData(it, edge, scope).copy(awaitingSteps = true) }
         }
+
+        /**
+         * Whether [packageName] writes fine-grained steps: its newest step record that starts in the last
+         * [STEPS_LOOKBACK_MS] (up to [CLOCK_TOLERANCE_MS] from [now]) is at most [marginMs] long. OHealth writes one record
+         * per minute with steps; a package without steps, or with longer records, is held by its heart rate alone.
+         */
+        private suspend fun writesFineGrainedSteps(
+            packageName: String,
+            marginMs: Long,
+            now: Long,
+        ): Boolean {
+            val newest = repository.newestSteps(now - STEPS_LOOKBACK_MS, now + CLOCK_TOLERANCE_MS, setOf(packageName))
+            return newest != null && newest.endMs - newest.startMs <= marginMs
+        }
+
+        /** Whether this record has [AWAKE_STEPS_PER_MIN] steps a minute or more (a record shorter than a minute counts as one). */
+        private fun StepsSample.isWalk(): Boolean = count * MINUTE_MS >= AWAKE_STEPS_PER_MIN * maxOf(endMs - startMs, MINUTE_MS)
+
+        /** [UnsettledReason.WAITING_FOR_DATA] for [hold], with its package's latest heart-rate sample [edge]. */
+        private fun waitingForData(
+            hold: DataHold,
+            edge: Long?,
+            scope: Scope,
+        ): Settlement.Unsettled =
+            scope
+                .unsettled(UnsettledReason.WAITING_FOR_DATA, hold.session, scope.rows[hold.session.uuid]?.nightClientRecordId)
+                .copy(thresholdMs = hold.thresholdMs, latestHeartRateMs = edge, ownHeartRate = hold.own)
 
         /** A written night that does not cover [session] (null: none). */
         private fun EstimatedNightEntity?.writtenWithout(session: HcSleepSession): Boolean =
@@ -375,6 +447,23 @@ class SourceSettlement
             ): Settlement.Unsettled = Settlement.Unsettled(versions, reason, session?.let(SourceVersion::of), nightClientRecordId)
         }
 
+        /**
+         * What rule 3 asks of the recent [session]: [own], its package wrote heart rate in it; [thresholdMs], the time its
+         * package's heart rate must reach, or, without heart rate of its own, the time of the clock from which it counts
+         * as final.
+         */
+        private class DataHold(
+            val session: HcSleepSession,
+            val own: Boolean,
+            val thresholdMs: Long,
+        ) {
+            /** Whether the package's latest heart-rate sample [edge] (without heart rate of its own: [now]) reached the threshold. */
+            fun reachedBy(
+                edge: Long?,
+                now: Long,
+            ): Boolean = if (own) edge != null && edge >= thresholdMs else now >= thresholdMs
+        }
+
         /** Constants. */
         companion object {
             /** One minute. */
@@ -405,6 +494,22 @@ class SourceSettlement
              * yet; the same order as the heart-rate margin.
              */
             const val QUIET_MS: Long = 60L * 60 * 1000
+
+            /**
+             * A step record of a session's package with at least this many steps a minute, starting at or after the time
+             * the package's heart rate must reach, shows that the user walked after the session: a sleeping user takes
+             * none, and heart rate alone (the watch's heart-rate-only upload, which OHealth may make while the user
+             * sleeps in) brings no steps. Equal to the default awake step threshold of the HMM
+             * (`algo.hmm.awakeStepThreshold`, steps per one-minute epoch), which this rule deliberately does not read: a
+             * tuned estimation parameter must not change when Sleep as Android is asked.
+             */
+            const val AWAKE_STEPS_PER_MIN: Int = 5
+
+            /**
+             * How far back the newest step record of a package is looked for, to tell whether it writes fine-grained steps:
+             * a week also covers some days without the band.
+             */
+            const val STEPS_LOOKBACK_MS: Long = 7L * 24 * 60 * 60 * 1000
 
             /** The margin after a session's end that its source's heart rate must reach with [settings] ([DATA_MARGIN_EXTRA_MS]). */
             fun dataMarginMs(settings: AppSettings): Long = settings.sources.mergeGapMin * MINUTE_MS + DATA_MARGIN_EXTRA_MS

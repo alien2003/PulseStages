@@ -87,16 +87,20 @@ internal object HcRecordMapper {
             .sortedBy { it.timeMs }
             .toList()
 
-    /** Step records overlapping `[startMs, endMs)`, sorted by start. */
+    /** Step records overlapping `[startMs, endMs)`, sorted by start (each with its own times: not clipped). */
     fun steps(
         records: List<StepsRecord>,
         startMs: Long,
         endMs: Long,
     ): List<StepsSample> =
         records
-            .map { StepsSample(it.startTime.toEpochMilli(), it.endTime.toEpochMilli(), it.count) }
+            .map(::toSteps)
             .filter { it.endMs > startMs && it.startMs < endMs }
             .sortedWith(compareBy({ it.startMs }, { it.endMs }))
+
+    /** A read [StepsRecord] as [StepsSample], with its own times and count. */
+    fun toSteps(record: StepsRecord): StepsSample =
+        StepsSample(record.startTime.toEpochMilli(), record.endTime.toEpochMilli(), record.count)
 
     /** SpO2 measurements with time in `[startMs, endMs)`, sorted by time. */
     fun spo2(

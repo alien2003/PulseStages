@@ -158,6 +158,12 @@ class ShadowWriteRepository(
         packages: Set<String>?,
     ): List<StepsSample> = reads.readSteps(startMs, endMs, packages)
 
+    override suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample? = reads.newestSteps(startMs, endMs, packages)
+
     override suspend fun readSpo2(
         startMs: Long,
         endMs: Long,

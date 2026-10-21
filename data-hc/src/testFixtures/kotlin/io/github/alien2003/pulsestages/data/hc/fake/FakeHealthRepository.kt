@@ -25,8 +25,10 @@ import kotlin.math.abs
 /**
  * In-memory [HealthRepository] that emulates the Health Connect semantics PulseStages relies on (verified facts in
  * research/hc-api.md):
- * - reads filter by record START time; heart-rate series and step records are looked up with 24 h of left padding
- *   and clipped to the window, exactly like [io.github.alien2003.pulsestages.data.hc.HealthConnectRepository];
+ * - reads filter by record START time; heart-rate series and step records are looked up with 24 h of left padding,
+ *   then heart-rate samples are limited to the window by their time and step records are filtered by overlap with it
+ *   and returned with their own times, exactly like [io.github.alien2003.pulsestages.data.hc.HealthConnectRepository];
+ *   the newest step record ([newestSteps]) is looked up without padding;
  * - origin filtering (`packages == null` = any origin, an empty set = nothing);
  * - our writes are upserts scoped to (our package, clientRecordId) with deterministic ids
  *   (`nameUUIDFromBytes(package + record type + clientRecordId)`) and the platform rule "replace iff new version ≥
@@ -69,6 +71,9 @@ class FakeHealthRepository(
 
         /** [readSteps]. */
         READ_STEPS,
+
+        /** [newestSteps]. */
+        READ_NEWEST_STEPS,
 
         /** [readSpo2]. */
         READ_SPO2,
@@ -454,6 +459,25 @@ class FakeHealthRepository(
                 .map { it.value }
                 .filter { it.endMs > startMs && it.startMs < endMs }
                 .sortedBy { it.startMs }
+        }
+    }
+
+    override suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample? {
+        enter(Operation.READ_NEWEST_STEPS)
+        requirePermission(HealthPermissions.READ_STEPS)
+        if (startMs >= endMs || packages?.isEmpty() == true) return null
+        val readable = readablePackages(packages)
+        return synchronized(lock) {
+            stepRecords
+                .filter { it.startMs in startMs until endMs }
+                .filter { readable == null || it.packageName in readable }
+                .filter { isVisible(it.packageName, it.startMs) }
+                .maxByOrNull { it.startMs }
+                ?.value
         }
     }
 

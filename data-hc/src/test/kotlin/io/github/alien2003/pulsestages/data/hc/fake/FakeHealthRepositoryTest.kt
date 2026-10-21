@@ -1,6 +1,7 @@
 package io.github.alien2003.pulsestages.data.hc.fake
 
 import io.github.alien2003.pulsestages.algo.model.HrSample
+import io.github.alien2003.pulsestages.algo.model.StepsSample
 import io.github.alien2003.pulsestages.data.hc.EstimatedSessionWrite
 import io.github.alien2003.pulsestages.data.hc.HcAvailability
 import io.github.alien2003.pulsestages.data.hc.HcStage
@@ -15,6 +16,7 @@ import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -51,6 +53,24 @@ class FakeHealthRepositoryTest {
             fake.addHeartRateSeries(OHEALTH, listOf(HrSample(start - 25 * HOUR_MS, 80.0), HrSample(start + 2 * MINUTE_MS, 56.0)))
 
             assertEquals(listOf(HrSample(start + MINUTE_MS, 55.0)), fake.readHeartRate(start, start + HOUR_MS, setOf(OHEALTH)))
+        }
+
+    @Test
+    fun `the newest step record is the latest start in the window, of the origin, without padding`() =
+        runTest {
+            fake.addSteps(OHEALTH, start - 2 * HOUR_MS, start - 2 * HOUR_MS + MINUTE_MS, 30)
+            fake.addSteps(OHEALTH, start, start + 90 * MINUTE_MS, 400)
+            fake.addSteps(OTHER_APP, start + 30 * MINUTE_MS, start + 31 * MINUTE_MS, 50)
+            fake.addSteps(OHEALTH, start + HOUR_MS, start + HOUR_MS + MINUTE_MS, 12)
+
+            val newest = fake.newestSteps(start - HOUR_MS, start + HOUR_MS, setOf(OHEALTH))
+
+            assertEquals(StepsSample(start, start + 90 * MINUTE_MS, 400), newest)
+            assertEquals(StepsSample(start + 30 * MINUTE_MS, start + 31 * MINUTE_MS, 50), fake.newestSteps(start, start + HOUR_MS, null))
+            assertNull(fake.newestSteps(start + MINUTE_MS, start + HOUR_MS, setOf(OHEALTH)), "a record that starts before the window")
+            assertNull(fake.newestSteps(start - HOUR_MS, start + HOUR_MS, emptySet()))
+            assertEquals(4, fake.callCount(FakeHealthRepository.Operation.READ_NEWEST_STEPS))
+            assertEquals(0, fake.callCount(FakeHealthRepository.Operation.READ_STEPS), "an operation of its own")
         }
 
     @Test

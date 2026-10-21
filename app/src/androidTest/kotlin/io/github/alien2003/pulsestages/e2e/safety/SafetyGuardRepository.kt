@@ -70,6 +70,12 @@ class SafetyGuardRepository(
         packages: Set<String>?,
     ): List<StepsSample> = delegate.readSteps(startMs, endMs, packages)
 
+    override suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample? = delegate.newestSteps(startMs, endMs, packages)
+
     override suspend fun readSpo2(
         startMs: Long,
         endMs: Long,

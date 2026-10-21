@@ -89,6 +89,12 @@ class CachingReadRepository(
         packages: Set<String>?,
     ): List<StepsSample> = cached(Key("steps", startMs, endMs, packages)) { delegate.readSteps(startMs, endMs, packages) }
 
+    override suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample? = cached(Key("newest", startMs, endMs, packages)) { delegate.newestSteps(startMs, endMs, packages) }
+
     override suspend fun readSpo2(
         startMs: Long,
         endMs: Long,

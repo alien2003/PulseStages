@@ -61,6 +61,12 @@ class BudgetedReadRepository(
         packages: Set<String>?,
     ): List<StepsSample> = charged("readSteps", { paddedPages(it.size) }) { delegate.readSteps(startMs, endMs, packages) }
 
+    override suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample? = charged("newestSteps", { 1 }) { delegate.newestSteps(startMs, endMs, packages) }
+
     override suspend fun readSpo2(
         startMs: Long,
         endMs: Long,

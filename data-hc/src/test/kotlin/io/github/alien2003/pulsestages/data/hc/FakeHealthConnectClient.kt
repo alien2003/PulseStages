@@ -28,10 +28,11 @@ import kotlin.reflect.KClass
 
 /**
  * A [HealthConnectClient] for JVM tests of [HealthConnectRepository], following the verified client behaviour:
- * reads filter by record start time and data origin and page with numeric tokens (null at the end, or `""` like the
- * APK path when [apkStyleLastPage]); a `""` token sent back throws [NumberFormatException] like the platform; inserts
- * with a clientRecordId replace the stored record iff `newVersion >= storedVersion`; `deleteRecords` with two empty
- * lists throws [IllegalArgumentException]. Errors are injected per operation through [failures].
+ * reads filter by record start time and data origin, sort by start time in the order the request asks and page with
+ * numeric tokens (null at the end, or `""` like the APK path when [apkStyleLastPage]); a `""` token sent back throws
+ * [NumberFormatException] like the platform; inserts with a clientRecordId replace the stored record iff
+ * `newVersion >= storedVersion`; `deleteRecords` with two empty lists throws [IllegalArgumentException]. Errors are
+ * injected per operation through [failures].
  */
 class FakeHealthConnectClient(
     private val ownPackage: String,
@@ -117,6 +118,7 @@ class FakeHealthConnectClient(
                         startOf(record).inRange(request.timeRangeFilter)
                 }.map { it.second as T }
                 .sortedBy { startOf(it) }
+                .let { if (request.ascendingOrder) it else it.asReversed() }
         val offset = request.pageToken?.toInt() ?: 0
         // The request's page size caps the fake's own one (tests use small pages to exercise pagination).
         val size = minOf(pageSize, request.pageSize)

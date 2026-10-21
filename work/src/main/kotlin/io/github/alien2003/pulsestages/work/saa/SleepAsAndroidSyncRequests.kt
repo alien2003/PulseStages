@@ -489,6 +489,13 @@ class SleepAsAndroidSyncRequests
             /** Hold: the last request is less than [FOLLOW_UP_DELAY_MS] ago. */
             private const val HOLD_GAP = "gap"
 
+            /**
+             * Hold: a source's heart rate reached the time it must reach after a session's end, but its steps show no walk
+             * since then ([Settlement.Unsettled.awaitingSteps]). Unlike the other unsettled checks it is not the reason's
+             * name, so that the switch from waiting for heart rate is logged at INFO.
+             */
+            private const val HOLD_STEPS = "waiting for steps"
+
             /** The detail of a check that Health Connect refused in the background. */
             private const val UNREADABLE =
                 "Health Connect cannot be read in the background (no background access); checked when PulseStages next runs while open"
@@ -529,7 +536,8 @@ class SleepAsAndroidSyncRequests
 
                         is Settlement.Unsettled -> {
                             val atMs = maxOf(nowMs + RECHECK_MS, verdict.thresholdMs ?: 0L)
-                            val action = Action.Defer(atMs, verdict.reason.name, detailOf(verdict, nowMs), verdict.nightClientRecordId)
+                            val hold = if (verdict.awaitingSteps) HOLD_STEPS else verdict.reason.name
+                            val action = Action.Defer(atMs, hold, detailOf(verdict, nowMs), verdict.nightClientRecordId)
                             deferred(checked.copy(settledKey = null, settledSinceMs = null), action)
                         }
 
@@ -753,21 +761,32 @@ class SleepAsAndroidSyncRequests
                 }
             }
 
-            /** The detail of [UnsettledReason.WAITING_FOR_DATA] for [version]. */
+            /** The detail of [UnsettledReason.WAITING_FOR_DATA] for [version]: heart rate, steps or an unchanged session. */
             private fun waitingForData(
                 verdict: Settlement.Unsettled,
                 version: SourceVersion,
-            ): String =
-                if (verdict.ownHeartRate) {
-                    val fromMs = (verdict.thresholdMs ?: version.endMs) - version.endMs
-                    val latest = verdict.latestHeartRateMs?.let { relative(it - version.endMs, "it") } ?: "none"
-                    val changed = relative(version.lastModifiedMs - version.endMs, "its end")
-                    "no heart rate from ${version.packageName} from ${minutes(fromMs)} min after the session's end yet " +
-                        "(latest: $latest; session last changed $changed)"
-                } else {
-                    "${version.packageName} wrote no heart rate in this session; " +
-                        "waiting until it is unchanged for ${minutes(SourceSettlement.QUIET_MS)} min"
+            ): String {
+                val fromMs = (verdict.thresholdMs ?: version.endMs) - version.endMs
+                val latest = verdict.latestHeartRateMs?.let { relative(it - version.endMs, "it") } ?: "none"
+                val changed = relative(version.lastModifiedMs - version.endMs, "its end")
+                return when {
+                    !verdict.ownHeartRate -> {
+                        "${version.packageName} wrote no heart rate in this session; " +
+                            "waiting until it is unchanged for ${minutes(SourceSettlement.QUIET_MS)} min"
+                    }
+
+                    verdict.awaitingSteps -> {
+                        "no minute of ${SourceSettlement.AWAKE_STEPS_PER_MIN} or more steps from ${version.packageName} " +
+                            "from ${minutes(fromMs)} min after the session's end yet " +
+                            "(heart rate reaches $latest; session last changed $changed)"
+                    }
+
+                    else -> {
+                        "no heart rate from ${version.packageName} from ${minutes(fromMs)} min after the session's end yet " +
+                            "(latest: $latest; session last changed $changed)"
+                    }
                 }
+            }
 
             /** The log line of a request sent after the check of [before] that concluded [step] from [verdict]. */
             private fun sentLine(

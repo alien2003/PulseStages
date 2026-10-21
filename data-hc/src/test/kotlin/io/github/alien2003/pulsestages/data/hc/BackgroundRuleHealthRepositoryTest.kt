@@ -1,14 +1,17 @@
 package io.github.alien2003.pulsestages.data.hc
 
+import io.github.alien2003.pulsestages.algo.model.StepsSample
 import io.github.alien2003.pulsestages.data.hc.fake.FakeHealthRepository
 import io.github.alien2003.pulsestages.data.hc.pipeline.BlockedReason
 import io.github.alien2003.pulsestages.data.hc.pipeline.HealthAccessGuard
 import io.github.alien2003.pulsestages.data.hc.testutil.HOUR_MS
+import io.github.alien2003.pulsestages.data.hc.testutil.MINUTE_MS
 import io.github.alien2003.pulsestages.data.hc.testutil.NOON
 import io.github.alien2003.pulsestages.data.hc.testutil.OHEALTH
 import io.github.alien2003.pulsestages.data.hc.testutil.nightStart
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -62,6 +65,7 @@ class BackgroundRuleHealthRepositoryTest {
             assertThrows<HealthDataException.PermissionDenied> { repository.readSleepSessions(window.first, window.second, null) }
             assertThrows<HealthDataException.PermissionDenied> { repository.readHeartRate(start, start + HOUR_MS, null) }
             assertThrows<HealthDataException.PermissionDenied> { repository.readSteps(start, start + HOUR_MS, setOf(OHEALTH)) }
+            assertThrows<HealthDataException.PermissionDenied> { repository.newestSteps(start, start + HOUR_MS, setOf(OHEALTH)) }
             assertThrows<HealthDataException.PermissionDenied> { repository.readSpo2(start, start + HOUR_MS, setOf(OHEALTH)) }
             assertThrows<HealthDataException.PermissionDenied> { repository.readRespiratoryRate(start, start + HOUR_MS, setOf(OHEALTH)) }
             assertThrows<HealthDataException.PermissionDenied> { repository.readHrv(start, start + HOUR_MS, setOf(OHEALTH)) }
@@ -81,6 +85,31 @@ class BackgroundRuleHealthRepositoryTest {
             repository.writeEstimatedSession(own().copy(clientRecordVersion = 1001))
             repository.deleteOwnSessions(listOf("ps:own"))
             assertTrue(fake.ownSessions().isEmpty())
+        }
+
+    @Test
+    fun `the newest step record is read under the background rule, not delegated as it is`() =
+        runTest {
+            fake.addSteps(OHEALTH, start, start + MINUTE_MS, 40)
+            val newest = StepsSample(start, start + MINUTE_MS, 40)
+            assertEquals(newest, repository().newestSteps(window.first, window.second, setOf(OHEALTH)), "in the foreground")
+            fake.inBackground = true
+            assertNull(fake.newestSteps(window.first, window.second, setOf(OHEALTH)), "the platform finds none, without an error")
+            fake.clearCalls()
+
+            assertThrows<HealthDataException.PermissionDenied> { repository().newestSteps(window.first, window.second, setOf(OHEALTH)) }
+            assertThrows<HealthDataException.PermissionDenied> { repository().newestSteps(window.first, window.second, null) }
+            assertEquals(0, fake.callCount(FakeHealthRepository.Operation.READ_NEWEST_STEPS), "refused before the call")
+            assertNull(repository().newestSteps(window.first, window.second, setOf(fake.ownPackage)), "our own steps: none")
+
+            fake.grant(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+            assertEquals(newest, repository().newestSteps(window.first, window.second, setOf(OHEALTH)))
+            val states = ArrayDeque(listOf(true, false))
+            fake.revoke(HealthPermissions.READ_HEALTH_DATA_IN_BACKGROUND)
+            assertThrows<HealthDataException.PermissionDenied> {
+                repository { states.removeFirst() }.newestSteps(window.first, window.second, setOf(OHEALTH))
+            }
+            assertTrue(states.isEmpty(), "checked before and after the call")
         }
 
     @Test

@@ -87,6 +87,12 @@ class BackgroundRuleHealthRepository
             packages: Set<String>?,
         ): List<StepsSample> = checked(packages) { delegate.readSteps(startMs, endMs, packages) }
 
+        override suspend fun newestSteps(
+            startMs: Long,
+            endMs: Long,
+            packages: Set<String>?,
+        ): StepsSample? = checked(packages) { delegate.newestSteps(startMs, endMs, packages) }
+
         override suspend fun readSpo2(
             startMs: Long,
             endMs: Long,

@@ -217,6 +217,40 @@ class SleepAsAndroidRequestDecisionTest {
     }
 
     @Test
+    fun `heart rate past the threshold without a walk ends the streak and is checked again in 15 minutes, as its own hold`() {
+        val state = streak(NOON - 5 * MINUTE_MS, NIGHT)
+        val awaiting =
+            Settlement.Unsettled(
+                versions = listOf(NIGHT),
+                reason = UnsettledReason.WAITING_FOR_DATA,
+                version = NIGHT,
+                nightClientRecordId = "ps:night",
+                thresholdMs = NIGHT.endMs + HOUR_MS,
+                latestHeartRateMs = NIGHT.endMs + 75 * MINUTE_MS,
+                awaitingSteps = true,
+            )
+
+        val step = decide(state, awaiting, NOON, lateDataPassAtMs = null)
+
+        assertEquals(
+            Action.Defer(
+                NOON + RECHECK_MS,
+                "waiting for steps",
+                "no minute of 5 or more steps from $OHEALTH from 60 min after the session's end yet " +
+                    "(heart rate reaches 75 min after it; session last changed 17 min after its end)",
+                "ps:night",
+            ),
+            step.action,
+        )
+        assertEquals(state.copy(dueAtMs = NOON + RECHECK_MS, settledKey = null, settledSinceMs = null), step.state)
+        assertEquals(
+            "WAITING_FOR_DATA",
+            decide(state, awaiting.copy(awaitingSteps = false), NOON, null).defer().hold,
+            "waiting for heart rate is another hold: the switch is logged at INFO",
+        )
+    }
+
+    @Test
     fun `every reason has its own detail`() {
         fun detailOf(
             reason: UnsettledReason,

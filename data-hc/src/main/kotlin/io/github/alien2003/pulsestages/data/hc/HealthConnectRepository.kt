@@ -42,8 +42,10 @@ import kotlin.reflect.KClass
  * Every call runs on [dispatcher], maps client exceptions with [HealthExceptionMapper] and retries quota / transient
  * errors with [retryPolicy] (delays through [sleeper]). Reads paginate with `pageSize = 1000` until the page token
  * is null or empty (the APK path returns `""` on the last page). Health Connect filters reads by record START time,
- * so series / interval records (heart rate, steps) are read with [SERIES_LEFT_PADDING_MS] of left padding and then
- * clipped to the requested window.
+ * so series / interval records (heart rate, steps) are read with [SERIES_LEFT_PADDING_MS] of left padding; heart-rate
+ * samples are then limited to the requested window by their time, step records are filtered by overlap with it and
+ * returned with their own times. The single-record reads ([oldestSleepSessionStartMs], [newestSteps]) make one request
+ * of page size 1: they neither paginate nor pad.
  *
  * On the Health Connect APK (Android 9–13) two provider errors arrive as a plain `RemoteException` (research/hc-api.md
  * §2 and §6): an outdated changes token (`CHANGES_TOKEN_OUTDATED`), which [sleepChanges] reports as
@@ -205,6 +207,28 @@ class HealthConnectRepository internal constructor(
                 endMs,
             )
         }
+
+    override suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample? {
+        // An empty package set selects nothing (an empty origin filter would select every app).
+        if (startMs >= endMs || packages?.isEmpty() == true) return null
+        val request =
+            ReadRecordsRequest(
+                recordType = StepsRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(Instant.ofEpochMilli(startMs), Instant.ofEpochMilli(endMs)),
+                dataOriginFilter = packages?.map(::DataOrigin)?.toSet() ?: emptySet(),
+                ascendingOrder = false,
+                pageSize = 1,
+            )
+        // One page of one record, without left padding; the page token is deliberately not followed.
+        return call("newestSteps") { client().readRecords(request) }
+            .records
+            .firstOrNull()
+            ?.let(HcRecordMapper::toSteps)
+    }
 
     override suspend fun readSpo2(
         startMs: Long,

@@ -174,9 +174,11 @@ sealed class HealthDataException(
 }
 
 /**
- * Thin, fakeable boundary over Health Connect. All reads paginate internally. Read windows are padded on the
- * left internally where needed (Health Connect filters reads by record START time), and returned samples are
- * clipped to the requested window. All methods throw only [HealthDataException].
+ * Thin, fakeable boundary over Health Connect. Reads paginate internally, except the single-record reads
+ * ([oldestSleepSessionStartMs], [newestSteps]). Read windows are padded on the left internally where needed (Health
+ * Connect filters reads by record START time); heart-rate samples are then limited to the requested window by their
+ * time, step records are filtered by overlap with it and returned with their own times. All methods throw only
+ * [HealthDataException].
  *
  * `packages == null` means "any origin".
  */
@@ -220,6 +222,17 @@ interface HealthRepository {
         endMs: Long,
         packages: Set<String>?,
     ): List<StepsSample>
+
+    /**
+     * The step record with the latest START in `[startMs, endMs)`, with its own times and count, or null when there is
+     * none. One request for a single record (descending by start time, page size 1, no left padding): it never pages
+     * through the history.
+     */
+    suspend fun newestSteps(
+        startMs: Long,
+        endMs: Long,
+        packages: Set<String>?,
+    ): StepsSample?
 
     /** SpO2 measurements with time in `[startMs, endMs)`. Optional channels return an empty list when the permission is not granted. */
     suspend fun readSpo2(

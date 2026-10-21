@@ -31,34 +31,52 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.File
 
 /** Sleep as Android's package: it never imports its own sessions, so the request ignores them. */
 private const val SLEEP_AS_ANDROID = "com.urbandroid.sleep"
 
 /** An app that writes heart rate but no sleep. */
-private const val WATCH = "com.example.watch"
+const val WATCH = "com.example.watch"
 
 /** The heart-rate margin after a session's end: the default `mergeGapMin` (30 min) + [SourceSettlement.DATA_MARGIN_EXTRA_MS]. */
 private const val MARGIN_MS = 60 * MINUTE_MS
 
 /** [hours]:[minutes] on the day of [MIDNIGHT]. */
-private fun time(
+fun time(
     hours: Int,
     minutes: Int,
 ): Long = MIDNIGHT + hours * HOUR_MS + minutes * MINUTE_MS
 
 /** The check as the Sleep as Android request runs it: Sleep as Android's 30-day window, its own sessions ignored. */
-private suspend fun PipelineHarness.settle(ignored: Set<String> = setOf(SLEEP_AS_ANDROID)): Settlement =
+suspend fun PipelineHarness.settle(ignored: Set<String> = setOf(SLEEP_AS_ANDROID)): Settlement =
     settlement.check(settings.current, ignored, 30 * DAY_MS)
 
 /** Enables exactly [packages] as sleep sources, in this priority order. */
-private suspend fun PipelineHarness.enableSources(vararg packages: String) {
+suspend fun PipelineHarness.enableSources(vararg packages: String) {
     settings.set { it.copy(sources = it.sources.copy(sourcePackages = packages.toList(), sourcePriority = packages.toList())) }
 }
 
+/**
+ * A walk of [packageName] as OHealth writes it: a one-minute step record of [count] steps every 5 minutes from [fromMs]
+ * until before [untilMs] (it writes a record only for a minute with steps).
+ */
+fun PipelineHarness.walk(
+    fromMs: Long,
+    untilMs: Long,
+    packageName: String = OHEALTH,
+    count: Long = 40,
+) {
+    (fromMs until untilMs step 5 * MINUTE_MS).forEach { repository.addSteps(packageName, it, it + MINUTE_MS, count) }
+}
+
+/** OHealth's steps of the evening before the nights of these tests: it writes fine-grained steps. */
+fun PipelineHarness.eveningWalk() = walk(time(-3, 0), time(-2, 0))
+
 /** Runs a sync at [timeMs]. */
-private suspend fun PipelineHarness.syncAt(timeMs: Long): SyncReport {
+suspend fun PipelineHarness.syncAt(timeMs: Long): SyncReport {
     clock.nowMs = timeMs
     return sync.run(inBackground = false)
 }
@@ -67,7 +85,7 @@ private suspend fun PipelineHarness.syncAt(timeMs: Long): SyncReport {
  * OHealth publishes last night (23:00–07:00) at 07:05 with heart rate up to 07:28, more heart rate up to 08:08 follows,
  * and a sync at 08:15 writes the night: settled.
  */
-private suspend fun PipelineHarness.settledNight(): HcSleepSession {
+suspend fun PipelineHarness.settledNight(): HcSleepSession {
     clock.nowMs = time(7, 5)
     val night = repository.addNight(OHEALTH, nightStart(0))
     repository.addHeartRate(OHEALTH, time(7, 30), time(8, 10))
@@ -76,18 +94,19 @@ private suspend fun PipelineHarness.settledNight(): HcSleepSession {
 }
 
 /** Asserts that this is [Settlement.Unsettled] for [reason]. */
-private fun Settlement.unsettled(reason: UnsettledReason): Settlement.Unsettled {
+fun Settlement.unsettled(reason: UnsettledReason): Settlement.Unsettled {
     val unsettled = assertInstanceOf(Settlement.Unsettled::class.java, this)
     assertEquals(reason, unsettled.reason, "$unsettled")
     return unsettled
 }
 
 /** Asserts that this is [Settlement.Settled]. */
-private fun Settlement.settled(): Settlement.Settled = assertInstanceOf(Settlement.Settled::class.java, this, "$this")
+fun Settlement.settled(): Settlement.Settled = assertInstanceOf(Settlement.Settled::class.java, this, "$this")
 
 /**
  * [SourceSettlement]: the source sessions that Sleep as Android imports are settled once PulseStages has processed every
- * one of them as it is now and the sources' heart rate shows that the recent ones are final.
+ * one of them as it is now and the sources' heart rate shows that the recent ones are final (and their steps, for a
+ * source that writes fine-grained steps: [SourceSettlementStepsTest]).
  */
 class SourceSettlementTest {
     @TempDir
@@ -97,65 +116,73 @@ class SourceSettlementTest {
      * 18 Oct 2026, after PulseStages' log on the development phone: at about 07:30 OHealth publishes the night cut at
      * 07:29 (in two fragments, as Sleep as Android's copy of it suggests); at about 09:37 an intermediate version ends at
      * 08:15, with heart rate to 09:35 already in Health Connect; at 12:16 the final version ends at the wake, 12:15; heart
-     * rate from an hour after the wake has arrived by 13:19.
+     * rate from an hour after the wake has arrived by 13:19. With [walks], OHealth also writes one-minute steps: the
+     * evening before, and from the wake on in the upload at 13:19; the rule for steps then holds nothing longer.
      */
-    @Test
-    fun `18 Oct - provisional and intermediate versions wait, the final one settles with heart rate an hour after the wake`() =
-        harnessTest(dir, now = time(7, 30)) { h ->
-            val first = h.repository.addSleepSession(OHEALTH, time(4, 21), time(6, 8))
-            val last = h.repository.addSleepSession(OHEALTH, time(6, 31), time(7, 29))
-            h.repository.addHeartRate(OHEALTH, time(3, 51), time(7, 29))
-            assertEquals(1, h.syncAt(time(7, 34)).pipeline.estimated)
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `18 Oct - provisional and intermediate versions wait, the final one settles with heart rate an hour after the wake`(
+        walks: Boolean,
+    ) = harnessTest(dir, now = time(7, 30)) { h ->
+        if (walks) h.eveningWalk()
+        val first = h.repository.addSleepSession(OHEALTH, time(4, 21), time(6, 8))
+        val last = h.repository.addSleepSession(OHEALTH, time(6, 31), time(7, 29))
+        h.repository.addHeartRate(OHEALTH, time(3, 51), time(7, 29))
+        assertEquals(1, h.syncAt(time(7, 34)).pipeline.estimated)
 
-            val provisional = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
-            assertEquals(SourceVersion.of(first), provisional.version, "the earlier fragment needs heart rate 5 min after its publication")
-            assertEquals(time(7, 35), provisional.thresholdMs)
-            assertEquals(time(7, 27), provisional.latestHeartRateMs)
-            h.syncAt(time(9, 1))
-            assertEquals(provisional, h.settle())
+        val provisional = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
+        assertEquals(SourceVersion.of(first), provisional.version, "the earlier fragment needs heart rate 5 min after its publication")
+        assertEquals(time(7, 35), provisional.thresholdMs)
+        assertEquals(time(7, 27), provisional.latestHeartRateMs)
+        h.syncAt(time(9, 1))
+        assertEquals(provisional, h.settle())
 
-            h.clock.nowMs = time(9, 36)
-            h.repository.addHeartRate(OHEALTH, time(7, 29), time(9, 36))
-            h.clock.nowMs = time(9, 37)
-            val intermediate = h.repository.updateSleepSession(last.uuid) { it.copy(endMs = time(8, 15)) }
-            assertEquals(1, h.syncAt(time(9, 39)).pipeline.estimated)
-            val waiting = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
-            assertEquals(SourceVersion.of(intermediate), waiting.version)
-            assertEquals(time(9, 35), waiting.latestHeartRateMs, "already past the end + margin, 09:15 ...")
-            assertEquals(intermediate.lastModifiedMs + 5 * MINUTE_MS, waiting.thresholdMs, "... but stamped before the change")
-            h.syncAt(time(11, 13))
-            assertEquals(waiting, h.settle())
+        h.clock.nowMs = time(9, 36)
+        h.repository.addHeartRate(OHEALTH, time(7, 29), time(9, 36))
+        h.clock.nowMs = time(9, 37)
+        val intermediate = h.repository.updateSleepSession(last.uuid) { it.copy(endMs = time(8, 15)) }
+        assertEquals(1, h.syncAt(time(9, 39)).pipeline.estimated)
+        val waiting = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
+        assertEquals(SourceVersion.of(intermediate), waiting.version)
+        assertEquals(time(9, 35), waiting.latestHeartRateMs, "already past the end + margin, 09:15 ...")
+        assertEquals(intermediate.lastModifiedMs + 5 * MINUTE_MS, waiting.thresholdMs, "... but stamped before the change")
+        h.syncAt(time(11, 13))
+        assertEquals(waiting, h.settle())
 
-            h.clock.nowMs = time(12, 16)
-            h.repository.addHeartRate(OHEALTH, time(9, 37), time(12, 16))
-            h.repository.updateSleepSession(last.uuid) { it.copy(endMs = time(12, 15)) }
-            assertEquals(1, h.syncAt(time(12, 17)).pipeline.estimated)
-            assertEquals(time(13, 15), h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA).thresholdMs)
-            // OHealth writes the session again with unchanged times; nothing is written, the threshold stays.
-            h.clock.nowMs = time(12, 33)
-            val finalVersion = h.repository.updateSleepSession(last.uuid) { it }
-            assertEquals(0, h.syncAt(time(12, 33)).pipeline.estimated)
-            val rewritten = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
-            assertEquals(SourceVersion.of(finalVersion), rewritten.version)
-            assertEquals(time(13, 15), rewritten.thresholdMs)
+        h.clock.nowMs = time(12, 16)
+        h.repository.addHeartRate(OHEALTH, time(9, 37), time(12, 16))
+        h.repository.updateSleepSession(last.uuid) { it.copy(endMs = time(12, 15)) }
+        assertEquals(1, h.syncAt(time(12, 17)).pipeline.estimated)
+        assertEquals(time(13, 15), h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA).thresholdMs)
+        // OHealth writes the session again with unchanged times; nothing is written, the threshold stays.
+        h.clock.nowMs = time(12, 33)
+        val finalVersion = h.repository.updateSleepSession(last.uuid) { it }
+        assertEquals(0, h.syncAt(time(12, 33)).pipeline.estimated)
+        val rewritten = h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA)
+        assertEquals(SourceVersion.of(finalVersion), rewritten.version)
+        assertEquals(time(13, 15), rewritten.thresholdMs)
 
-            h.clock.nowMs = time(13, 19)
-            h.repository.addHeartRate(OHEALTH, time(12, 17), time(13, 19))
-            h.syncAt(time(13, 19))
-            val settled = h.settle().settled()
-            assertEquals(listOf(SourceVersion.of(first), SourceVersion.of(finalVersion)), settled.versions)
-            assertEquals(mapOf(OHEALTH to time(13, 17)), settled.latestHeartRateMs)
-        }
+        h.clock.nowMs = time(13, 19)
+        h.repository.addHeartRate(OHEALTH, time(12, 17), time(13, 19))
+        if (walks) h.walk(time(12, 20), time(13, 19))
+        h.syncAt(time(13, 19))
+        val settled = h.settle().settled()
+        assertEquals(listOf(SourceVersion.of(first), SourceVersion.of(finalVersion)), settled.versions)
+        assertEquals(mapOf(OHEALTH to time(13, 17)), settled.latestHeartRateMs)
+    }
 
     /**
      * 19 Oct 2026, after PulseStages' log on the development phone: OHealth publishes the night cut at 07:29 at
      * about 07:30 and the final version, ending at the wake (08:03), at 08:05 with heart rate to 07:58; it writes the
      * session again with unchanged times at 08:20; its heart rate reaches 08:56 by 08:57 (the late-data pass rewrites the
-     * night) and an hour after the wake by 09:12.
+     * night) and an hour after the wake by 09:12. With [walks], OHealth also writes one-minute steps: the evening before,
+     * and from the wake on in the uploads at 08:57 and 09:12; the rule for steps then holds nothing longer.
      */
-    @Test
-    fun `19 Oct - the night settles once heart rate an hour after the wake arrives, not at the final version`() =
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `19 Oct - the night settles once heart rate an hour after the wake arrives, not at the final version`(walks: Boolean) =
         harnessTest(dir, now = time(7, 30)) { h ->
+            if (walks) h.eveningWalk()
             val source = h.repository.addSleepSession(OHEALTH, time(2, 20), time(7, 29))
             h.repository.addHeartRate(OHEALTH, time(1, 50), time(7, 29))
             h.syncAt(time(7, 55))
@@ -176,12 +203,14 @@ class SourceSettlementTest {
 
             h.clock.nowMs = time(8, 57)
             h.repository.addHeartRate(OHEALTH, time(8, 0), time(8, 57))
+            if (walks) h.walk(time(8, 10), time(8, 57))
             assertEquals(1, h.syncAt(time(8, 57)).pipeline.refreshed)
             assertEquals(1002L, h.singleRecord().clientRecordVersion)
             assertEquals(time(8, 56), h.settle().unsettled(UnsettledReason.WAITING_FOR_DATA).latestHeartRateMs)
 
             h.clock.nowMs = time(9, 12)
             h.repository.addHeartRate(OHEALTH, time(8, 58), time(9, 11))
+            if (walks) h.walk(time(9, 0), time(9, 12))
             assertEquals(mapOf(OHEALTH to time(9, 10)), h.settle().settled().latestHeartRateMs)
         }
 
