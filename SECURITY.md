@@ -84,12 +84,14 @@ Out of scope:
   USB debugging is on ([docs/privacy.md](docs/privacy.md#5-logs)). "Ask Sleep as Android to sync" (on by default;
   Settings → "Written sessions", where the user can turn it off) sends Sleep as Android's sync broadcast
   (`com.urbandroid.sleep.REQUEST_SYNC`, restricted to its package) once the nights a run wrote or updated are complete
-  (once the watch app's heart rate reaches about an hour past the wake) when Sleep as Android is installed, and nothing
-  when it is not; it carries no extras and no data
+  (once the watch app's heart rate reaches about an hour past the wake and, if it writes steps, its steps show a minute
+  of walking after that) when Sleep as Android is installed, and nothing when it is not; it carries no extras and no
+  data. With it on, a night that PulseStages changes after a request gets a local notification with the night's date
+  and times, which Android also shows on the lock screen unless the user set it to hide sensitive content
   ([docs/privacy.md](docs/privacy.md#2-everything-stays-on-the-device)).
-- Package visibility is limited to Health Connect, OHealth, Sleep as Android (only to check that it is installed
-  before that sync request) and the apps that declare a Health Connect permission rationale; the app does not request
-  `QUERY_ALL_PACKAGES` (also checked by `MergedManifestTest`).
+- Package visibility is limited to Health Connect, OHealth, Sleep as Android (only to check that it is installed before
+  that sync request and to open it from that notification) and the apps that declare a Health Connect permission
+  rationale; the app does not request `QUERY_ALL_PACKAGES` (also checked by `MergedManifestTest`).
 
 ## Signing key policy
 

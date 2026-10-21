@@ -10,19 +10,63 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+### Added
+
+- **The notification "Check a night in Sleep as Android".** Sleep as Android never updates a night it imported, so a
+  night that PulseStages changes after asking Sleep as Android to sync may be out of date there. PulseStages now
+  remembers the nights each request covered and, when a later run writes one of them with another start or end (in
+  place, or merged into a new night with a part the watch app added after a short wake), shows "Check a night in Sleep
+  as Android" with the night's date, its times now and its times when Sleep as Android was asked (all of them when
+  nights of the request were merged), and how to repair it: delete there every record with the cloud icon between the
+  two times it names, which also covers a part of the night that Sleep as Android imported apart, without undoing the
+  deletion, then "Recompute" the night in PulseStages. Tapping the notification opens the night's detail; its button
+  "Open Sleep as Android" opens Sleep as Android. There is one notification per new version of a night: a newer version
+  of the same night replaces it without a second sound, a merged night's notification replaces the earlier one and
+  alerts again unless its times are the same, and a night back at the times Sleep as Android was asked about has its
+  notification removed; a recompute that keeps the times brings none. It has its own category, "Nights in Sleep as
+  Android", which can be turned off in Android's notification settings once the first notification has come; without
+  notifications, the Log still has the line. On the lock screen Android shows the full text unless it is set to hide
+  sensitive content. It covers only the nights of PulseStages' last request, not a "Sync now"; under "Never overwrite"
+  only a session that the watch app deleted and wrote again with other times can bring one, and since "Recompute"
+  rewrites nothing under that option, its repair then says to tap "Sync now" in Sleep as Android (Settings → Services)
+  instead. Tested in the build's tests, not yet on the development phone ([user
+  guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
+  §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+
 ### Changed
 
-- **When Sleep as Android gets a night with OHealth.** The hint of "Ask Sleep as Android to sync", the user guide,
-  the README and the privacy notes no longer say that the request usually comes 1–2 hours after you wake up. It comes
-  once the watch app's heart rate in Health Connect reaches about an hour past the wake, and OHealth uploads heart
-  rate only when it pulls it from the watch: when the watch reconnects, when the watch reports the wake-up or (not
-  observed) new heart-rate data, and when OHealth is opened. It has no regular schedule in the background, and no
-  OHealth setting changes that (OHealth 4.62.7 on the development phone, 19–20 October 2026: after the night's last
-  upload at 08:10 nothing reached Health Connect until the user opened OHealth at 13:55). The user guide now advises
-  opening OHealth 75 minutes or more after waking up and pulling down on its "Home" tab (the screen headed "Health");
-  with checks every 15 minutes Sleep as Android then usually gets the night 15–60 minutes later, with the default
-  hourly checks up to an hour more ([user guide](docs/user-guide.md#ask-sleep-as-android-to-sync),
-  [health-connect.md §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+- **The Sleep as Android request also waits for a walk after the night.** OHealth's code can upload heart rate alone
+  while the user still sleeps (when the watch reports new heart-rate data, or when a pull's sleep fetch fails or is cut
+  off), and heart rate past a night cut at 07:29 would then release that night. For a watch app that writes steps minute
+  by minute, as OHealth does, the request now also waits for a minute with 5 or more steps from about an hour after the
+  end of the night on (Settings hint of "Ask Sleep as Android to sync", en and ru); a heart-rate-only upload brings no
+  steps. Steps before the night's end do not count (rarely, a walk during a long sleep-in after a night cut short still
+  lets it through). A watch app without steps, or with only coarse step totals, is held by heart rate alone as before.
+  The cost: with OHealth, open it 75 minutes or more after waking up once you have walked a little after the first hour,
+  and on a day in bed the night reaches Sleep as Android only about 12 hours after it ended. The check of an owed
+  request makes up to three more Health Connect reads once the heart rate is there. Tested with replays of 18 and 19
+  October and a constructed sleep-in scenario, not yet on the development phone ([user
+  guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
+  §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+- **Home's notifications row** now reads "Notifications (progress, Sleep as Android)", and without the permission "Not
+  allowed: long runs show no progress, and a night to check in Sleep as Android is noted only in the Log." (en and ru).
+- **Opening the app after the notification.** The notification opens the app's screen with the same identity as the
+  launcher icon, so that when it starts the app, the launcher icon later brings the app back as it was instead of
+  opening a second copy of its screen, whatever screen of the app is on top. The app's activity is also `singleTop`:
+  another notification that opens it while it is on top, such as the progress notification, reaches the existing screen
+  (neither checked on a phone yet) ([architecture.md §2](docs/architecture.md#2-components)).
+- **When Sleep as Android gets a night with OHealth.** The hint of "Ask Sleep as Android to sync", the user guide, the
+  README and the privacy notes no longer say that the request usually comes 1–2 hours after you wake up. It comes once
+  the watch app's heart rate in Health Connect reaches about an hour past the wake, and OHealth uploads heart rate only
+  when it pulls it from the watch: when the watch reconnects, when the watch reports the wake-up or (not observed) new
+  heart-rate data, and when OHealth is opened. It has no regular schedule in the background, and no OHealth setting
+  changes that (OHealth 4.62.7 on the development phone, 19–20 October 2026: after the night's last upload at 08:10
+  nothing reached Health Connect until the user opened OHealth at 13:55). The user guide now advises opening OHealth 75
+  minutes or more after waking up (once you have walked a little after the first hour, above) and pulling down on its
+  "Home" tab (the screen headed "Health"); with checks every 15 minutes Sleep as Android then usually gets the night
+  15–60 minutes later, with the default hourly checks up to an hour more ([user
+  guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
+  §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
 
 ## [0.4.1] - 2026-10-20
 

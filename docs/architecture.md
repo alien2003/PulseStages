@@ -35,8 +35,8 @@ Contents:
 | `:algo-cli` | Kotlin/JVM application | Command-line front end of `:core-algo` (`features`, `evaluate`, `estimate`, ...). `tools/train` calls it so that training and validation use exactly the code that runs on the phone ([INTERCHANGE.md](INTERCHANGE.md#2-algo-cli-commands)). |
 | `:data-local` | Android library | The Room ledger (`pulsestages.db`), the settings DataStore, the sync-state DataStore, the internal logger, the UTC `Clock` and the application `CoroutineScope`. |
 | `:data-hc` | Android library | The `HealthRepository` boundary and its Health Connect implementation, the night pipeline (candidate building, estimation, idempotent writing), the Changes-API sync, the backfill engine, recompute, the data eraser, the source scanner, the check whether the source sessions another reader imports are complete (`SourceSettlement`, for the sync request to Sleep as Android), and the use cases the UI calls. Test doubles in `src/testFixtures`. |
-| `:work` | Android library | WorkManager workers, the runners behind them, the scheduler, the foreground notifications, the production `NightEstimator` (`SleepStagerNightEstimator`), the loader of the bundled model, and the sync request to Sleep as Android (`work/saa`, on by default, [6.7](#67-what-a-sync-does)). |
-| `:app` | Android application | Compose Material 3 UI, the Hilt component root (`PulseStagesApp`), the manifest, the permission-rationale activity, platform services (Storage Access Framework, FileProvider, PackageManager), the model asset `assets/models/hybrid_model.json`, and the debug-only demo mode. |
+| `:work` | Android library | WorkManager workers, the runners behind them, the scheduler, the foreground notifications, the production `NightEstimator` (`SleepStagerNightEstimator`), the loader of the bundled model, the sync request to Sleep as Android (`work/saa`, on by default, [6.7](#67-what-a-sync-does)) and its notice of a night that changed after a request (`work/notify`: `SleepAsAndroidNotifications`, and `OpenNight`, the intent contract by which a notification opens a night in the app). |
+| `:app` | Android application | Compose Material 3 UI with its single `MainActivity` (which also opens the night of a notification), the Hilt component root (`PulseStagesApp`), the manifest, the permission-rationale activity, platform services (Storage Access Framework, FileProvider, PackageManager), the model asset `assets/models/hybrid_model.json`, and the debug-only demo mode. |
 | `tools/train` | Python (not a Gradle module) | Dataset download, OHealth emulation, training and leave-one-subject-out validation ([tools/train/README.md](../tools/train/README.md)). |
 
 ### 1.1 The dependency rule
@@ -103,6 +103,7 @@ flowchart TB
         WRK["EstimateNewNightsWorker<br/>BackfillWorker<br/>RecomputeWorker<br/>SleepAsAndroidSyncWorker"]
         RUN["EstimateNewNightsRunner<br/>BackfillRunner<br/>RecomputeRunner"]
         SAA["SleepAsAndroidSyncRequests"]
+        NOTE["SleepAsAndroidNotifications"]
         EST["SleepStagerNightEstimator"]
         BUNDLE["BundledHybridModelProvider"]
     end
@@ -142,6 +143,9 @@ flowchart TB
     SAA --> DS
     SAA -->|"are the nights complete?"| SET
     SAA -->|"REQUEST_SYNC broadcast"| SLEEP
+    SAA -->|"nights of the last request"| ROOM
+    SAA -->|"a night changed after a request"| NOTE
+    NOTE -->|"tap: open the night"| UI
     SLEEP -->|"its own sync"| HC
     JOBS --> PIPE
     UC --> PIPE
@@ -160,9 +164,23 @@ flowchart TB
     HC -->|"privacy policy link"| RAT
 ```
 
-- **UI.** One activity (`MainActivity`) with four tabs: Home, Nights, Compare, Settings (`TopLevelDestination`);
-  Sources and Log are reached from Settings. ViewModels call use cases and the `WorkScheduler`; they never call Health
-  Connect directly.
+- **UI.** One activity (`MainActivity`) with four tabs: Home, Nights, Compare, Settings (`TopLevelDestination`); Sources
+  and Log are reached from Settings. ViewModels call use cases and the `WorkScheduler`; they never call Health Connect
+  directly. A notification of a night (`OpenNight`: an intent with the launcher's identity, `Intent.makeMainActivity`,
+  and the night's `clientRecordId` as an extra) opens that night's detail in the Nights tab, at launch (`onCreate`) or
+  while the app is open (`addOnNewIntentListener`); a rotation, a process restore or a relaunch from Recents
+  (`FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY`) does not open it again (`OpenNight.nightToOpen`).
+  `NavHostController.openNight` switches to the Nights tab first, whose back stack entry the detail needs, then opens
+  the detail in place of one already on top. A task keeps the intent that started it as its base intent: a
+  notification that reaches the root `MainActivity` of an existing task through CLEAR_TOP does not replace it
+  (`Task.setIntent` keeps the identity of a root activity without `relinquishTaskIdentity`, Android 9–16). The
+  launcher's identity therefore matters when the notification's tap starts the task: the launcher icon then finds that
+  task the same and brings it to the front, whatever screen is on top, instead of stacking a second `MainActivity` on
+  it. Android 14+ ignore the package in that comparison (`Task.isSameIntentFilter`), so a task that the progress
+  notification started (its intent names the package) is found too; on Android 9–13 such a task still gets a second
+  `MainActivity` from the launcher icon when another screen is on top. `MainActivity` is also `singleTop`, which helps
+  only while it is on top: an intent with another identity (on Android 9–13 the progress notification's) then reaches
+  it instead of a second copy (AOSP's task logic; neither checked on a phone yet).
 - **Use cases** report Health Connect problems as values instead of throwing: `UseCaseResult` (success, not found,
   not estimated, blocked, failed) for the night inspection and the reference comparison, dedicated result types such
   as `CalibrationOutcome` for personalization ([7.5](#75-use-cases-and-the-ui)). "Delete my sessions from Health
@@ -434,7 +452,7 @@ differ from the current entities, and without the migrations the old database is
 | File | Owner | Content |
 |---|---|---|
 | `app_settings.json` | `SettingsRepository` (`AppSettingsDataStoreFactory`) | The settings as JSON. Only values that differ from the defaults are stored, so data-driven defaults (for example a retrained model's decoder values) still update for every value the user never changed. A corrupted file is reset to defaults and logged. Export writes every value ([settings-reference.md](settings-reference.md)). |
-| `sync_state` (Preferences DataStore) | `SyncStateStore` | The Changes-API token and the package set it was created for, its creation and last-update times, the start, end, outcome and detail of the last sync, the night count of the last population-EM run, the start of the run whose late-data pass last completed (`late_data_pass_at`, [6.7](#67-what-a-sync-does)), the time a late-data pass was last asked for (`late_data_pass_requested_at`; a new request replaces it, also with an earlier time after the clock was set back), and the sync request owed to Sleep as Android (`SleepAsAndroidRequestState`, [6.7](#67-what-a-sync-does)): its due time (`sleep_as_android_request_due_at`), whether a follow-up is owed after it (`sleep_as_android_request_follow_up`), the latest write or request that left it owed (`sleep_as_android_request_owed_since`), the session versions and start of the current settled streak (`sleep_as_android_settled_key`, `sleep_as_android_settled_since`), and the time and session versions of the last request (`sleep_as_android_last_sent_at`, `sleep_as_android_sent_key`). A session version is `uuid:start:end:lastModified` of a source session in Health Connect. 0.4.0's `sleep_as_android_follow_up_due_at` is read, while the new due time is absent, as a request owed since then without a follow-up, and every update removes it (after a downgrade 0.4.0 would send what it finds there without waiting). A corrupted file is replaced by an empty state; the next run takes a new token. |
+| `sync_state` (Preferences DataStore) | `SyncStateStore` | The Changes-API token and the package set it was created for, its creation and last-update times, the start, end, outcome and detail of the last sync, the night count of the last population-EM run, the start of the run whose late-data pass last completed (`late_data_pass_at`, [6.7](#67-what-a-sync-does)), the time a late-data pass was last asked for (`late_data_pass_requested_at`; a new request replaces it, also with an earlier time after the clock was set back), and the sync request owed to Sleep as Android (`SleepAsAndroidRequestState`, [6.7](#67-what-a-sync-does)): its due time (`sleep_as_android_request_due_at`), whether a follow-up is owed after it (`sleep_as_android_request_follow_up`), the latest write or request that left it owed (`sleep_as_android_request_owed_since`), the session versions and start of the current settled streak (`sleep_as_android_settled_key`, `sleep_as_android_settled_since`), the time and session versions of the last request (`sleep_as_android_last_sent_at`, `sleep_as_android_sent_key`), the written nights of that request's sessions (`sleep_as_android_sent_nights`) and the version of them each notice now shows (`sleep_as_android_noticed`). A session version is `uuid:start:end:lastModified` of a source session in Health Connect; a night is `clientRecordId:sessionStart:sessionEnd` of a ledger night, sorted and joined by `;`. A request replaces the nights and clears the notified versions; forgetting the request (the option off, Sleep as Android gone, 24 h owed, a failed broadcast) clears both. 0.4.0's `sleep_as_android_follow_up_due_at` is read, while the new due time is absent, as a request owed since then without a follow-up, and every update removes it (after a downgrade 0.4.0 would send what it finds there without waiting). A corrupted file is replaced by an empty state; the next run takes a new token. |
 
 ### 4.4 The ledger lock
 
@@ -670,6 +688,27 @@ treated as a background run. Without the notification permission (Android 13+) t
 is just not shown. Expedited works on Android 11 and lower also run as a foreground service with these
 notifications.
 
+**The Sleep as Android notice.** One notification has nothing to do with the foreground service: "Check a night in Sleep
+as Android" (`SleepAsAndroidNotifications`, behind the `SleepAsAndroidNotices` interface that
+`SleepAsAndroidSyncRequests` calls, [6.7](#67-what-a-sync-does)). It has its own channel, `pulsestages.saa`, at default
+importance (a channel's importance cannot be raised later, and the user can turn it off without the progress
+notifications), created at the first notice that notifications allow, so it appears in Android's settings only from then
+on. It is posted with the night's `clientRecordId` as tag and the id 1004 (1001–1003 are the progress notifications), so
+a newer version of the night replaces it, the tags of the nights it replaced are cancelled, and `withdraw` cancels the
+notice of a night that is back at its stored span; `setOnlyAlertOnce`, `setSilent` for a notice with the times of one it
+replaces (`ChangedNight.silent`), auto-cancel, local-only, `VISIBILITY_PRIVATE` with a public version without date and
+times. Its text gives the stored span, or each stored span when several nights of the request are now one, and its
+repair the time from `ChangedNight.repairStartMs` to `repairEndMs` in which every record of Sleep as Android must go,
+then "Recompute", or under `NEVER` (`ChangedNight.neverOverwrite`) "Sync now" in Sleep as Android. Its content intent is
+`OpenNight.pendingIntent`: explicit, immutable, with the launcher's identity (MAIN, LAUNCHER, no data or package) and
+the night as an extra, distinct per night through its request code (`OpenNight.requestCodeOf`, the hash of the id, never
+0, which the progress notifications' launcher intent uses, so neither rewrites the other's extras). Its action opens
+Sleep as Android when its launch intent resolves (`<queries>` lists the package). Without `POST_NOTIFICATIONS` on
+Android 13+, with notifications off for the app or with the channel off, `show` posts nothing and returns why
+(`NoticeResult`); a `SecurityException` from a revoke in between is caught. Robolectric runs only Android 15 offline, so
+the Android 12-and-lower branch of the permission rule is tested only as a pure function
+(`SleepAsAndroidNotifications.allowed`).
+
 ### 6.5 The background-permission guard
 
 Without `READ_HEALTH_DATA_IN_BACKGROUND`, Health Connect only serves an app's own data while the app is in the
@@ -790,25 +829,51 @@ to the pure `decide`:
   it is deferred to the end of the confirmation or to the next check. A confirmed streak that was not sent yet is
   checked by the run that completes such a pass even before that stored time; a follow-up keeps its time.
 - `Unsettled`: the streak ends; deferred by `RECHECK_MS`, or to the time the session's heart rate must reach if that is
-  later.
+  later. A wait for steps (`Settlement.Unsettled.awaitingSteps`: the heart rate reached that time, but the source's
+  fine-grained steps show no minute of 5 or more steps since) is its own hold, "waiting for steps", so that the switch
+  from waiting for heart rate is logged at info level.
 - `Unreadable` (the background rule refused the read, [6.5](#65-the-background-permission-guard)): sent without a new
   check once a stored streak is `CONFIRM_MS` old, deferred until then; without a streak nothing is scheduled, and the
   next run in the foreground checks.
 - `Failed` (another Health Connect error): the streak is kept; deferred by `RECHECK_MS`.
 
 Whatever the verdict, a session of the last request (`sentKey`) that now has another start or end is warned about once.
-The resulting state is stored in one edit; then the request is sent (`SyncRequestSender.send`: the broadcast
-`com.urbandroid.sleep.REQUEST_SYNC` restricted to `com.urbandroid.sleep`, without extras), or the deferral is logged
-(at info level when it waits for something else than the last one logged, at debug level for a repeat) and the work is
-scheduled. Scheduling is always the last call: from a run with `REPLACE`, from the work with `APPEND_OR_REPLACE`
-(`scheduleFromWork`), so the work never cancels itself. A request sent with a follow-up owed stores the follow-up's due
-time `FOLLOW_UP_DELAY_MS` later and keeps the streak for it. A send that fails (the sender throws, or Sleep as Android
-is gone) forgets the request; once the request is out, a failure to schedule its follow-up is logged as a warning of
-its own and the request still counts as sent. An owed, sent or streak time later than now, or a due time further away
-than the longest deferral (the heart-rate margin past a session end `CLOCK_TOLERANCE_MS` ahead, or `QUIET_MS`), is
-taken for a clock set back: those times count as now, the streak is dropped and the due time comes within
-`RECHECK_MS`; a late-data pass stored ahead of now does not count for a streak. The summary of a completed run carries
-`sleepAsAndroidSyncRequested` (sent) and `sleepAsAndroidSyncDeferred` (the run wrote, and the request waits).
+Independently of the verdict, `SentNights.check` compares the nights of the last request (`sentNightsKey`) with the
+ledger: a WRITTEN night is itself, a SUPERSEDED or SOURCE_DELETED one is followed to the WRITTEN night that shares its
+source sessions and overlaps its stored span most, or else to the WRITTEN night that overlaps that span by more than
+half of the shorter of the two; DELETED, NOT_ESTIMATED and FAILED nights are skipped. A night whose session start or end
+differs from the stored one is a change, unless a notice shows that version (`noticedKey`); nights of the request that
+are now one night give one change, with the stored span of the one Sleep as Android most likely holds (that night
+itself, else the one that overlaps it most, else the longest) and every stored span (`sentSpans`). A change replaces the
+notices of the nights linked to the stored night and to the night it is now, and of the SUPERSEDED or SOURCE_DELETED
+nights that overlap the stored span by more than half (`replaced`); it is silent when a notified version of one of them
+has its times. A stored night that is unchanged withdraws the notified versions of itself and of the nights linked to it
+(`withdrawn`). Every span change of a written night is a write that makes a request owed (`recordRun`), so this check
+sees it, at the end of that run or in the work. Under `NEVER` no written night is rewritten in place or merged; a
+session the source deleted and wrote again under another id still gives a change, since the deletion retires the night
+whatever the policy. A ledger read error is logged as a warning and loses only the notices. The resulting state is
+stored in one edit, under `NonCancellable`: a request that is sent stores the WRITTEN nights of its sessions
+(`SentNights.keyOf`) as the new `sentNightsKey` and clears `noticedKey`; otherwise `noticedKey` becomes the version each
+notice now shows (`SentNights.noticedAfter`): the versions found now are added, and the withdrawn ones, the earlier
+versions of a changed night and the versions of the nights it replaced are removed, so a night that goes back to a
+version notified earlier is notified again. Then the request is sent (`SyncRequestSender.send`: the broadcast
+`com.urbandroid.sleep.REQUEST_SYNC` restricted to `com.urbandroid.sleep`, without extras), or the deferral is logged (at
+info level when it waits for something else than the last one logged, at debug level for a repeat) and the work is
+scheduled. Scheduling is always the last call of the request: from a run with `REPLACE`, from the work with
+`APPEND_OR_REPLACE` (`scheduleFromWork`), so the work never cancels itself. A request sent with a follow-up owed stores
+the follow-up's due time `FOLLOW_UP_DELAY_MS` later and keeps the streak for it. After that, in a `finally` after the
+send or the deferral, every withdrawn notice is removed (`SleepAsAndroidNotices.withdraw`, logged at info level with its
+night's key) and every change is shown (`SleepAsAndroidNotices.show`; under `NEVER` with `ChangedNight.neverOverwrite`,
+whose repair is "Sync now" in Sleep as Android, since a recompute rewrites nothing and owes no request) and logged with
+its night's key, at info level when it was shown and as a warning otherwise; a failure of the notifier is logged and
+changes nothing else, and a process death between the edit and the post loses that notice but never repeats it. A send
+that fails (the sender throws, or Sleep as Android is gone) forgets the request and the stored nights, though the
+notices of that check are still posted; once the request is out, a failure to schedule its follow-up is logged as a
+warning of its own and the request still counts as sent. An owed, sent or streak time later than now, or a due time
+further away than the longest deferral (the heart-rate margin past a session end `CLOCK_TOLERANCE_MS` ahead, or
+`QUIET_MS`), is taken for a clock set back: those times count as now, the streak is dropped and the due time comes
+within `RECHECK_MS`; a late-data pass stored ahead of now does not count for a streak. The summary of a completed run
+carries `sleepAsAndroidSyncRequested` (sent) and `sleepAsAndroidSyncDeferred` (the run wrote, and the request waits).
 `BackfillRunner` and `RecomputeRunner` use the same helper, with the `WriteCount` passed to `BackfillEngine.run`
 (interrupted windows included) and to `NightRecomputer.recompute` / `recomputeAll`. They call `holdForRun` first: it
 ends the settled streak of an owed request (state only), so that the work sends nothing while they spend minutes
@@ -913,9 +978,9 @@ what catches a change that breaks it (a constructor or an interface it implement
 | `:core-algo` | JUnit 5, plain JVM | every algorithm part, invariants of every estimate (sorted, contiguous, covering the session), synthetic recovery, edge cases, the params hash, the CSV format, the night / nap modes (`NapModeRegressionTest` compares 767 estimates with digests recorded on the build before the two modes), and the shipped model bundle against this build (`BundledModelAssetTest`). Synthetic data guards invariants and regressions only; algorithm choices are made on the open datasets ([ALGORITHM.md §15](../ALGORITHM.md#15-synthetic-validation-regression-tests-only)). |
 | `:algo-cli` | JUnit 5 | the commands and their file formats. |
 | `:data-local` | JUnit 5; Robolectric (JUnit 4 through the Vintage engine) where Android SQLite is needed | the DAOs on a real Room database, the migration against the exported schemas, the settings JSON and validator, the DataStores, the logger, the module's Hilt graph. |
-| `:data-hc` | JUnit 5; Robolectric for the Room cross-check and the Hilt graph | `HealthConnectRepository` against `FakeHealthConnectClient`, the error mapping, `VerifiedUpsert`, and the pipeline scenarios (merging, priority, staged sources, naps, deletions, repairs, recompute, erase, backfill, sync, the refresh of written nights, and in `ShortCheckIntervalTest` the late-data pass at most every 55 min with 15- and 30-minute checks (also for attempts that record nothing, a backlog after a backfill, "Estimate new", a requested pass, an incomplete requested pass, a pass stopped by the quota and a clock set back) and the calls of an idle run; `SourceExtendedInPlaceTest` a source session extended in place, as OHealth does; `SourceSettlementTest` the check before the sync request to Sleep as Android, with replays of 18 and 19 Oct 2026) against `FakeHealthRepository` and `InMemoryLedger`. |
-| `:work` | JUnit 5; Robolectric with work-testing's test WorkManager | the runners (also the sync request to Sleep as Android after a run that wrote and then ended with an error or was cancelled), the `WorkOutcome` mapping, the work requests, the scheduler, the worker adapters (`TestListenableWorkerBuilder`), the estimator adapter, and the sync request to Sleep as Android: when it is owed, checked, deferred, sent and followed up (`SleepAsAndroidSyncRequestsTest`, `SleepAsAndroidSyncRequestsChecksTest`), the pure decision (`SleepAsAndroidRequestDecisionTest`), the nights of 18 and 19 Oct 2026, hourly checks, a morning race, checks 12 and 24 h apart, daily runs in the foreground without background access and a pending 0.4.0 follow-up against a fake Sleep as Android that imports like the real one (`SleepAsAndroidGateScenarioTest`), the broadcast itself through Robolectric's package manager (`BroadcastSyncRequestSenderTest`) and the work, also scheduled from inside itself (`WorkManagerSleepAsAndroidFollowUpsTest`). |
-| `:app` | JUnit 5 for ViewModels; Robolectric for the app graph, wiring, rendering and screenshots | ViewModel state machines with fakes, the production Hilt graph, an end-to-end wiring test, render tests, screenshots, and the structural checks below. |
+| `:data-hc` | JUnit 5; Robolectric for the Room cross-check and the Hilt graph | `HealthConnectRepository` against `FakeHealthConnectClient`, the error mapping, `VerifiedUpsert`, and the pipeline scenarios (merging, priority, staged sources, naps, deletions, repairs, recompute, erase, backfill, sync, the refresh of written nights, and in `ShortCheckIntervalTest` the late-data pass at most every 55 min with 15- and 30-minute checks (also for attempts that record nothing, a backlog after a backfill, "Estimate new", a requested pass, an incomplete requested pass, a pass stopped by the quota and a clock set back) and the calls of an idle run; `SourceExtendedInPlaceTest` a source session extended in place, as OHealth does; `SourceSettlementTest` the check before the sync request to Sleep as Android, with replays of 18 and 19 Oct 2026, and `SourceSettlementStepsTest` its wait for a minute of walking) against `FakeHealthRepository` and `InMemoryLedger`. |
+| `:work` | JUnit 5; Robolectric with work-testing's test WorkManager | the runners (also the sync request to Sleep as Android after a run that wrote and then ended with an error or was cancelled), the `WorkOutcome` mapping, the work requests, the scheduler, the worker adapters (`TestListenableWorkerBuilder`), the estimator adapter, and the sync request to Sleep as Android: when it is owed, checked, deferred, sent and followed up (`SleepAsAndroidSyncRequestsTest`, `SleepAsAndroidSyncRequestsChecksTest`), the pure decision (`SleepAsAndroidRequestDecisionTest`), the nights of 18 and 19 Oct 2026 (also with OHealth's one-minute steps), a sleep-in with heart-rate-only uploads, days in bed whose night changes after the request (also merged with a session Sleep as Android imported apart), hourly checks, a morning race, checks 12 and 24 h apart, daily runs in the foreground without background access and a pending 0.4.0 follow-up against a fake Sleep as Android that imports like the real one (`SleepAsAndroidGateScenarioTest`), the broadcast itself through Robolectric's package manager (`BroadcastSyncRequestSenderTest`), the work, also scheduled from inside itself (`WorkManagerSleepAsAndroidFollowUpsTest`), the nights of a request compared with the ledger (`SentNightsTest`, and in `SleepAsAndroidSyncRequestsChecksTest` the notices of the checks), the notification itself under Robolectric (`SleepAsAndroidNotificationsTest`) and the intent that opens a night and its request codes (`OpenNightTest`). |
+| `:app` | JUnit 5 for ViewModels; Robolectric for the app graph, wiring, rendering and screenshots | ViewModel state machines with fakes, the production Hilt graph, an end-to-end wiring test, render tests, screenshots, the way from a notification to a night (`OpenNightNavigationTest` on a navigation graph of the same shape; `OpenNightActivityTest` with the real `MainActivity` and Hilt graph: at launch and while open, again after Back, not after a recreation or from Recents), and the structural checks below. |
 
 ### 8.2 Fakes
 
@@ -963,7 +1028,7 @@ test downloads anything.
 
 | Test | Checks |
 |---|---|
-| `MergedManifestTest` | the merged debug and release manifests: no `INTERNET`, every health permission declared under `<manifest>`, the foreground-service permissions, the `<queries>` entries (`com.urbandroid.sleep` among them) without `QUERY_ALL_PACKAGES`, the rationale activity and its Android 14+ alias, the `dataSync` type of WorkManager's service, the private FileProvider, the removed WorkManager initializer, exactly one launcher entry, no demo component |
+| `MergedManifestTest` | the merged debug and release manifests: no `INTERNET`, every health permission declared under `<manifest>`, the foreground-service permissions, `MainActivity` with `launchMode="singleTop"`, the `<queries>` entries (`com.urbandroid.sleep` among them) without `QUERY_ALL_PACKAGES`, the rationale activity and its Android 14+ alias, the `dataSync` type of WorkManager's service, the private FileProvider, the removed WorkManager initializer, exactly one launcher entry, no demo component |
 | `ReleaseApkTest` | the minified release APK: R8's mapping lists no demo class, and aapt2's dump shows no demo resource or text (its inputs make `./gradlew test` build the release APK) |
 | `ResourcesParityTest` | every string of every module in English and Russian, with the same placeholders and the plural forms of each language |
 | `ResourceFormatsTest` | every string with `%` is a valid format pattern or marked `formatted="false"` |
@@ -1003,6 +1068,7 @@ can make.
 | Settings and sync state | [`AppSettings.kt`](../data-local/src/main/kotlin/io/github/alien2003/pulsestages/data/local/settings/AppSettings.kt), [`SyncStateStore.kt`](../data-local/src/main/kotlin/io/github/alien2003/pulsestages/data/local/sync/SyncStateStore.kt) |
 | Work | [`WorkRequests.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/schedule/WorkRequests.kt), [`WorkManagerWorkScheduler.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/schedule/WorkManagerWorkScheduler.kt), [`Workers.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/worker/Workers.kt), [`WorkerSupport.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/worker/WorkerSupport.kt), [`Runners.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/run/Runners.kt), [`WorkResults.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/run/WorkResults.kt) |
 | Sync request to Sleep as Android | [`SleepAsAndroid.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/saa/SleepAsAndroid.kt), [`SleepAsAndroidSyncRequests.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/saa/SleepAsAndroidSyncRequests.kt), [`SleepAsAndroidFollowUps.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/saa/SleepAsAndroidFollowUps.kt); the check whether the nights are complete: [`SourceSettlement.kt`](../data-hc/src/main/kotlin/io/github/alien2003/pulsestages/data/hc/pipeline/SourceSettlement.kt); its state: `SleepAsAndroidRequestState` in `SyncStateStore.kt` |
+| Notice of a night that changed after a request | [`SentNights.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/saa/SentNights.kt), [`SleepAsAndroidNotices.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/saa/SleepAsAndroidNotices.kt), [`SleepAsAndroidNotifications.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/notify/SleepAsAndroidNotifications.kt), [`OpenNight.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/notify/OpenNight.kt); opening the night: [`MainActivity.kt`](../app/src/main/kotlin/io/github/alien2003/pulsestages/MainActivity.kt), `openNight` in [`PulseStagesNavHost.kt`](../app/src/main/kotlin/io/github/alien2003/pulsestages/ui/PulseStagesNavHost.kt) |
 | Estimator adapter | [`SleepStagerNightEstimator.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/estimate/SleepStagerNightEstimator.kt), [`BundledHybridModelProvider.kt`](../work/src/main/kotlin/io/github/alien2003/pulsestages/work/estimate/BundledHybridModelProvider.kt) |
 | Manifest | [`AndroidManifest.xml`](../app/src/main/AndroidManifest.xml), [`MergedManifestTest.kt`](../app/src/test/kotlin/io/github/alien2003/pulsestages/MergedManifestTest.kt) |
 | Module rule | [`build.gradle.kts`](../build.gradle.kts), [`core-algo/build.gradle.kts`](../core-algo/build.gradle.kts) |

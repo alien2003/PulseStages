@@ -162,9 +162,9 @@ differently.
 3. **Health Connect.** On Android 14 and later it is part of the system. On Android 9–13, open PulseStages and tap
    "Install or update Health Connect" on the Home tab; this path is supported but has not been tested on a device, and
    reports are welcome. Make sure your watch app (OHealth by default) writes sleep and heart rate to Health Connect.
-4. **Permissions.** On the Home tab tap "Grant permissions" and allow sleep (read and write), heart rate and steps;
-   then "Allow history" (older nights) and "Allow background" (automatic runs). On Android 13 and later, "Allow
-   notifications" shows the progress of long runs.
+4. **Permissions.** On the Home tab tap "Grant permissions" and allow sleep (read and write), heart rate and steps; then
+   "Allow history" (older nights) and "Allow background" (automatic runs). On Android 13 and later, "Allow
+   notifications" shows the progress of long runs and the notification of a night to check in Sleep as Android.
 5. **First estimate.** Tap "Estimate new" on the Home tab, then open the Nights tab. The first run reads the sleep
    sessions of the last 7 days. New nights are processed automatically from then on (every hour by default, and once a
    day).
@@ -205,10 +205,12 @@ already in Health Connect keep their stages until they are recomputed. The
   Sleep as Android, which imports only the first of overlapping sessions ([user
   guide](docs/user-guide.md#sleep-as-android)), and **Ask Sleep as Android to sync** (on by default; it does nothing
   without Sleep as Android): once the nights PulseStages wrote or updated are complete (the watch app must have uploaded
-  heart rate covering about the first hour after waking up; OHealth does that when it is opened and its Home tab is
-  pulled down), it asks Sleep as Android to sync, and once more 10 minutes later after a new or recomputed night so that
-  the night also gets its heart rate. It waits because Sleep as Android keeps the first version of a night it imports,
-  and the watch app may publish a night cut short before the whole night ([user
+  heart rate covering about the first hour after waking up and, if it writes steps, a minute of walking after that;
+  OHealth does that when it is opened, once you are up and have walked after that first hour, and its Home tab is pulled
+  down), it asks Sleep as Android to sync, and once more 10 minutes later after a new or recomputed night so that the
+  night also gets its heart rate. It waits because Sleep as Android keeps the first version of a night it imports, and
+  the watch app may publish a night cut short before the whole night. When PulseStages later changes the start or end of
+  a night it asked about, the notification "Check a night in Sleep as Android" says how to repair it there ([user
   guide](docs/user-guide.md#ask-sleep-as-android-to-sync)).
 - **Idempotent writes**: one output per night, keyed by the source sessions and rewritten under the same key on
   recompute, verified by reading it back; fragments of a night are merged, and deleted sources remove the output.
@@ -286,7 +288,9 @@ already in Health Connect keep their stages until they are recomputed. The
   development phone a night published cut at 07:29 and extended twice got no request until OHealth's heart rate reached
   about an hour past its end, which OHealth uploaded only when the user opened it almost six hours after the wake, and
   Sleep as Android then showed it with its final end; a "Sync now" in Sleep as Android in the morning can still import a
-  night cut short.
+  night cut short. Two later additions are so far covered only by the tests: the request also waits for a minute of
+  walking after that hour (OHealth's code can upload heart rate alone while the user still sleeps), and a night that
+  PulseStages changes after a request gets the notification "Check a night in Sleep as Android".
 - **Not verified yet.** Whether OHealth writes SpO2 or respiratory rate at night (the app works either way); the
   behaviour of readers that filter by recording method or device type.
 - **Known limitations** of the algorithm are listed in [ALGORITHM.md §16](ALGORITHM.md#16-limitations).
