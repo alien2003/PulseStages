@@ -660,6 +660,23 @@ def test_u1_line_order(tmp_path):
     assert mg.u1_record(log)["passed"]
 
 
+def test_u1_amendment_before_the_first_result_sets_the_limit(tmp_path):
+    log = tmp_path / "commands.log"
+    pre = f"2026-10-22T03:00:00+02:00 {mg.PREREG_NOTE}"
+    u1 = "2026-10-22T04:00:00+02:00 NOTE merge-gap U1 DMAX 60: an hour is fine"
+    start = "2026-10-22T05:00:00+02:00 START python -I tools/train/train.py mergegap --out-run mergegap"
+    amend = "2026-10-22T05:01:00+02:00 NOTE merge-gap AMENDMENT U1 DMAX 90: the developer chose 90"
+    gates = "2026-10-22T04:30:00+02:00 RESULT mergegap-gates G0 passed"
+    result = "2026-10-22T05:10:00+02:00 RESULT mergegap case 1: adopt B"
+    log.write_text("\n".join([pre, u1, gates, start, amend, result]) + "\n")
+    rec = mg.u1_record(log)
+    assert rec["passed"] and rec["dMax"] == 90 and rec["loggedDMax"] == 60 and rec["amendment"] == amend
+    # An amendment after the first result of the experiment does not count.
+    log.write_text("\n".join([pre, u1, start, result, amend]) + "\n")
+    rec = mg.u1_record(log)
+    assert rec["passed"] and rec["dMax"] == 60 and "amendment" not in rec
+
+
 # ------------------------------------------------------------------------------------------ decision rule ----
 
 def test_every_case_of_the_decision_table():

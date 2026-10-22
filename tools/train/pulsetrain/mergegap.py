@@ -58,6 +58,10 @@ PREREG_SHA256 = "1692a87ef59d92d6b2063488675f97e536848a608bb6b615e3b428c53bb2909
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PREREG_NOTE = f"NOTE {PREREG_NAME} sha256 {PREREG_SHA256}"
 U1_RE = re.compile(r" NOTE merge-gap U1 DMAX (\d+): ")
+# The developer's amendment of the limit: it applies when it is logged after the U1 NOTE and before the first RESULT
+# of ``train.py mergegap`` (before any result of the experiment existed); the last such line counts.
+AMENDMENT_RE = re.compile(r"^\S+ NOTE merge-gap AMENDMENT U1 DMAX (\d+): ")
+EXPERIMENT_RESULT_RE = re.compile(r"^\S+ RESULT mergegap(?=\s|:)")
 # Only a START line counts (its type follows the time stamp): a NOTE that mentions a start is not one.
 EXPERIMENT_START_RE = re.compile(r"^\S+ START .*\btrain\.py mergegap(?=\s|$)")
 ANY_START_RE = re.compile(r" START .*\btrain\.py mergegap(?:-base|-gates|-report)?(?=\s|$)")
@@ -1645,10 +1649,17 @@ def u1_record(log_path: Path | None) -> dict:
     starts = [i for i, x in stamped if EXPERIMENT_START_RE.search(x)]
     first = starts[0] if starts else None
     ok = (pre is not None and len(u1) == 1 and u1[0][0] > pre and (first is None or u1[0][0] < first))
-    return {"lines": len(u1), "dMax": int(u1[0][1].group(1)) if len(u1) == 1 else None,
-            "line": lines[u1[0][0]] if len(u1) == 1 else None, "afterPrereg": bool(u1 and pre is not None
-                                                                                    and u1[0][0] > pre),
-            "beforeFirstStart": bool(u1 and (first is None or u1[0][0] < first)), "passed": bool(ok)}
+    d_max = int(u1[0][1].group(1)) if len(u1) == 1 else None
+    rec = {"lines": len(u1), "dMax": d_max, "line": lines[u1[0][0]] if len(u1) == 1 else None,
+           "afterPrereg": bool(u1 and pre is not None and u1[0][0] > pre),
+           "beforeFirstStart": bool(u1 and (first is None or u1[0][0] < first)), "passed": bool(ok)}
+    if len(u1) == 1:
+        result = next((i for i, x in stamped if EXPERIMENT_RESULT_RE.search(x)), None)
+        amended = [(i, m) for i, x in stamped if (m := AMENDMENT_RE.search(x)) and i > u1[0][0]
+                   and (result is None or i < result)]
+        if amended:
+            rec.update({"dMax": int(amended[-1][1].group(1)), "loggedDMax": d_max, "amendment": lines[amended[-1][0]]})
+    return rec
 
 
 def decision_case(g: bool, sc: bool, sb: bool, r_b: bool, r_c: bool, u_b: bool, u_c: bool) -> int:
