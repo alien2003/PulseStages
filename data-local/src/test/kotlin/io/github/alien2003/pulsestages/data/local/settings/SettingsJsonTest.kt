@@ -280,6 +280,20 @@ class SettingsJsonTest {
     }
 
     @Test
+    fun `an export with the removed continuationGapMin imports with the key ignored, whatever its value`() {
+        // "Merge gap after a long session" (sources.continuationGapMin) was on main from c076017 until it was removed
+        // after the merge-gap experiment, never in a release; the exports of those builds list it and keep importing.
+        val current = SettingsJson.encode(customized)
+        assertTrue("continuationGapMin" !in current)
+        for (value in listOf(0, 60, 999)) {
+            val old = current.replace("\"mergeGapMin\": 45,", "\"mergeGapMin\": 45, \"continuationGapMin\": $value,")
+            assertTrue("\"continuationGapMin\": $value" in old)
+
+            assertEquals(SettingsImportResult.Success(customized), SettingsJson.decode(old), "continuationGapMin $value")
+        }
+    }
+
+    @Test
     fun `import repairs sourcePriority by appending enabled and manual packages`() {
         val json =
             """

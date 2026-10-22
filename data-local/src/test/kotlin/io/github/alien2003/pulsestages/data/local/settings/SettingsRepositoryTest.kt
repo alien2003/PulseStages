@@ -114,6 +114,26 @@ class SettingsRepositoryTest {
         }
 
     @Test
+    fun `a file with the removed continuationGapMin loads without it and the next update leaves it out`() =
+        runTest {
+            // Stored by a build of main that had "Merge gap after a long session" (from c076017, never released).
+            file.writeText("""{"sources":{"mergeGapMin":45,"continuationGapMin":60}}""")
+
+            withRepository { repository ->
+                assertEquals(AppSettings(sources = SourceSettings(mergeGapMin = 45)), repository.settings.first())
+
+                val result = repository.update { it.copy(sources = it.sources.copy(minSessionMin = 60)) }
+                assertInstanceOf(SettingsUpdateResult.Applied::class.java, result)
+            }
+
+            assertEquals(
+                Json.parseToJsonElement("""{"sources":{"minSessionMin":60,"mergeGapMin":45}}"""),
+                Json.parseToJsonElement(file.readText()),
+            )
+            assertTrue(corruptions.isEmpty())
+        }
+
+    @Test
     fun `the file stores only changed values, so defaults that a new app version changes reach the user`() =
         runTest {
             withRepository { repository ->

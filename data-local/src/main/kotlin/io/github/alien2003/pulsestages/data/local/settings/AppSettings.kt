@@ -62,13 +62,6 @@ data class SourceSettings(
     val minSessionMin: Int = 90,
     /** Fragments of one night from one source with a smaller gap are merged. */
     val mergeGapMin: Int = 30,
-    /**
-     * A larger merge gap after a group of fragments that already covers at least `napMode.maxSessionMin` (180 min by
-     * default) of session time (the union of its sessions, gaps excluded): the next fragment of the same source joins the
-     * group when its gap is shorter than this. 0 = off (only [mergeGapMin] applies); it acts only when it is larger than
-     * [mergeGapMin]. Arm C of docs/prereg/prereg-merge-gap.md; off by default.
-     */
-    val continuationGapMin: Int = 0,
     /** History depth for backfill; 0 = all available history. */
     val backfillDays: Int = 0,
 )

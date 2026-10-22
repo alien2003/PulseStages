@@ -59,7 +59,7 @@ tasks.withType<Test>().configureEach {
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
     // Gate G4 of docs/prereg/prereg-merge-gap.md: the grouping fixture that tools/train generates and checks as well
-    // (MergeGapGroupingFixtureTest, SourceSettlementMergeGapTest).
+    // (MergeGapGroupingFixtureTest, arms A, B, R45 and R90; arm C and SourceSettlementMergeGapTest only up to a55aa55).
     val mergeGapFixture = layout.projectDirectory.file("../tools/train/tests/data/mergegap-grouping.json")
     inputs.file(mergeGapFixture).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("mergegapGroupingFixture")
     systemProperty("pulsestages.mergegapGroupingFixture", mergeGapFixture.asFile.absolutePath)

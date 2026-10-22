@@ -54,7 +54,8 @@ tasks.withType<Test>().configureEach {
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
     // Gate V3 of docs/prereg/prereg-merge-gap.md: MergeGapGateReplayTest writes its replay report here
-    // (-Ppulsestages.mergegapReport=<path>) and replays the arms of -Ppulsestages.mergegapArms (default: all five).
+    // (-Ppulsestages.mergegapReport=<path>) and replays the arms of -Ppulsestages.mergegapArms (default: A, B, R45 and
+    // R90; arm C, the removed setting sources.continuationGapMin, runs only at the experiment's commit a55aa55).
     systemProperty(
         "pulsestages.mergegap.v3Report",
         providers

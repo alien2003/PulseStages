@@ -179,17 +179,6 @@ private val sourcesSection =
                 ),
                 SettingsItem.Field(
                     IntSpec(
-                        path = "sources.continuationGapMin",
-                        title = text(R.string.set_src_continuation_gap_title),
-                        hint = text(R.string.set_src_continuation_gap_hint),
-                        range = SettingsLimits.continuationGapMin,
-                        unit = UNIT_MIN,
-                        read = { it.sources.continuationGapMin },
-                        write = { s, v -> s.copy(sources = s.sources.copy(continuationGapMin = v)) },
-                    ),
-                ),
-                SettingsItem.Field(
-                    IntSpec(
                         path = "sources.backfillDays",
                         title = text(R.string.set_src_backfill_days_title),
                         hint = text(R.string.set_src_backfill_days_hint),

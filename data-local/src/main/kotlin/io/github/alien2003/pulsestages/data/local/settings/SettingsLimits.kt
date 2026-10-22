@@ -14,9 +14,6 @@ object SettingsLimits {
     /** `sources.mergeGapMin`, minutes. */
     val mergeGapMin: IntRange = 0..240
 
-    /** `sources.continuationGapMin`, minutes (0 = off). */
-    val continuationGapMin: IntRange = 0..240
-
     /** `sources.backfillDays` (0 = all available history). */
     val backfillDays: IntRange = 0..36_500
 

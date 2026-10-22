@@ -13,20 +13,24 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
-/** System property: the arms to replay, comma-separated (default: all five). */
+/** System property: the arms to replay, comma-separated (default: all of [ARMS]). */
 private const val ARMS_PROPERTY = "pulsestages.mergegap.arms"
 
 /** System property: where the replay report (JSON) is written. */
 private const val REPORT_PROPERTY = "pulsestages.mergegap.v3Report"
 
-/** One arm of docs/prereg/prereg-merge-gap.md section 3.1: `sources.mergeGapMin` and `sources.continuationGapMin`. */
+/** One arm of docs/prereg/prereg-merge-gap.md section 3.1: `sources.mergeGapMin`. */
 private data class Arm(
     val name: String,
     val mergeGapMin: Int,
-    val continuationGapMin: Int = 0,
 )
 
-private val ARMS: List<Arm> = listOf(Arm("A", 30), Arm("B", 60), Arm("C", 30, 60), Arm("R45", 45), Arm("R90", 90))
+/**
+ * The arms that the app can still be set to. Arm C (30 min, and 60 min after a group that covers at least the nap
+ * threshold) was the setting `sources.continuationGapMin`, removed after the experiment kept arm A; its replays run
+ * only at the experiment's commit a55aa55.
+ */
+private val ARMS: List<Arm> = listOf(Arm("A", 30), Arm("B", 60), Arm("R45", 45), Arm("R90", 90))
 
 /**
  * The timelines of section 9.1: the clock at the start ([startMs]), PulseStages' runs (every [intervalMs] from
@@ -117,11 +121,12 @@ private class ExtraHeartRate(
 
 /**
  * Gate V3 of docs/prereg/prereg-merge-gap.md (section 9): the Sleep as Android gate replayed end to end in the harness of
- * [SleepAsAndroidGateScenarioTest] under each arm (A, B, C, R45, R90), with the upload extensions E(P), P = 15, 60, 180
- * min. The replays are recorded, not asserted (the pass rules are applied by tools/train, `pulsetrain.mergegap`), to
- * the JSON file of the system property `pulsestages.mergegap.v3Report`. Gate G2b asserts that arm A without the
- * extension reproduces what the scenario tests assert. Tagged `mergegap-replay`: excluded from the default test tasks,
- * run with `-Ppulsestages.mergegapReplay=true` (and `-Ppulsestages.mergegapArms=A` for arm A only).
+ * [SleepAsAndroidGateScenarioTest] under each arm of [ARMS] (A, B, R45, R90; arm C only at a55aa55), with the upload
+ * extensions E(P), P = 15, 60, 180 min. The replays are recorded, not asserted (the pass rules are applied by
+ * tools/train, `pulsetrain.mergegap`), to the JSON file of the system property `pulsestages.mergegap.v3Report`; a
+ * requested arm that is not in [ARMS] fails the test. Gate G2b asserts that arm A without the extension reproduces what
+ * the scenario tests assert. Tagged `mergegap-replay`: excluded from the default test tasks, run with
+ * `-Ppulsestages.mergegapReplay=true` (and `-Ppulsestages.mergegapArms=A` for arm A only).
  */
 @Tag("mergegap-replay")
 class MergeGapGateReplayTest {
@@ -137,7 +142,7 @@ class MergeGapGateReplayTest {
     ) = harnessTest(File(dir, "r${runs++}"), now = start) { h ->
         h.settings.set {
             it.copy(
-                sources = it.sources.copy(mergeGapMin = arm.mergeGapMin, continuationGapMin = arm.continuationGapMin),
+                sources = it.sources.copy(mergeGapMin = arm.mergeGapMin),
                 write = it.write.copy(startBeforeSource = true),
             )
         }
@@ -192,6 +197,8 @@ class MergeGapGateReplayTest {
                 ?.split(",")
                 ?.map { it.trim() }
                 ?.filter { it.isNotEmpty() }
+        val unknown = names.orEmpty() - ARMS.map { it.name }.toSet()
+        assertTrue(unknown.isEmpty(), "arms not in this build: $unknown (arm C runs only at a55aa55)")
         val arms = if (names == null) ARMS else ARMS.filter { it.name in names }
         val records =
             arms.flatMap { arm ->
@@ -201,11 +208,10 @@ class MergeGapGateReplayTest {
         target.parentFile?.mkdirs()
         val report =
             mapOf(
-                "version" to 1,
+                // Version 2: the arms have no continuationGapMin any more (version 1, up to a55aa55, had it).
+                "version" to 2,
                 "arms" to
-                    arms.map {
-                        mapOf("name" to it.name, "mergeGapMin" to it.mergeGapMin, "continuationGapMin" to it.continuationGapMin)
-                    },
+                    arms.map { mapOf("name" to it.name, "mergeGapMin" to it.mergeGapMin) },
                 "uploadPatternsMin" to UPLOAD_PATTERNS,
                 "replays" to records,
             )

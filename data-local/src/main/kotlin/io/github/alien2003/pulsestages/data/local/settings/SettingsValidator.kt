@@ -124,7 +124,6 @@ private const val SECONDS_PER_MINUTE = 60.0
 private fun Checker.checkSources(s: SourceSettings) {
     int("sources.minSessionMin", s.minSessionMin, SettingsLimits.minSessionMin)
     int("sources.mergeGapMin", s.mergeGapMin, SettingsLimits.mergeGapMin)
-    int("sources.continuationGapMin", s.continuationGapMin, SettingsLimits.continuationGapMin)
     int("sources.backfillDays", s.backfillDays, SettingsLimits.backfillDays)
     s.sourcePackages.forEachIndexed { i, name -> packageName("sources.sourcePackages[$i]", name) }
     s.sourcePriority.forEachIndexed { i, name -> packageName("sources.sourcePriority[$i]", name) }

@@ -1,7 +1,7 @@
 # Downloaded datasets and everything derived from them are never committed (see README.md / DATASETS.md).
 data
 # ...but the committed test fixtures are not data (tests/data/mergegap-grouping.json: the G4 fixture of
-# docs/prereg/prereg-merge-gap.md, read by test_mergegap.py and the data-hc unit tests)
+# docs/prereg/prereg-merge-gap.md, read by test_mergegap.py and the data-hc unit test MergeGapGroupingFixtureTest)
 !/tests/data/
 out
 .venv
