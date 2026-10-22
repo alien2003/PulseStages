@@ -49,6 +49,7 @@ Which sessions are estimated. Shown expanded.
 | Heart rate and steps from | `sources.hrSources` | `"SAME_AS_SLEEP"` (Same app) | `"SAME_AS_SLEEP"` (Same app), `"ANY"` (Any app) | The app that wrote the sleep session, or any app that writes heart rate and steps. | yes |
 | Minimum session length | `sources.minSessionMin` | `90` min | 10–720 (whole number) | Shorter sessions (after merging fragments) are ignored; longer ones below the nap threshold are processed as naps. | no |
 | Merge gap | `sources.mergeGapMin` | `30` min | 0–240 (whole number) | Fragments of one night from one app with a shorter gap become one night; the gap is written as awake. | no |
+| Merge gap after a long session | `sources.continuationGapMin` | `0` min | 0–240 (whole number) | Once the fragments of a night cover at least the nap threshold (3 hours by default), a later fragment from the same app joins the night when its gap is shorter than this. 0 = off: only the merge gap applies. Also delays the Sleep as Android request after such a night. | no |
 | History depth | `sources.backfillDays` | `0` days | 0–36500 (whole number) | How far back the history backfill goes; 0 = all available history. | no |
 
 The three source lists are edited on the **Sources** screen (**Sleep sources** above). On every save and import, duplicate package names are removed and every enabled or manually added package that is missing from `sources.sourcePriority` is appended to it.

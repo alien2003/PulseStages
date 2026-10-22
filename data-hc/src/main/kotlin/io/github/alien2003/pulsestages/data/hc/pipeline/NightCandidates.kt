@@ -4,6 +4,7 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import io.github.alien2003.pulsestages.algo.model.SessionMode
 import io.github.alien2003.pulsestages.algo.model.TimeSpan
 import io.github.alien2003.pulsestages.algo.params.AlgoParams
+import io.github.alien2003.pulsestages.algo.params.NapModeParams
 import io.github.alien2003.pulsestages.algo.params.NapOutputPolicy
 import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.di.OwnPackageName
@@ -191,8 +192,9 @@ object NightKeys {
  *    in [SourceSettings.sourcePackages] are ignored (allowlist);
  * 2. sessions whose stages contain any type other than UNKNOWN (0) / SLEEPING (2) are skipped (HAS_STAGES) unless
  *    the overwrite policy is RECOMPUTE_ALL;
- * 3. per package, sessions sorted by start are merged while the gap to the merged end is `< mergeGapMin` (overlaps
- *    included); gaps become forced-AWAKE spans; the zone offsets are the first fragment's start offset and the
+ * 3. per package, sessions sorted by (start, end, uuid) are merged while the gap to the merged end is below the threshold
+ *    of [MergeGaps] (`mergeGapMin`, or `continuationGapMin` after a group that covers at least the nap threshold;
+ *    overlaps included); gaps become forced-AWAKE spans; the zone offsets are the first fragment's start offset and the
  *    last-ending fragment's end offset (fallback: [zoneOffsets]);
  * 4. merged nights shorter than `minSessionMin` are ignored (outcome NAP, a persisted name from before the nap mode;
  *    sessions from `minSessionMin` up to `napMode.maxSessionMin` are estimated as naps, see [NightCandidate.mode]);
@@ -224,12 +226,7 @@ class NightCandidateBuilder
             overwritePolicy: OverwritePolicy,
             algo: AlgoParams? = null,
         ): CandidateSet {
-            val distinct = sessions.filter { it.endMs > it.startMs }.distinctBy { it.uuid }
-            val own = distinct.filter { it.packageName == ownPackage }.sortedBy { it.startMs }
-            val enabled = sources.sourcePackages.toSet() - ownPackage
-            val allowed = distinct.filter { it.packageName in enabled }
-
-            val (staged, usable) = allowed.partition { overwritePolicy != OverwritePolicy.RECOMPUTE_ALL && it.hasRealStages() }
+            val (own, staged, usable) = partition(sessions, sources, overwritePolicy)
             val withStages =
                 staged.map {
                     SkippedNight(
@@ -240,11 +237,11 @@ class NightCandidateBuilder
                     )
                 }
 
-            val mergeGapMs = sources.mergeGapMin * MINUTE_MS
+            val gaps = MergeGaps.of(sources, algo)
             val merged =
                 usable
                     .groupBy { it.packageName }
-                    .flatMap { (packageName, list) -> merge(packageName, list.sortedWith(SESSION_ORDER), mergeGapMs) }
+                    .flatMap { (packageName, list) -> merge(packageName, list.sortedWith(SESSION_ORDER), gaps) }
 
             val minDurationMs = sources.minSessionMin * MINUTE_MS
             val (nights, naps) = merged.partition { it.durationMs >= minDurationMs }
@@ -262,7 +259,7 @@ class NightCandidateBuilder
             val stagedNights =
                 staged
                     .groupBy { it.packageName }
-                    .flatMap { (packageName, list) -> merge(packageName, list.sortedWith(SESSION_ORDER), mergeGapMs) }
+                    .flatMap { (packageName, list) -> merge(packageName, list.sortedWith(SESSION_ORDER), gaps) }
                     .filter { it.durationMs >= minDurationMs }
 
             val writesNothing = { night: NightCandidate -> algo != null && night.writesNothing(algo) }
@@ -272,6 +269,47 @@ class NightCandidateBuilder
                 skipped = (withStages + napNights + duplicates).sortedWith(compareBy({ it.startMs }, { it.packageName })),
                 own = own,
             )
+        }
+
+        /**
+         * Per session uuid of [sessions] that [build] would merge (the same allowlist, the same partition of sessions with
+         * their own stages and the same per-package chaining, with [sources], [overwritePolicy] and [algo]): the gap below
+         * which a later session of its package would join its group, in ms. That is [MergeGaps.thresholdAfter] the
+         * covered time of the whole group the session belongs to: `continuationGapMin` when it is larger than
+         * `mergeGapMin` and the group covers at least the nap threshold, otherwise `mergeGapMin`. Our own sessions, sessions
+         * of packages that are not enabled and zero-length sessions are left out. [SourceSettlement] adds its data margin
+         * to it.
+         */
+        internal fun continuationThresholds(
+            sessions: List<HcSleepSession>,
+            sources: SourceSettings,
+            overwritePolicy: OverwritePolicy,
+            algo: AlgoParams? = null,
+        ): Map<String, Long> {
+            val (_, staged, usable) = partition(sessions, sources, overwritePolicy)
+            val gaps = MergeGaps.of(sources, algo)
+            return listOf(staged, usable)
+                .flatMap { part -> part.groupBy { it.packageName }.values.flatMap { groups(it.sortedWith(SESSION_ORDER), gaps) } }
+                .flatMap { group -> group.sessions.map { it.uuid to gaps.thresholdAfter(group.coveredMs) } }
+                .toMap()
+        }
+
+        /**
+         * The sessions of [sessions] (zero-length ones and repeated uuids dropped) as (our own, sorted by start; those of
+         * enabled packages with their own stages, not estimated unless [overwritePolicy] is RECOMPUTE_ALL; the other
+         * sessions of enabled packages).
+         */
+        private fun partition(
+            sessions: List<HcSleepSession>,
+            sources: SourceSettings,
+            overwritePolicy: OverwritePolicy,
+        ): Triple<List<HcSleepSession>, List<HcSleepSession>, List<HcSleepSession>> {
+            val distinct = sessions.filter { it.endMs > it.startMs }.distinctBy { it.uuid }
+            val own = distinct.filter { it.packageName == ownPackage }.sortedBy { it.startMs }
+            val enabled = sources.sourcePackages.toSet() - ownPackage
+            val allowed = distinct.filter { it.packageName in enabled }
+            val (staged, usable) = allowed.partition { overwritePolicy != OverwritePolicy.RECOMPUTE_ALL && it.hasRealStages() }
+            return Triple(own, staged, usable)
         }
 
         /**
@@ -390,22 +428,45 @@ class NightCandidateBuilder
         private fun merge(
             packageName: String,
             sorted: List<HcSleepSession>,
-            mergeGapMs: Long,
-        ): List<NightCandidate> {
-            val groups = mutableListOf<MutableList<HcSleepSession>>()
+            gaps: MergeGaps,
+        ): List<NightCandidate> = groups(sorted, gaps).map { toCandidate(packageName, it.sessions) }
+
+        /**
+         * The groups of [sorted] (one package, sorted by [SESSION_ORDER]): a session joins the current group when its
+         * start minus the latest end of the group so far is below [MergeGaps.thresholdAfter] the group's covered time
+         * before it joins (an overlap always joins); otherwise it starts a new group.
+         */
+        private fun groups(
+            sorted: List<HcSleepSession>,
+            gaps: MergeGaps,
+        ): List<SessionGroup> {
+            val groups = mutableListOf<SessionGroup>()
             var groupEnd = Long.MIN_VALUE
             sorted.forEach { session ->
                 val current = groups.lastOrNull()
-                if (current != null && session.startMs - groupEnd < mergeGapMs) {
-                    current += session
+                if (current != null && session.startMs - groupEnd < gaps.thresholdAfter(current.coveredMs)) {
+                    current.sessions += session
+                    // Sorted by start: the session adds what lies after the latest end so far (the union of the spans).
+                    current.coveredMs += (session.endMs - maxOf(session.startMs, groupEnd)).coerceAtLeast(0L)
                     groupEnd = maxOf(groupEnd, session.endMs)
                 } else {
-                    groups += mutableListOf(session)
+                    groups += SessionGroup(mutableListOf(session), session.endMs - session.startMs)
                     groupEnd = session.endMs
                 }
             }
-            return groups.map { toCandidate(packageName, it) }
+            return groups
         }
+
+        /**
+         * One group of sessions of a package being merged.
+         *
+         * @property sessions its sessions, in [SESSION_ORDER].
+         * @property coveredMs the measure of the union of their spans `[start, end)`: the group's span minus its gaps.
+         */
+        private class SessionGroup(
+            val sessions: MutableList<HcSleepSession>,
+            var coveredMs: Long,
+        )
 
         private fun toCandidate(
             packageName: String,
@@ -468,6 +529,44 @@ class NightCandidateBuilder
             fun HcSleepSession.hasRealStages(): Boolean = stages.any { it.type !in NON_STAGE_TYPES }
         }
     }
+
+/**
+ * The merge thresholds of [NightCandidateBuilder] with given settings (all in whole ms): a session joins a group of its
+ * package when its gap to the latest end of the group so far is below [thresholdAfter] the group's covered time (the
+ * union of its session spans, the forced-AWAKE gaps excluded). [continuationGapMs] (`sources.continuationGapMin`) applies
+ * when it is larger than [mergeGapMs] (`sources.mergeGapMin`) and the group covers at least [coveredThresholdMs], else
+ * [mergeGapMs]; with `continuationGapMin` 0 (the default) the threshold is always [mergeGapMs], as before.
+ *
+ * @property mergeGapMs `sources.mergeGapMin` in ms.
+ * @property continuationGapMs `sources.continuationGapMin` in ms (0 = off).
+ * @property coveredThresholdMs H: `napMode.maxSessionMs` of the [AlgoParams] in effect when it is positive; otherwise
+ *   (naps disabled, or no parameters given) [NapModeParams]'s default (180 min), so the rule keeps its meaning.
+ */
+internal data class MergeGaps(
+    val mergeGapMs: Long,
+    val continuationGapMs: Long,
+    val coveredThresholdMs: Long,
+) {
+    /** The gap below which the next session joins a group that covers [coveredMs] before it joins. */
+    fun thresholdAfter(coveredMs: Long): Long =
+        if (continuationGapMs > mergeGapMs && coveredMs >= coveredThresholdMs) continuationGapMs else mergeGapMs
+
+    /** Constructors. */
+    companion object {
+        private const val MINUTE_MS = 60_000L
+
+        /** The thresholds of [sources] with the nap threshold of [algo] (see [coveredThresholdMs]). */
+        fun of(
+            sources: SourceSettings,
+            algo: AlgoParams?,
+        ): MergeGaps =
+            MergeGaps(
+                mergeGapMs = sources.mergeGapMin * MINUTE_MS,
+                continuationGapMs = sources.continuationGapMin * MINUTE_MS,
+                coveredThresholdMs = algo?.napMode?.maxSessionMs?.takeIf { it > 0 } ?: NapModeParams().maxSessionMs,
+            )
+    }
+}
 
 /**
  * The uncovered time between [spans] sorted by start: every gap between the latest end so far and the next start

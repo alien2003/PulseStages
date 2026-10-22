@@ -7,6 +7,8 @@
     <string name="set_src_min_session_hint">Shorter sessions (after merging fragments) are ignored; longer ones below the nap threshold are processed as naps.</string>
     <string name="set_src_merge_gap_title">Merge gap</string>
     <string name="set_src_merge_gap_hint">Fragments of one night from one app with a shorter gap become one night; the gap is written as awake.</string>
+    <string name="set_src_continuation_gap_title">Merge gap after a long session</string>
+    <string name="set_src_continuation_gap_hint">Once the fragments of a night cover at least the nap threshold (3 hours by default), a later fragment from the same app joins the night when its gap is shorter than this. 0 = off: only the merge gap applies. Also delays the Sleep as Android request after such a night.</string>
     <string name="set_src_backfill_days_title">History depth</string>
     <string name="set_src_backfill_days_hint">How far back the history backfill goes; 0 = all available history.</string>
     <string name="set_sch_daily_time_title">Daily run</string>

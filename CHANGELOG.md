@@ -32,6 +32,19 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   instead. Tested in the build's tests, not yet on the development phone ([user
   guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
   §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+- **The setting "Merge gap after a long session"** (`sources.continuationGapMin`, Settings → Sources, en and ru; 0–240
+  min). It is off by default (0), and then nothing changes. Set above "Merge gap", it lets a later session from the same
+  app join a night whose sessions already cover at least the nap threshold (`napMode.maxSessionMin`, 3 hours by default
+  and when naps are off; the time the sessions cover, gaps excluded) when the gap before it is shorter than this setting
+  instead of the merge gap; the gap is written as awake, as with the merge gap. A group that does not cover the nap
+  threshold yet (an early doze, the first part of a night cut short) still joins only within the merge gap. It is for a
+  watch app that splits one night at an awakening of 30–59 minutes (dozing off again after the alarm, for example), and
+  it is arm C of the pre-registered merge-gap experiment, which decides whether it or a longer merge gap becomes the
+  default ([docs/prereg/prereg-merge-gap.md](docs/prereg/prereg-merge-gap.md)). While it is on, the request to Sleep as
+  Android after such a night waits for the watch app's heart rate up to this gap plus 30 minutes past the night's end
+  (the merge gap plus 30 minutes otherwise), so the night reaches Sleep as Android later. Tested in the build's tests,
+  with grouping cases shared with the experiment's analysis code, not on a phone ([settings
+  reference](docs/settings-reference.md)).
 
 ### Changed
 

@@ -13,7 +13,8 @@ Like core-algo: ``napMode.contextMarginMin`` = m restricts a nap's input to hear
 step records ending in (start - m, end + m] (a value above ``preprocess.contextMarginMin`` is refused, exit 65); the
 nap section's ``stageLogBiasByLength`` gives a nap its row interpolated in the session length; a nap with
 ``napMode.outputPolicy`` SKIP is not estimated (``NAP_SKIPPED``); a night id that occurs twice is refused (exit 65);
-``--per-epoch`` writes the columns of the real CSV with toy posteriors.
+``--per-epoch`` writes the columns of the real CSV with toy posteriors; an epoch whose midpoint lies in a
+``forcedAwake`` span is AWAKE; every ``perNight`` and ``skipped`` entry carries the session's ``mode`` (NIGHT / NAP).
 
 Environment: FAKE_ALGO_CLI_NO_GRID=1 rejects --param-grid with exit code 64 (tests the fallback);
 FAKE_ALGO_CLI_LOG=<file> appends one JSON line per call (argv); FAKE_ALGO_CLI_DEFAULTS=<json> is a parameter patch
@@ -338,6 +339,15 @@ def predict(n, rows, estimator, params, bundle):
                 if pred[k - 1] == pred[k + 1] != pred[k]:
                     sm[k] = pred[k - 1]
             pred = sm
+    forced = n.get("forcedAwake") or []
+    if forced:                                   # like core-algo: an epoch whose midpoint lies in a span is AWAKE
+        s0 = n["sessionStartMs"]
+        for k in range(len(pred)):
+            mid = s0 + k * EPOCH_MS + EPOCH_MS // 2
+            if any(a <= mid < b for a, b in forced):
+                pred[k] = "AWAKE"
+                if post is not None:
+                    post[k] = [1.0, 0.0, 0.0, 0.0]
     if post is None:
         post = [[1.0 if s == st else 0.0 for s in STAGES] for st in pred]
     return pred, None, used, warnings, post
@@ -368,19 +378,22 @@ def evaluate_once(nights, estimator, params, model_path, fold_dir, per_epoch_row
         rows = night_epochs(prepared(n, params))
         bundle = None
         if not n.get("labels"):
-            skipped.append({"id": n["id"], "subject": n["subject"], "reason": "NO_LABELS"})
+            skipped.append({"id": n["id"], "subject": n["subject"], "reason": "NO_LABELS",
+                            "mode": "NAP" if is_nap(n, params) else "NIGHT"})
             continue
         if fold_dir is not None:
             mp = Path(fold_dir) / f"{n['subject']}.json"
             if not mp.is_file():
-                skipped.append({"id": n["id"], "subject": n["subject"], "reason": "NO_FOLD_MODEL"})
+                skipped.append({"id": n["id"], "subject": n["subject"], "reason": "NO_FOLD_MODEL",
+                                "mode": "NAP" if is_nap(n, params) else "NIGHT"})
                 continue
             bundle = json.loads(mp.read_text())
         elif model_path:
             bundle = json.loads(Path(model_path).read_text())
         pred, reason, used, warns, post = predict(n, rows, estimator, params, bundle)
         if pred is None:
-            skipped.append({"id": n["id"], "subject": n["subject"], "reason": reason})
+            skipped.append({"id": n["id"], "subject": n["subject"], "reason": reason,
+                            "mode": "NAP" if is_nap(n, params) else "NIGHT"})
             continue
         c = [[0] * 4 for _ in range(4)]
         s0 = n["sessionStartMs"]

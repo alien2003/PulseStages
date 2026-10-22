@@ -1,5 +1,6 @@
 package io.github.alien2003.pulsestages.data.hc.pipeline
 
+import io.github.alien2003.pulsestages.data.hc.HcSleepSession
 import io.github.alien2003.pulsestages.data.hc.HealthRepository
 import io.github.alien2003.pulsestages.data.hc.di.OwnPackageName
 import io.github.alien2003.pulsestages.data.local.settings.AppSettings
@@ -31,6 +32,15 @@ class NightWindowReader
             val sessions = repository.readSleepSessions(fromMs, toMs, packages)
             return builder.build(sessions, settings.sources, settings.write.overwritePolicy, settings.algo)
         }
+
+        /**
+         * Per session uuid of [sessions] that the nights of [settings] would include, the gap (ms) below which a later
+         * session of its package would join its group ([NightCandidateBuilder.continuationThresholds]).
+         */
+        internal fun continuationThresholds(
+            sessions: List<HcSleepSession>,
+            settings: AppSettings,
+        ): Map<String, Long> = builder.continuationThresholds(sessions, settings.sources, settings.write.overwritePolicy, settings.algo)
 
         /** The nights owned by the window `[fromMs, toMs)` (first fragment starts inside it; see [CandidateSet.ownedBy]). */
         suspend fun nightsInWindow(

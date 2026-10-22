@@ -27,6 +27,10 @@
     mise exec -- python -I tools/train/train.py naps-realistic-external --exp naps-realistic --final ... --data ...
     mise exec -- python -I tools/train/train.py naps-realistic-install --exp ... --final ... --external ...
     mise exec -- python -I tools/train/train.py naps-realistic-verify --exp ... --final ... --out-run ...
+    mise exec -- python -I tools/train/train.py mergegap-base --out-run mergegap-base   # merge gap, phase A (prereg)
+    mise exec -- python -I tools/train/train.py mergegap-gates --out-run mergegap-gates # G0, G1, G2, G4
+    mise exec -- python -I tools/train/train.py mergegap --out-run mergegap             # the experiment
+    mise exec -- python -I tools/train/train.py mergegap-report --out-run mergegap      # re-render its report
 
 Features and decoding are computed by the Kotlin ``algo-cli`` (``mise exec -- ./gradlew :algo-cli:installDist``;
 override the launcher with ``--algo-cli`` or $ALGO_CLI). Reads untrusted data: run with ``python -I``.
@@ -44,8 +48,8 @@ from pathlib import Path
 TRAIN_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TRAIN_DIR))  # our own package only; `python -I` does not add the script directory
 
-from pulsetrain import (bias, kotlin_defaults, loso, napmodel, naps, naps_posthoc, napsrealistic,  # noqa: E402
-                        pipeline, robustness)
+from pulsetrain import (bias, kotlin_defaults, loso, mergegap, napmodel, naps, naps_posthoc,  # noqa: E402
+                        napsrealistic, pipeline, robustness)
 from pulsetrain.algocli import AlgoCliError  # noqa: E402
 from pulsetrain.bundle import BundleError  # noqa: E402
 from pulsetrain.features import FeatureFileError  # noqa: E402
@@ -57,7 +61,7 @@ from pulsetrain.util import read_json  # noqa: E402
 OUT_ROOT = TRAIN_DIR / "out"
 EXPECTED_ERRORS = (AlgoCliError, BundleError, FeatureFileError, MetricsFormatError, FileNotFoundError,
                    kotlin_defaults.DefaultsError, robustness.RobustnessError, bias.BiasError, naps.NapError,
-                   napmodel.NapModelError, napsrealistic.NapsRealisticError)
+                   napmodel.NapModelError, napsrealistic.NapsRealisticError, mergegap.MergeGapError)
 NIGHTS_ROOT = TRAIN_DIR / "data" / "nights"
 
 
@@ -219,6 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     _nap_model_parsers(sub)
     _naps_realistic_parsers(sub)
+    _mergegap_parsers(sub)
     return p
 
 
@@ -291,6 +296,39 @@ def _naps_realistic_parsers(sub) -> None:
             q.add_argument("--installed", type=Path, default=APP_MODEL_PATH, help="the installed bundle")
 
 
+MERGEGAP = ("mergegap-base", "mergegap-gates", "mergegap", "mergegap-report")
+
+
+def _mergegap_parsers(sub) -> None:
+    """The subcommands of the pre-registered merge-gap experiment (docs/prereg/prereg-merge-gap.md section 19); each
+    logs its START / END / RESULT / NOTE lines in the commands log (default <out-root>/commands.log)."""
+    jobs = max(1, min(mergegap.MAX_CALLS, (os.cpu_count() or 2) - 2))
+    helps = {
+        "mergegap-base": "phase A: the base references of gate G2a (whole nights, shipped bundle, default parameters) "
+                         "and the base build fingerprint NOTE; no construct",
+        "mergegap-gates": "gates G0, G1, G2 (the replays under arm A only) and G4, before the code commit",
+        "mergegap": "the experiment: G0-G8, the Sleep as Android replays (V3), the constructs and their decodes (V1, "
+                    "V2, positive control), V4 and the rule of section 11",
+        "mergegap-report": "re-render <out-run>/report.md from summary.json and cells.json (no algo-cli)"}
+    for name in MERGEGAP:
+        q = sub.add_parser(name, help=helps[name])
+        q.add_argument("--out-root", type=Path, default=OUT_ROOT)
+        q.add_argument("--log", type=Path, default=None, help="commands log (default <out-root>/commands.log)")
+        q.add_argument("--out-run", default=name)
+        if name == "mergegap-report":
+            continue
+        q.add_argument("--nights-root", type=Path, default=NIGHTS_ROOT)
+        q.add_argument("--algo-cli", default=None)
+        q.add_argument("--jobs", type=int, default=jobs, help=f"parallel algo-cli calls (at most {mergegap.MAX_CALLS})")
+        if name == "mergegap-base":
+            continue
+        q.add_argument("--run", default="bias-base", help="the night run with the fold bundles and groups (read only)")
+        q.add_argument("--naps", default="naps", help="the `naps` experiment (b_short_g(180); read only)")
+        q.add_argument("--posthoc", default="naps-posthoc", help="`naps-posthoc` (read only)")
+        q.add_argument("--nap-model", default="nap-model", help="the `nap-model` experiment (N1; read only)")
+        q.add_argument("--base", default="mergegap-base", help="the phase-A references (a run under --out-root)")
+
+
 def _nap_model_parsers(sub) -> None:
     jobs = max(1, (os.cpu_count() or 2) - 2)
     for name, default_out, what in (
@@ -360,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if a.cmd in NAPS_REALISTIC:
             return _naps_realistic(a, argv)
+        if a.cmd in MERGEGAP:
+            return _mergegap(a, argv)
         return _dispatch(a)
     except EXPECTED_ERRORS as e:
         print(f"error: {e}", file=sys.stderr)
@@ -456,6 +496,70 @@ def _naps_realistic_run(a: argparse.Namespace, rl, log_path: Path) -> int:
         rl.result(a.out_run, f"verification of {res['model']} passed: " + ", ".join(
             k for k in res if k.startswith("item") and isinstance(res[k], dict) and res[k].get("passed")))
         print(json.dumps(nr.naps._clean({k: v for k, v in res.items() if k not in ("algoCli", "code")}), indent=2))
+    return 0
+
+
+def _mergegap(a: argparse.Namespace, argv: list[str]) -> int:
+    """A ``mergegap*`` subcommand between its START and END lines in the commands log; refused unless the
+    pre-registration NOTE is in the log (and the committed text has the registered digest); ``mergegap`` also needs
+    exactly one U1 NOTE after it (section 9.2)."""
+    log_path = a.log or a.out_root / "commands.log"
+    pre = mergegap.prereg_record(log_path)
+    if not pre["passed"]:
+        raise mergegap.MergeGapError(f"refused: the pre-registration does not match or its NOTE is not in "
+                                     f"{log_path}: {pre}")
+    if a.cmd == "mergegap":
+        mergegap.experiment_preflight(log_path)
+    rl = napsrealistic.RunLog(log_path, argv)
+    rl.start()
+    rc = 1
+    try:
+        rc = _mergegap_run(a, rl, log_path)
+        return rc
+    except mergegap.GateFailure as e:
+        failed = [k for k, g in e.gates.items() if isinstance(g, dict) and g.get("passed") is False]
+        if a.cmd == "mergegap":
+            mergegap.stopped_summary(a.out_root / a.out_run, e.gates, e)
+        rl.result(a.out_run, f"stopped by gate {', '.join(failed) or '?'}: {e}; gates.json written")
+        rc = 2
+        raise
+    except EXPECTED_ERRORS:
+        rc = 2
+        raise
+    finally:
+        rl.end(rc)
+
+
+def _mergegap_run(a: argparse.Namespace, rl, log_path: Path) -> int:
+    from pulsetrain.algocli import AlgoCli
+
+    out = a.out_root / a.out_run
+    if a.cmd == "mergegap-report":
+        res = mergegap.rerender(out)
+        rl.note(f"mergegap-report re-rendered {a.out_run}/report.md: {mergegap.result_line(res)}")
+        print(json.dumps(res["decision"], indent=2))
+        print(out / "report.md")
+        return 0
+    pipeline.setup_logging(out)
+    cli = AlgoCli.locate(a.algo_cli, commands_log=out / "algocli.log")
+    if a.cmd == "mergegap-base":
+        rec = mergegap.run_base(cli, a.nights_root, out)
+        rl.note(mergegap.base_note(rec))
+        print(json.dumps(rec["reference"], indent=2))
+        return 0
+    inp = napsrealistic.Inputs(a.out_root / a.run, a.out_root / a.naps, a.out_root / a.nap_model, a.nights_root,
+                               posthoc_dir=a.out_root / a.posthoc if a.posthoc else None)
+    base = a.out_root / a.base
+    if a.cmd == "mergegap-gates":
+        g = mergegap.run_gates(inp, cli, out, base, jobs=a.jobs, log_path=log_path)
+        rl.result(a.out_run, "G0, G1, G2 (G2b under arm A), G4 passed; gates.json in "
+                             f"out/{a.out_run}")
+        print(json.dumps({k: v.get("passed") for k, v in g.items()}, indent=2))
+    elif a.cmd == "mergegap":
+        res = mergegap.run_experiment(inp, cli, out, base, jobs=a.jobs, log_path=log_path)
+        rl.result(a.out_run, mergegap.result_line(res))
+        print(json.dumps(res["decision"], indent=2))
+        print(out / "report.md")
     return 0
 
 

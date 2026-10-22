@@ -162,14 +162,17 @@ fun Settlement.keyOf(): String = versions.map { it.key }.sorted().joinToString("
  *    ([UnsettledReason.AWAITING_ESTIMATE]). A session that no automatic run would update counts as processed: one that
  *    the NEVER policy kept from being written or whose written night NEVER keeps, and one whose night the user deleted.
  * 3. Per recent session, the heart rate of its own package, whatever `hrSources` says (another app's heart rate tells
- *    nothing about the source's next upload): a sample at or after the session's end + `mergeGapMin` +
- *    [DATA_MARGIN_EXTRA_MS], and at least [CLOCK_TOLERANCE_MS] after the session was last changed (samples stamped after
- *    the change can only come from a later upload). When the package wrote no heart rate in the session: the session
- *    unchanged for [QUIET_MS] and that margin past its end ([UnsettledReason.WAITING_FOR_DATA]). When it did and it
- *    writes fine-grained steps (its newest step record that starts in the last [STEPS_LOOKBACK_MS] is at most that
- *    margin long; OHealth writes one record per minute with steps), also a step record of the package that starts at
- *    or after the time its heart rate must reach and has [AWAKE_STEPS_PER_MIN] steps a minute or more: OHealth may
- *    upload heart rate alone while the user sleeps in, without extending the session
+ *    nothing about the source's next upload): a sample at or after the session's end + its margin, and at least
+ *    [CLOCK_TOLERANCE_MS] after the session was last changed (samples stamped after the change can only come from a
+ *    later upload). The margin of a session is the gap below which a later session would join its group
+ *    ([NightWindowReader.continuationThresholds] over the sessions read: `mergeGapMin`, or `continuationGapMin` after a
+ *    group that covers at least the nap threshold) + [DATA_MARGIN_EXTRA_MS]; a session that no night includes gets
+ *    `mergeGapMin` + [DATA_MARGIN_EXTRA_MS]. When the package wrote no heart rate in the session: the session unchanged
+ *    for [QUIET_MS] and its margin past its end ([UnsettledReason.WAITING_FOR_DATA]). When it did and it writes
+ *    fine-grained steps (its newest step record that starts in the last [STEPS_LOOKBACK_MS] is at most the largest margin
+ *    of its recent sessions long; OHealth writes one record per minute with steps), also a step record of the package
+ *    that starts at or after the time its heart rate must reach and has [AWAKE_STEPS_PER_MIN] steps a minute or more:
+ *    OHealth may upload heart rate alone while the user sleeps in, without extending the session
  *    ([Settlement.Unsettled.awaitingSteps]).
  *
  * In rule 3, the heart rate of every package is checked before the steps of any: a wait for heart rate, whose threshold
@@ -232,7 +235,7 @@ class SourceSettlement
                 }
             val uuids = inScope.map { it.uuid }
             val rows = ledger.sources.findByUuids(uuids).associateBy { it.uuid }
-            val scope = Scope(now, settings, inScope, rows, ledger.nights.findBySourceUuids(uuids))
+            val scope = Scope(now, settings, inScope, rows, ledger.nights.findBySourceUuids(uuids), marginsOf(read, settings))
             return deletionPending(read, packages, scope) ?: unprocessed(scope) ?: dataAfterEnd(scope)
         }
 
@@ -320,21 +323,20 @@ class SourceSettlement
          * steps of any: a wait for heart rate, rechecked at its threshold, is found before a wait for steps.
          */
         private suspend fun dataAfterEnd(scope: Scope): Settlement {
-            val marginMs = dataMarginMs(scope.settings)
             val latest = sortedMapOf<String, Long>()
             val ownHolds = sortedMapOf<String, List<DataHold>>()
             for ((packageName, sessions) in scope.recent.groupBy { it.packageName }.toSortedMap()) {
                 val heartRate = repository.readHeartRate(sessions.minOf { it.startMs }, scope.now + CLOCK_TOLERANCE_MS, setOf(packageName))
                 val edge = heartRate.lastOrNull()?.timeMs
                 if (edge != null) latest[packageName] = edge
-                val holds = sessions.map { holdOf(it, heartRate, marginMs) }
+                val holds = sessions.map { holdOf(it, heartRate, scope.marginOf(it)) }
                 val waiting = holds.firstOrNull { !it.reachedBy(edge, scope.now) }
                 if (waiting != null) return waitingForData(waiting, edge, scope)
                 ownHolds[packageName] = holds.filter { it.own }
             }
             val awaiting =
                 ownHolds.entries.firstNotNullOfOrNull { (packageName, holds) ->
-                    awaitingSteps(packageName, holds, latest[packageName], marginMs, scope)
+                    awaitingSteps(packageName, holds, latest[packageName], scope)
                 }
             return awaiting ?: Settlement.Settled(scope.versions, latest)
         }
@@ -350,24 +352,23 @@ class SourceSettlement
         ): DataHold {
             val own = heartRate.any { it.timeMs in session.startMs until session.endMs }
             val sinceChange = if (own) CLOCK_TOLERANCE_MS else QUIET_MS
-            return DataHold(session, own, maxOf(session.endMs + marginMs, session.lastModifiedMs + sinceChange))
+            return DataHold(session, own, maxOf(session.endMs + marginMs, session.lastModifiedMs + sinceChange), marginMs)
         }
 
         /**
          * The steps part of rule 3 for the sessions of [packageName] with heart rate of its own in them ([holds]), whose
-         * heart rate (latest sample [edge]) reached their thresholds: when the package writes fine-grained steps, each
-         * needs a step record of the package that starts at or after its threshold with [AWAKE_STEPS_PER_MIN] steps a
-         * minute or more. [UnsettledReason.WAITING_FOR_DATA] ([Settlement.Unsettled.awaitingSteps]) for the first one
-         * without, or null. Reads nothing when [holds] is empty.
+         * heart rate (latest sample [edge]) reached their thresholds: when the package writes fine-grained steps (records
+         * at most the largest margin of [holds] long), each needs a step record of the package that starts at or after its
+         * threshold with [AWAKE_STEPS_PER_MIN] steps a minute or more. [UnsettledReason.WAITING_FOR_DATA]
+         * ([Settlement.Unsettled.awaitingSteps]) for the first one without, or null. Reads nothing when [holds] is empty.
          */
         private suspend fun awaitingSteps(
             packageName: String,
             holds: List<DataHold>,
             edge: Long?,
-            marginMs: Long,
             scope: Scope,
         ): Settlement.Unsettled? {
-            if (holds.isEmpty() || !writesFineGrainedSteps(packageName, marginMs, scope.now)) return null
+            if (holds.isEmpty() || !writesFineGrainedSteps(packageName, holds.maxOf { it.marginMs }, scope.now)) return null
             // The read pads its window on the left and returns the records that overlap it (all of them start before its
             // end) with their own times, not clipped: a record counts for a session only when it starts at or after its
             // threshold.
@@ -407,6 +408,16 @@ class SourceSettlement
                 .unsettled(UnsettledReason.WAITING_FOR_DATA, hold.session, scope.rows[hold.session.uuid]?.nightClientRecordId)
                 .copy(thresholdMs = hold.thresholdMs, latestHeartRateMs = edge, ownHeartRate = hold.own)
 
+        /**
+         * The margin after the end of each session of [read] (by uuid) that its package's heart rate must reach: the gap
+         * below which a later session would join its group ([NightWindowReader.continuationThresholds]) +
+         * [DATA_MARGIN_EXTRA_MS]. Sessions that no night of [settings] includes are left out ([Scope.marginOf]).
+         */
+        internal fun marginsOf(
+            read: List<HcSleepSession>,
+            settings: AppSettings,
+        ): Map<String, Long> = windowReader.continuationThresholds(read, settings).mapValues { it.value + DATA_MARGIN_EXTRA_MS }
+
         /** A written night that does not cover [session] (null: none). */
         private fun EstimatedNightEntity?.writtenWithout(session: HcSleepSession): Boolean =
             this != null && status == NightStatus.WRITTEN && !covers(session)
@@ -416,8 +427,8 @@ class SourceSettlement
             sessionStartMs <= session.startMs && session.endMs <= sessionEndMs
 
         /**
-         * One evaluation at [now] with [settings]: the [inScope] sessions, their `source_sessions` [rows] by uuid and the
-         * ledger nights that list them ([owners]).
+         * One evaluation at [now] with [settings]: the [inScope] sessions, their `source_sessions` [rows] by uuid, the
+         * ledger nights that list them ([owners]) and the data margins of the sessions read ([margins], [marginsOf]).
          */
         private class Scope(
             val now: Long,
@@ -425,7 +436,12 @@ class SourceSettlement
             val inScope: List<HcSleepSession>,
             val rows: Map<String, SourceSessionEntity>,
             val owners: List<EstimatedNightEntity>,
+            val margins: Map<String, Long>,
         ) {
+            /** The margin after [session]'s end ([marginsOf]; `mergeGapMin` + [DATA_MARGIN_EXTRA_MS] when it has none). */
+            fun marginOf(session: HcSleepSession): Long =
+                margins[session.uuid] ?: (settings.sources.mergeGapMin * MINUTE_MS + DATA_MARGIN_EXTRA_MS)
+
             /** The in-scope sessions that ended in the last [SETTLE_TIMEOUT_MS]. */
             val recent: List<HcSleepSession> = inScope.filter { isRecent(it) }
 
@@ -450,12 +466,13 @@ class SourceSettlement
         /**
          * What rule 3 asks of the recent [session]: [own], its package wrote heart rate in it; [thresholdMs], the time its
          * package's heart rate must reach, or, without heart rate of its own, the time of the clock from which it counts
-         * as final.
+         * as final; [marginMs], its margin past its end.
          */
         private class DataHold(
             val session: HcSleepSession,
             val own: Boolean,
             val thresholdMs: Long,
+            val marginMs: Long,
         ) {
             /** Whether the package's latest heart-rate sample [edge] (without heart rate of its own: [now]) reached the threshold. */
             fun reachedBy(
@@ -477,9 +494,10 @@ class SourceSettlement
             const val SETTLE_TIMEOUT_MS: Long = 12L * 60 * 60 * 1000
 
             /**
-             * Added to `sources.mergeGapMin` for the margin after a session's end that its source's heart rate must reach
-             * (60 min by default): it covers a back-to-sleep fragment that would merge with the session and the 20–27 min
-             * OHealth needs to report a sleep period; the slack observed is 3–11 min, so do not lower it.
+             * Added to the merge threshold of a session (`sources.mergeGapMin`, or `sources.continuationGapMin` after a
+             * long group) for the margin after its end that its source's heart rate must reach (60 min by default): it
+             * covers a back-to-sleep fragment that would merge with the session and the 20–27 min OHealth needs to report
+             * a sleep period; the slack observed is 3–11 min, so do not lower it.
              */
             const val DATA_MARGIN_EXTRA_MS: Long = 30L * 60 * 1000
 
@@ -511,7 +529,12 @@ class SourceSettlement
              */
             const val STEPS_LOOKBACK_MS: Long = 7L * 24 * 60 * 60 * 1000
 
-            /** The margin after a session's end that its source's heart rate must reach with [settings] ([DATA_MARGIN_EXTRA_MS]). */
-            fun dataMarginMs(settings: AppSettings): Long = settings.sources.mergeGapMin * MINUTE_MS + DATA_MARGIN_EXTRA_MS
+            /**
+             * The largest margin after a session's end that its source's heart rate may have to reach with [settings]:
+             * the larger of `mergeGapMin` and `continuationGapMin`, + [DATA_MARGIN_EXTRA_MS] (equal to every session's
+             * margin while `continuationGapMin` is not larger than `mergeGapMin`).
+             */
+            fun dataMarginMs(settings: AppSettings): Long =
+                maxOf(settings.sources.mergeGapMin, settings.sources.continuationGapMin) * MINUTE_MS + DATA_MARGIN_EXTRA_MS
         }
     }

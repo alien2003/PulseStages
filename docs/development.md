@@ -650,13 +650,14 @@ that later builds reproduced the earlier runs night by night, are listed at the 
 
 A default that changes estimates (the bundled model, `TrainedDefaults`, an `AlgoParams` default) is chosen on the open
 datasets by a rule written down before the evaluation runs, never on synthetic data
-([PLAN.md §2](../PLAN.md#2-decisions)). The three experiments so far:
+([PLAN.md §2](../PLAN.md#2-decisions)). The experiments so far:
 
 | Pre-registration | Command log | Results | Committed |
 |---|---|---|---|
 | [`prereg-bias.md`](prereg/prereg-bias.md) (stage proportions) | `commands-train2.log` | [ALGORITHM.md §13.10](../ALGORITHM.md#1310-stage-proportions-prior-exponent-and-proportion-matching-pre-registered-v3-adopted) | together with its results (`31657ce`) |
 | [`prereg-naps.md`](prereg/prereg-naps.md) (nap proxies, short-session bias) | `commands-naps.log` | [ALGORITHM.md §13.11](../ALGORITHM.md#1311-daytime-naps-nap-proxies-and-a-short-session-bias-pre-registered-adopted) | together with its results (`118e329`) |
 | [`prereg-nap-model.md`](prereg/prereg-nap-model.md) (dedicated nap model) | `commands-nap-model.log` | [ALGORITHM.md §13.12](../ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted) | with its analysis code before the first run (`72eb467`, the same patch with the same commit time as `d0b7f7b`, the id ALGORITHM.md cites; results in `36b6ab7`) |
+| [`prereg-merge-gap.md`](prereg/prereg-merge-gap.md) (merge gap: one night or two after an awakening of 30–59 min) | `commands-merge-gap.log` | not run yet (to be reported in ALGORITHM.md §13.14) | on its own before the base references of phase A, then with its analysis code before the first run (its section 20) |
 
 For the first two, the order of writing and running rests on the timestamped command logs and on the ordering checks
 of `tools/train/tests/test_prereg.py`, not on the commit history. Committing before the first run was first done for

@@ -164,3 +164,50 @@ def test_naps_realistic_test_set_freeze_order_of_the_committed_log():
     naps-realistic < its RESULT < the START of train.py naps-realistic-external."""
     rec = ds006576.freeze_order(_nr_log(), prereg_sha256=napsrealistic.PREREG_SHA256, complete=False)
     assert rec["ok"], rec["failures"]
+
+
+# ----------------------------------------------------------------------------------- merge-gap pre-registration ----
+
+from pulsetrain import mergegap  # noqa: E402
+
+MG_PREREG = REPO / mergegap.PREREG_PATH
+MG_LOG = MG_PREREG.parent / "commands-merge-gap.log"
+MG_STAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+
+
+def _mg_log() -> list[str]:
+    """The committed copy of the merge-gap part of tools/train/out/commands.log (docs/prereg/prereg-merge-gap.md
+    section 20)."""
+    return MG_LOG.read_text(encoding="utf-8").splitlines()
+
+
+def test_merge_gap_prereg_sha256_matches_every_record():
+    digest = hashlib.sha256(MG_PREREG.read_bytes()).hexdigest()
+    assert digest == mergegap.PREREG_SHA256
+    assert (MG_PREREG.parent / "prereg-merge-gap.md.sha256").read_text().split() == [digest, MG_PREREG.name]
+    assert any(MG_STAMP.match(x) and f" NOTE prereg-merge-gap.md sha256 {digest}" in x for x in _mg_log())
+
+
+def test_logged_merge_gap_prereg_is_the_committed_text_and_precedes_every_run():
+    """The text is logged verbatim (with its timestamp, not before the date it was written) before any START of a
+    ``train.py mergegap*`` subcommand; the log is append-only in time order; exactly one U1 NOTE lies between the
+    pre-registration NOTE and the first START of ``train.py mergegap`` (that subcommand itself), and none before it."""
+    log = _mg_log()
+    start = next(i for i, x in enumerate(log) if MG_STAMP.match(x) and " PRE-REGISTRATION merge-gap " in x)
+    end = next(i for i, x in enumerate(log) if i > start and MG_STAMP.match(x)
+               and f" NOTE prereg-merge-gap.md sha256 {mergegap.PREREG_SHA256}" in x)
+    logged = [x[2:] if x.startswith("  ") else x for x in log[start + 1:end]]
+    assert logged == MG_PREREG.read_text(encoding="utf-8").splitlines()          # verbatim
+    times = [m.group(1) for x in log if (m := MG_STAMP.match(x))]
+    assert times == sorted(times)                                                 # append-only, in time order
+    written = re.search(r"^Written (\S+),", MG_PREREG.read_text(encoding="utf-8"), re.M).group(1)
+    assert log[start][:10] >= written[:10]
+    runs = [i for i, x in enumerate(log) if MG_STAMP.match(x) and mergegap.ANY_START_RE.search(x)]
+    assert all(start < end < i for i in runs)                     # no merge-gap run before the pre-registration
+    u1 = [i for i, x in enumerate(log) if MG_STAMP.match(x) and mergegap.U1_RE.search(x)]
+    assert all(i > end for i in u1)
+    experiment = [i for i, x in enumerate(log) if MG_STAMP.match(x) and mergegap.EXPERIMENT_START_RE.search(x)]
+    if experiment:
+        assert len(u1) == 1 and end < u1[0] < experiment[0]
+    else:
+        assert len(u1) <= 1

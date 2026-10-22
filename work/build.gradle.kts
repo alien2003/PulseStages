@@ -53,6 +53,32 @@ tasks.withType<Test>().configureEach {
     inputs.files(prepareRobolectricDependencies).withPropertyName("robolectricDependencies").withNormalizer(ClasspathNormalizer::class.java)
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricDependencyDir.get().asFile.absolutePath)
+    // Gate V3 of docs/prereg/prereg-merge-gap.md: MergeGapGateReplayTest writes its replay report here
+    // (-Ppulsestages.mergegapReport=<path>) and replays the arms of -Ppulsestages.mergegapArms (default: all five).
+    systemProperty(
+        "pulsestages.mergegap.v3Report",
+        providers
+            .gradleProperty("pulsestages.mergegapReport")
+            .getOrElse(
+                layout.buildDirectory
+                    .file("reports/mergegap-v3.json")
+                    .get()
+                    .asFile.absolutePath,
+            ),
+    )
+    providers
+        .gradleProperty("pulsestages.mergegapArms")
+        .orNull
+        ?.let { systemProperty("pulsestages.mergegap.arms", it) }
+}
+
+// The replays of gate V3 (JUnit tag mergegap-replay) are excluded from the unit-test tasks unless the Gradle property
+// pulsestages.mergegapReplay is set; then only they run (docs/prereg/prereg-merge-gap.md section 16).
+val mergeGapReplay: Boolean = providers.gradleProperty("pulsestages.mergegapReplay").isPresent
+junitPlatform {
+    filters {
+        if (mergeGapReplay) includeTags("mergegap-replay") else excludeTags("mergegap-replay")
+    }
 }
 
 dependencies {

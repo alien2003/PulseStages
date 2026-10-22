@@ -313,6 +313,40 @@ code moved to `main`, and `naps-realistic-gates-a1` repeated the gates on `main`
 `tools/train/data/external/ds006576/` (a re-extraction must reproduce the logged digests):
 `defaults --run naps-realistic-final` generates the current `TrainedDefaults.kt`.
 
+The merge gap (pre-registered: `docs/prereg/prereg-merge-gap.md`, a verbatim copy of `tools/train/out/prereg-merge-gap.md`,
+with SHA-256 in `docs/prereg/prereg-merge-gap.md.sha256` and the timestamped `out/commands.log` as
+`docs/prereg/commands-merge-gap.log`, checked by `tests/test_prereg.py`): should `sources.mergeGapMin` stay at 30 min
+(arm A), become 60 min (B) or 30 min with 60 min after a group that covers at least 180 min (C,
+`sources.continuationGapMin`)? Section 19 of the text has the order of the steps:
+
+```sh
+# phase A, with core-algo, algo-cli and the bundle of the base commit: the whole-night references of gate G2a
+# (refused unless they, the root build files and algo-cli's dependency on :core-algo alone are as in the base commit)
+mise exec -- ./gradlew :algo-cli:installDist
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py mergegap-base --out-run mergegap-base --jobs 10
+# before the code commit: G0, G1, G2 (the Sleep as Android replays under arm A only) and G4
+mise exec -- ./gradlew test ktlintCheck detekt :algo-cli:installDist
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py mergegap-gates --out-run mergegap-gates --jobs 10
+# the developer's limit U1 logged as 'NOTE merge-gap U1 DMAX <minutes>: <answer>'; the code commit; its build
+mise exec -- ./gradlew :algo-cli:installDist
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py mergegap --out-run mergegap --jobs 10
+mise exec -- python -I tools/train/train.py mergegap-report --out-run mergegap      # re-render (no algo-cli)
+```
+
+`mergegap` (`pulsetrain/mergegap.py`) reads, read only, `bias-base`, `naps`, `naps-posthoc` and `nap-model` (the N1 fold
+bundles and parameters of naps-realistic gate G1) and `out/mergegap-base`. It replays the Sleep as Android gate in the
+Kotlin harness first (`MergeGapGateReplayTest` in `:work`, JUnit tag `mergegap-replay`, excluded from the default test
+tasks: `-Ppulsestages.mergegapReplay=true`, `-Ppulsestages.mergegapArms=<arms>`, `-Ppulsestages.mergegapReport=<json>`),
+then builds the constructs of every hosting night (a stretched awakening at the end, in the middle or at the start; a
+doze before or a nap after the night; the 15-min late start of the positive control), decodes them merged (M), split (S)
+and, for the nap after the night, alone (S'), in id-sorted blocks of at most 1000 sessions per outer group (the positive
+controls in blocks of their own, with `napMode.maxSessionMin` 0 so that both of its sessions are nights), scores regions
+from the per-epoch CSV, and applies the cells, the positive controls and the rule; `summary.json` holds every criterion,
+the case of the rule and its generated reasons. Gate G2a also compares every existing test source changed since the base
+commit with its base version (test method names, assertion calls). The grouping of every arm is checked against
+`NightCandidateBuilder` on the committed fixture `tests/data/mergegap-grouping.json` (gate G4; regenerate it with
+`pulsetrain.mergegap.write_grouping_fixture()` only together with a change of the rule it records).
+
 Provenance: every nap run records `meta.code` in its `summary.json` (SHA-256 of `train.py` and each `pulsetrain/*.py`,
 one digest over them, the git commit and the hashed files that differ from it) next to the algo-cli fingerprint and
 the pre-registration digest. Commit a pre-registration, with the analysis code it names, before the first run: the
