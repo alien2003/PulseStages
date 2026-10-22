@@ -10,6 +10,15 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-22
+
+"Ask Sleep as Android to sync" now also waits until you are up: heart rate that OHealth uploads while you still sleep no
+longer lets a night cut short reach Sleep as Android, and a notification tells you when a night that Sleep as Android
+was asked about later gets another start or end, and how to repair it there. Install it over 0.4.1 like any update (same
+signing key): the app keeps its data and settings, no night becomes stale, and no new permission is needed. With
+OHealth, open it 75 minutes or more after waking up, once you have walked a little after the first hour, and pull down
+on its "Home" tab (below).
+
 ### Added
 
 - **The notification "Check a night in Sleep as Android".** Sleep as Android never updates a night it imported, so a
@@ -30,18 +39,18 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   only a session that the watch app deleted and wrote again with other times can bring one, and since "Recompute"
   rewrites nothing under that option, its repair then says to tap "Sync now" in Sleep as Android (Settings → Services)
   instead. Tested in the build's tests, not yet on the development phone ([user
-  guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
-  §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
-- **Merge-gap experiment** (pre-registered: [docs/prereg/prereg-merge-gap.md](docs/prereg/prereg-merge-gap.md) with its
+  guide](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
+  §8.3](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.5.0/PLAN.md#2-decisions)).
+- **Merge-gap experiment** (pre-registered: [docs/prereg/prereg-merge-gap.md](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/prereg/prereg-merge-gap.md) with its
   digest and command log; [ALGORITHM.md
-  §13.14](ALGORITHM.md#1314-the-merge-gap-of-split-nights-pre-registered-not-adopted)): `train.py mergegap-base`,
+  §13.14](https://github.com/alien2003/PulseStages/blob/v0.5.0/ALGORITHM.md#1314-the-merge-gap-of-split-nights-pre-registered-not-adopted)): `train.py mergegap-base`,
   `mergegap-gates`, `mergegap` and `mergegap-report`, with `pulsetrain/mergegap.py` (split nights constructed in
   labelled nights, decoded merged and split, the cells, positive controls and decision rule) and the grouping fixture
   `tests/data/mergegap-grouping.json` shared by the Python emulation and `MergeGapGroupingFixtureTest`; the Sleep as
   Android replay of each arm, `MergeGapGateReplayTest` in `:work` (JUnit tag `mergegap-replay`, excluded from the
   default test tasks; `-Ppulsestages.mergegapReplay=true`, `-Ppulsestages.mergegapArms=<arms>`,
   `-Ppulsestages.mergegapReport=<json>`), with the gate's scenario timelines moved to
-  `SleepAsAndroidScenarioTimelines.kt` ([tools/train/README.md](tools/train/README.md)). Outcome: "Merge gap" stays 30
+  `SleepAsAndroidScenarioTimelines.kt` ([tools/train/README.md](https://github.com/alien2003/PulseStages/blob/v0.5.0/tools/train/README.md)). Outcome: "Merge gap" stays 30
   min (case 4 of the rule: merging a separate nap that starts 35–59 min after the night made the night's staging
   worse); nothing was installed and no estimate changes. The trial setting of the experiment, "Merge gap after a long
   session" (`sources.continuationGapMin`), was removed before any release; a settings file or export that lists it
@@ -60,15 +69,20 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   and on a day in bed the night reaches Sleep as Android only about 12 hours after it ended. The check of an owed
   request makes up to three more Health Connect reads once the heart rate is there. Tested with replays of 18 and 19
   October and a constructed sleep-in scenario, not yet on the development phone ([user
-  guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
-  §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+  guide](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
+  §8.3](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.5.0/PLAN.md#2-decisions)).
 - **Home's notifications row** now reads "Notifications (progress, Sleep as Android)", and without the permission "Not
   allowed: long runs show no progress, and a night to check in Sleep as Android is noted only in the Log." (en and ru).
+- **The privacy screen** now says that with "Ask Sleep as Android to sync" steps are also read after the night (a minute
+  of walking shows that you are up), and that a notification on the phone says how to update a night that changed
+  afterwards in Sleep as Android (en and ru; [privacy.md
+  §1](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/privacy.md#1-what-is-processed) and
+  [§2](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/privacy.md#2-everything-stays-on-the-device)).
 - **Opening the app after the notification.** The notification opens the app's screen with the same identity as the
   launcher icon, so that when it starts the app, the launcher icon later brings the app back as it was instead of
   opening a second copy of its screen, whatever screen of the app is on top. The app's activity is also `singleTop`:
   another notification that opens it while it is on top, such as the progress notification, reaches the existing screen
-  (neither checked on a phone yet) ([architecture.md §2](docs/architecture.md#2-components)).
+  (neither checked on a phone yet) ([architecture.md §2](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/architecture.md#2-components)).
 - **When Sleep as Android gets a night with OHealth.** The hint of "Ask Sleep as Android to sync", the user guide, the
   README and the privacy notes no longer say that the request usually comes 1–2 hours after you wake up. It comes once
   the watch app's heart rate in Health Connect reaches about an hour past the wake, and OHealth uploads heart rate only
@@ -79,8 +93,8 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   minutes or more after waking up (once you have walked a little after the first hour, above) and pulling down on its
   "Home" tab (the screen headed "Health"); with checks every 15 minutes Sleep as Android then usually gets the night
   15–60 minutes later, with the default hourly checks up to an hour more ([user
-  guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
-  §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
+  guide](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
+  §8.3](https://github.com/alien2003/PulseStages/blob/v0.5.0/docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](https://github.com/alien2003/PulseStages/blob/v0.5.0/PLAN.md#2-decisions)).
 
 ## [0.4.1] - 2026-10-20
 
@@ -535,7 +549,8 @@ for nights (Cohen's κ about 0.32–0.34) and rough for naps (about 6 in 10 epoc
   and of the debug signing certificate.
 - **Licence**: WTFPL.
 
-[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/alien2003/PulseStages/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.5.0
 [0.4.1]: https://github.com/alien2003/PulseStages/releases/tag/v0.4.1
 [0.4.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.4.0
 [0.3.0]: https://github.com/alien2003/PulseStages/releases/tag/v0.3.0

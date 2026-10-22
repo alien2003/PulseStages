@@ -19,7 +19,7 @@ only the latest release receives security fixes.
 
 | Version | Supported |
 |---|---|
-| Latest release (currently 0.1.x) | Yes |
+| Latest release | Yes |
 | Older releases, pre-releases, debug and CI builds | No; update to the latest release |
 
 ## Reporting a vulnerability
