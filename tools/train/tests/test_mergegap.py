@@ -654,6 +654,10 @@ def test_u1_line_order(tmp_path):
     assert not mg.u1_record(log)["passed"]
     log.write_text("\n".join([u1, pre]) + "\n")
     assert not mg.u1_record(log)["passed"]
+    # A NOTE that mentions the start of the experiment is not a START line.
+    note = "2026-10-22T03:45:00+02:00 NOTE merge-gap order: logged before the first START of train.py mergegap"
+    log.write_text("\n".join([pre, note, u1, start]) + "\n")
+    assert mg.u1_record(log)["passed"]
 
 
 # ------------------------------------------------------------------------------------------ decision rule ----

@@ -58,7 +58,8 @@ PREREG_SHA256 = "1692a87ef59d92d6b2063488675f97e536848a608bb6b615e3b428c53bb2909
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PREREG_NOTE = f"NOTE {PREREG_NAME} sha256 {PREREG_SHA256}"
 U1_RE = re.compile(r" NOTE merge-gap U1 DMAX (\d+): ")
-EXPERIMENT_START_RE = re.compile(r" START .*\btrain\.py mergegap(?=\s|$)")
+# Only a START line counts (its type follows the time stamp): a NOTE that mentions a start is not one.
+EXPERIMENT_START_RE = re.compile(r"^\S+ START .*\btrain\.py mergegap(?=\s|$)")
 ANY_START_RE = re.compile(r" START .*\btrain\.py mergegap(?:-base|-gates|-report)?(?=\s|$)")
 BASE_COMMIT = "e7caaf4"
 BUILD_NEUTRAL_PATHS: tuple[str, ...] = ("core-algo", "algo-cli", "app/src/main/assets/models")
