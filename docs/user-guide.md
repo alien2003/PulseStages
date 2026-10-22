@@ -685,7 +685,11 @@ Each run turns the sleep sessions in Health Connect into nights and naps by thes
 2. **Sessions that already have stages** (any stage other than unknown or "sleeping") are skipped: they need no
    estimate. The exception is "Existing sessions" = "Recompute everything".
 3. **Fragments are merged.** Sessions of one app with a gap shorter than "Merge gap" (30 min) become one night; the gap
-   is written as awake. A nap that ends less than 30 min before the night therefore becomes part of the night.
+   is written as awake. A nap that ends less than 30 min before the night therefore becomes part of the night. A
+   larger "Merge gap" also keeps a return to sleep after a longer awakening, and with it the real end of the night.
+   But it joins a separate nap or evening doze just as close to the night, which made the night's stages worse on
+   labelled test nights, and Sleep as Android is asked later. So the default stays 30 min
+   ([ALGORITHM.md §13.14](../ALGORITHM.md#1314-the-merge-gap-of-split-nights-pre-registered-not-adopted)).
 4. **Too short is ignored.** A merged session shorter than "Minimum session length" (90 min) is not processed.
 5. **Night or nap.** The rest is a night or a nap by the nap threshold ([Nights and naps](#nights-and-naps)).
 6. **Priority between apps.** When sessions of two enabled apps overlap by more than half of the shorter one, they are

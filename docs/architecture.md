@@ -235,7 +235,8 @@ explains this and the padding of heart-rate and step reads.
    fragment's start offset and the last-ending fragment's end offset; when a source gives none, the device's current
    zone is used (`SystemZoneOffsetProvider`), and for a night the ledger already knows, the offsets stored there
    (`NightRun.withLedgerOffsets`), so a later change of the phone's time zone neither counts as a source change nor
-   rewrites a historical offset.
+   rewrites a historical offset. The merge gap's default of 30 min was kept, not validated, by a pre-registered
+   experiment ([ALGORITHM.md §13.14](../ALGORITHM.md#1314-the-merge-gap-of-split-nights-pre-registered-not-adopted)).
 4. **Minimum length.** A merged session shorter than `sources.minSessionMin` is ignored. It is recorded with the
    persisted outcome name `NAP`, which predates the nap mode.
 5. **Night or nap.** Every remaining candidate is a nap when the merged session (gaps included) is strictly shorter

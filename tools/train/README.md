@@ -343,9 +343,26 @@ and, for the nap after the night, alone (S'), in id-sorted blocks of at most 100
 controls in blocks of their own, with `napMode.maxSessionMin` 0 so that both of its sessions are nights), scores regions
 from the per-epoch CSV, and applies the cells, the positive controls and the rule; `summary.json` holds every criterion,
 the case of the rule and its generated reasons. Gate G2a also compares every existing test source changed since the base
-commit with its base version (test method names, assertion calls). The grouping of every arm is checked against
-`NightCandidateBuilder` on the committed fixture `tests/data/mergegap-grouping.json` (gate G4; regenerate it with
-`pulsetrain.mergegap.write_grouping_fixture()` only together with a change of the rule it records).
+commit with its base version (test method names, assertion calls). Gate G4 checked the grouping of every arm against
+`NightCandidateBuilder` on the committed fixture `tests/data/mergegap-grouping.json` at the experiment's commits
+(`c076017` to `a55aa55`); since then the Kotlin side covers arms A, B, R45 and R90 only (below). Regenerate the fixture
+with `pulsetrain.mergegap.write_grouping_fixture()` only together with a change of the rule it records.
+
+The experiment kept arm A (case 4 of its rule), and arm C's setting `sources.continuationGapMin` was then removed from
+the app, with `SourceSettlementMergeGapTest` and arm C's part of `MergeGapGroupingFixtureTest`. So `mergegap-gates` and
+`mergegap`, which run Kotlin tests, reproduce the run only at the experiment's commit `a55aa55`. At later commits
+`MergeGapGroupingFixtureTest` (data-hc, in the default test tasks) still checks that `NightCandidateBuilder` groups
+every fixture case under arms A, B, R45 and R90 as `pulsetrain.mergegap.group` does, and `MergeGapGateReplayTest`
+replays those four arms and fails when asked for C (its report is version 2, without `continuationGapMin`);
+`mergegap-report`, the Python side of G4 and `tests/test_mergegap.py` need no Kotlin code and run as before. The
+results, the first run with the developer's withdrawn limit of 60 min and the deviations are in ALGORITHM.md section
+13.14.
+
+Keep these runs: `out/mergegap-base` (phase A's references), `out/mergegap-gates`, `out/mergegap-withdrawn-limit60`
+(the first run, with the withdrawn limit, reported next to the other), `out/mergegap` (the reported run),
+`out/mergegap-verify` (the scripts and outputs of the independent verification behind the post-hoc numbers of section
+13.14; the scripts still name the scratch paths they ran from), `out/prereg-merge-gap.md` and `out/commands.log`, and
+the inputs `out/bias-base`, `out/naps`, `out/naps-posthoc` and `out/nap-model`.
 
 Provenance: every nap run records `meta.code` in its `summary.json` (SHA-256 of `train.py` and each `pulsetrain/*.py`,
 one digest over them, the git commit and the hashed files that differ from it) next to the algo-cli fingerprint and

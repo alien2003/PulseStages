@@ -138,8 +138,9 @@ differently.
 [§13.1](ALGORITHM.md#131-headline-walch-psg-ohealth-like-session-window), the stage-proportion correction in
 [§13.10](ALGORITHM.md#1310-stage-proportions-prior-exponent-and-proportion-matching-pre-registered-v3-adopted), naps in
 [§13.12](ALGORITHM.md#1312-a-dedicated-nap-model-pre-registered-adopted) and
-[§13.13](ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted), published results for comparison in
-[§14](ALGORITHM.md#14-published-results-for-context) and the limitations in
+[§13.13](ALGORITHM.md#1313-realistic-naps-pre-registered-not-adopted), nights split at a long awakening in
+[§13.14](ALGORITHM.md#1314-the-merge-gap-of-split-nights-pre-registered-not-adopted), published results for
+comparison in [§14](ALGORITHM.md#14-published-results-for-context) and the limitations in
 [§16](ALGORITHM.md#16-limitations). If this summary differs from ALGORITHM.md, ALGORITHM.md wins.
 
 ## Quick start

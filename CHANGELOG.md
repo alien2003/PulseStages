@@ -32,19 +32,20 @@ section are absolute ([docs/development.md](docs/development.md#releases)).
   instead. Tested in the build's tests, not yet on the development phone ([user
   guide](docs/user-guide.md#ask-sleep-as-android-to-sync), [health-connect.md
   §8.3](docs/health-connect.md#83-sleep-as-android), [PLAN.md §2](PLAN.md#2-decisions)).
-- **The setting "Merge gap after a long session"** (`sources.continuationGapMin`, Settings → Sources, en and ru; 0–240
-  min). It is off by default (0), and then nothing changes. Set above "Merge gap", it lets a later session from the same
-  app join a night whose sessions already cover at least the nap threshold (`napMode.maxSessionMin`, 3 hours by default
-  and when naps are off; the time the sessions cover, gaps excluded) when the gap before it is shorter than this setting
-  instead of the merge gap; the gap is written as awake, as with the merge gap. A group that does not cover the nap
-  threshold yet (an early doze, the first part of a night cut short) still joins only within the merge gap. It is for a
-  watch app that splits one night at an awakening of 30–59 minutes (dozing off again after the alarm, for example), and
-  it is arm C of the pre-registered merge-gap experiment, which decides whether it or a longer merge gap becomes the
-  default ([docs/prereg/prereg-merge-gap.md](docs/prereg/prereg-merge-gap.md)). While it is on, the request to Sleep as
-  Android after such a night waits for the watch app's heart rate up to this gap plus 30 minutes past the night's end
-  (the merge gap plus 30 minutes otherwise), so the night reaches Sleep as Android later. Tested in the build's tests,
-  with grouping cases shared with the experiment's analysis code, not on a phone ([settings
-  reference](docs/settings-reference.md)).
+- **Merge-gap experiment** (pre-registered: [docs/prereg/prereg-merge-gap.md](docs/prereg/prereg-merge-gap.md) with its
+  digest and command log; [ALGORITHM.md
+  §13.14](ALGORITHM.md#1314-the-merge-gap-of-split-nights-pre-registered-not-adopted)): `train.py mergegap-base`,
+  `mergegap-gates`, `mergegap` and `mergegap-report`, with `pulsetrain/mergegap.py` (split nights constructed in
+  labelled nights, decoded merged and split, the cells, positive controls and decision rule) and the grouping fixture
+  `tests/data/mergegap-grouping.json` shared by the Python emulation and `MergeGapGroupingFixtureTest`; the Sleep as
+  Android replay of each arm, `MergeGapGateReplayTest` in `:work` (JUnit tag `mergegap-replay`, excluded from the
+  default test tasks; `-Ppulsestages.mergegapReplay=true`, `-Ppulsestages.mergegapArms=<arms>`,
+  `-Ppulsestages.mergegapReport=<json>`), with the gate's scenario timelines moved to
+  `SleepAsAndroidScenarioTimelines.kt` ([tools/train/README.md](tools/train/README.md)). Outcome: "Merge gap" stays 30
+  min (case 4 of the rule: merging a separate nap that starts 35–59 min after the night made the night's staging
+  worse); nothing was installed and no estimate changes. The trial setting of the experiment, "Merge gap after a long
+  session" (`sources.continuationGapMin`), was removed before any release; a settings file or export that lists it
+  loads with the key ignored.
 
 ### Changed
 

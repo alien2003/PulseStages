@@ -404,7 +404,9 @@ than 180 min, and what deliberately does not:
   estimated"](docs/user-guide.md#which-sleep-sessions-are-estimated)): fragments closer than `mergeGapMin` = 30 min
   are merged before the nap filter, so a nap ending less than 30 min before bedtime becomes the
   first fragment of the night (the gap is AWAKE) — unchanged, because it cannot be told apart from a night that the
-  watch split at an awakening, and the merged session's nadir is the night's; for two sources, a session lying mostly
+  watch split at an awakening, and the merged session's nadir is the night's (a larger merge gap would also glue on
+  separate naps and evening dozes, which made the night's staging worse in the pre-registered experiment of section
+  13.14; 30 min was kept there, not validated); for two sources, a session lying mostly
   inside a session of another source but covering at most half of it is a piece of that sleep and never replaces it,
   whatever the priority (otherwise a 40-min fragment of a higher-priority watch would replace a whole night); this
   holds only while that session is kept itself, and a piece of a session that lost to another night is decided by
@@ -648,6 +650,11 @@ research, Nature Health (2026), https://doi.org/10.1038/s44360-026-00096-z. Deta
   subjects' tiles; constant nap biases and per-length tables fitted on inner out-of-fold decodes); every gate and rule
   on the common set of sessions all models estimate; OpenNeuro ds006576 decoded only after rules (i) and (ii) were
   written, as a test.
+- **Merge gap** (pre-registered, not adopted, section 13.14): no training; labelled nights with a constructed split (a
+  real awakening stretched to a gap of 35–89 min at the end, in the middle or at the start of the night, or a copy of
+  the night's onset placed before or after it as a doze or a nap), each decoded merged and split by the held-out
+  subject's fold bundle of the model in effect; per-subject changes pooled over the gaps, a subject bootstrap
+  stratified by dataset, a positive control; the Sleep as Android gate replayed in the Kotlin harness under each arm.
 - **Provenance**: each run records the SHA-256 of the `algo-cli` build it used (launcher + `lib/*.jar`) in its
   `config.json` and fails if the build changes during the run; every rebuild is logged in
   `tools/train/out/commands.log`.
@@ -686,10 +693,15 @@ commit; `naps-realistic-gates-a1` — the gates again on main's build of the cod
 on that build `naps-realistic` (the experiment, 1022 s, every gate passed, 456 `algo-cli` calls, all exit code 0),
 `naps-realistic-final` (nothing adopted: the shipped bundle unchanged) and `naps-realistic-external` (ds006576, test
 only); on the build with the new default nap output policy (`33232722…`) `naps-realistic-verify` checked that nights are
-unchanged. Rows marked "+ b" below are the adopted default with proportion matching; the other HYBRID rows are without
-it. All kappas are Cohen's kappa on the 30-s label epochs over AWAKE / LIGHT / DEEP / REM; "κ mean ± sd" is the mean and
-the **sample sd (n − 1)** over subjects (each subject's nights pooled), "κ pooled" is over all chunks; minute errors are
-mean absolute errors per night.
+unchanged. Then, on 2026-10-22 and on that build (core-algo, algo-cli and the bundle as in `e7caaf4`), the merge-gap
+experiment (section 13.14): `mergegap-base` — the reference decodes of its phase A; `mergegap-gates` — its gates before
+the runs; `mergegap-withdrawn-limit60` — the first run, with the developer's withdrawn delay limit of 60 min (the same
+decision); `mergegap` — the reported run (475 s, every fatal gate passed, 80 `algo-cli` calls: 10 for G1, 2 for G2 and
+68 construct decodes, all exit code 0); nothing was adopted; `mergegap-verify` holds the scripts and outputs of its
+independent verification (post hoc, not committed). Rows marked "+ b" below are the adopted default with proportion
+matching; the other HYBRID rows are without it. All kappas are Cohen's kappa on the 30-s label epochs over AWAKE /
+LIGHT / DEEP / REM; "κ mean ± sd" is the mean and the **sample sd (n − 1)** over subjects (each subject's nights
+pooled), "κ pooled" is over all chunks; minute errors are mean absolute errors per night.
 
 Sanity checks: for every metrics file the confusion-matrix total plus the chunks predicted UNKNOWN equals the number
 of 30-s label chunks of the evaluated nights (UNKNOWN = label chunks inside heart-rate gaps > 10 min, not scored: 1.0
@@ -2133,6 +2145,352 @@ decoded much more sleep than YASA: the asleep / awake output relies on the watch
 (headband) is secondary throughout. On real data only afternoon naps were tested, not morning or evening naps, returns
 to sleep after the night or short nights of 90–180 min.
 
+### 13.14 The merge gap of split nights (pre-registered, not adopted)
+
+**Question.** A watch app writes one night as several Health Connect sessions when it records no sleep for a while;
+OHealth, the default source, starts a new session after more than 20 min without sleep data. The app merges the
+sessions of one app whose gap is shorter than `sources.mergeGapMin` (30 min, set in the first pipeline commit and never
+validated) into one night and forces the gap AWAKE (section 9); a merged group shorter than 90 min is ignored, one of
+90–180 min is a nap (written as asleep / awake only, section 13.13) and a longer one is a night. On the development
+phone 3 of 23 nights had a gap of 35–38 min followed by more sleep, and the 30-min rule cut each of them: 30 Sep became
+a night of 3 h 19 min plus a nap of 1 h 43 min without stages, and the re-dozes of 23 and 29 min on 10 and 21 Oct were
+not written at all. The developer labelled 21 Oct as one night ("I woke up, moved the alarm and slept on"). The
+pre-registration asked whether the default should become 60 min (arm B) or a continuation rule (arm C: 30 min, but 60
+min after a group whose sessions already cover at least 180 min) instead of 30 min (arm A, the control); 45 and 90 min
+(R45, R90) were reported only. Four gates: **V1**, does merging a fragment across a gap of 35–59 min, with the gap
+forced AWAKE, make the night's staging worse than today's split handling, when the fragment comes at the end, when the
+gap splits the night in the middle and when the fragment comes at the start, and does it keep the sleep / wake reading
+of a fragment that today becomes a nap; **V2**, does merging a separate sleep, a doze that ended 35–59 min before the
+night (B only) or a nap that started 35–59 min after it (B and C), make the night's staging worse, and does the merge
+stage that nap worse than the nap model would; **V3**, is the longer wait of the Sleep as Android request within the
+longest delay the developer accepts (U1, a number stated before the run), and do the replays still deliver what today's
+tests assert; **V4**, does the arm group the labelled pair as labelled (a consistency check). Staging decides; what A
+loses in coverage (re-doze fragments never written, a continuation written as a nap without stages) is reported and
+decides nothing ("coverage is never traded against staging", section 12 of the text).
+
+**Pre-registration, stated plainly.** [docs/prereg/prereg-merge-gap.md](docs/prereg/prereg-merge-gap.md) was written
+before any construct of the experiment was built, decoded or scored and before any Sleep as Android replay with another
+merge gap. It was appended verbatim to `tools/train/out/commands.log` with its SHA-256 (`1692a87e…9096`) at
+2026-10-22T02:46:28+02:00 and **committed on its own as `fb13b36`**; its analysis code and the app changes of its
+section 16 (arm C's setting `sources.continuationGapMin`, 0 = off by default, with per-session Sleep as Android margins;
+the replay test `MergeGapGateReplayTest`; the grouping fixture of gate G4 and its data-hc tests) followed as `c076017`
+(both commits 04:46:56), before phase A and before any run on data. Disclosed in the log before phase A (NOTEs of
+04:30:41 and 04:47:27): the implementation had been written before the pre-registration commit and before phase A,
+which the text places before any Kotlin edit (phase A's decode build was nevertheless `e7caaf4`'s: core-algo, algo-cli
+and the bundle unchanged, checked at run time), and the code commit came before the gates instead of after them; three
+implementation details were settled and logged before any run (the positive control decoded with
+`napMode.maxSessionMin` = 0 so that both of its sessions are nights; how gate G3 reads "identical block order"; a
+mechanical check of gate G2a that every existing test method and assertion is unchanged). Phase A (`mergegap-base`,
+04:47:36–04:47:39, base build `33232722…`, the build of section 13.13's verification) and the gates (`mergegap-gates`,
+04:48:24–04:48:52: G0, G1, G2 with the replays under arm A only, G4 passed) ran at `c076017`.
+
+**The developer's limit, the runs and four deviations.** U1 was asked after the gates and logged at 14:08:15: the
+first answer was not one number ("It does not matter, what matters is reliability and functionality. Even an hour of
+delay is not fatal, possibly longer.", translated), so it was asked once more, as the text provides: "Let it be 60
+minutes", D_max = 60. A first attempt of `train.py mergegap` was refused by its own preflight before it wrote a line or
+a file: the check counted the 04:47:27 NOTE, which mentions the experiment's start, as a START line, so U1 seemed to
+come after the first start; `8f43fb3` (14:09:47; NOTE 14:09:51) counts START lines only and changes no analysis. The
+first run started at 14:09:59 at `8f43fb3` with D_max 60. During it the developer revised the limit ("Let us take 90
+after all", NOTE 14:14:35, which kept 60 for the rule and 90 as post hoc) and then withdrew 60 and set 90 ("I want to
+cancel the decision and choose 90", logged at 14:15:21 as an amendment for the decision). That run ended at 14:16:03
+with case 4 (adopt A). Its output was moved to `out/mergegap-withdrawn-limit60` (NOTE 14:17:35); `a55aa55` (14:17:32)
+made the analysis take as D_max the last amendment logged after the U1 line and before the first RESULT line (recording
+the withdrawn value), and the experiment ran again from the start at `a55aa55` with D_max 90: START 14:17:42, RESULT
+14:25:48 (475 s, 80 `algo-cli` calls, all exit code 0). That run is the one reported below. The deviations:
+
+1. **A fix after the code commit.** `8f43fb3` corrected an implementation error found by the run's own check after the
+   code commit, a deviation by the letter of section 20 of the text; no run had started and no analysis changed.
+2. **The limit changed after the first START.** Section 9.2 allows one answer, "decided before any result of this
+   experiment exists" and logged before the first START. The amendment came after the first START, and `a55aa55`
+   changed the analysis code after the code commit to honour it (section 20: a deviation). Gate G0's "exactly one U1
+   line" does not see the amendment, which has another prefix.
+3. **"Before any of its results existed" is inaccurate.** The amendment says so, but when the limit was changed the
+   first run had written its Sleep as Android replay files (`g2b/` at 14:11:18, `v3/` at 14:12:19), and 43 of its 68
+   construct decode calls had finished by 14:14:35, 58 by 14:15:21; its region matrices, cells and decision were written
+   from 14:15:58 on. No result had been seen by the developer or the assistant (the 14:14:35 NOTE says so; file times
+   cannot show it). NOTEs of 15:19:19 and 15:25:02 correct the wording.
+4. **The first run was declared "not reported"** (NOTE 14:17:35), against section 20 ("every run is reported", and a
+   rerun publishes the earlier decision next to the new one). It is reported here: with D_max 60, at `8f43fb3`, every
+   fatal gate passed and it computed the same decision, case 4; its `cells.json` is byte-identical to the reported
+   run's, and its report differs in the line "D_max (U1)" only.
+
+None of them changes the outcome: V3b, the added delay of B and C, is 60 min, so U holds at the logged limit of 60 and
+at the amended 90 alike, and with SC false (below) the case is 4 for every value of R and U. The reported run records
+`meta.code` `d101afeb…` at `a55aa55` with no modified file, `algo-cli` `33232722…`, the text's digest, the U1 line with
+the amendment (`summary.json` `meta.u1`: `loggedDMax` 60, `dMax` 90) and the digest of the replay report (`6f838d96…`);
+every one of its output files is dated after its START, and no code path reads the withdrawn directory. The log is
+committed as `docs/prereg/commands-merge-gap.log`; `tools/train/tests/test_prereg.py` checks that the text, the log and
+the digests agree and the order (the text before every `train.py mergegap*` run, exactly one U1 line between the text
+and the first START of the experiment). Code: `tools/train/pulsetrain/mergegap.py`, the `train.py` subcommands
+`mergegap-base`, `mergegap-gates`, `mergegap` and `mergegap-report`, `tools/train/tests/test_mergegap.py` and the
+fixture `tools/train/tests/data/mergegap-grouping.json`; in the app, at `a55aa55`, arm C's setting with its grouping
+and margin code, `MergeGapGroupingFixtureTest`, `SourceSettlementMergeGapTest` and `MergeGapGateReplayTest` (arm C's
+code and `SourceSettlementMergeGapTest` were removed afterwards and the other two tests trimmed to the remaining arms,
+below).
+
+**Known beforehand** (section 2 of the text). Section 13.8's boundary sensitivity (a session start 15 min late:
+−0.025 / −0.023 κ; start 10 min late and end 10 min early: −0.020 / −0.012), which set the margin −0.02 and the
+positive control; from the diagnosis of section 13.13, that decoding a late return-to-sleep window as the continuation
+of its night beat a stand-alone nap decode, for wake bouts under 40 min only, which the app already merges. Labels only:
+4.9 % of the 284 Walch and BIDSleep nights have a gap of 30 min or more inside the sleep period, 1.8 % of 45 min or
+more and none of 90 min, and both datasets end at the final awakening, so a return to sleep after getting up is almost
+unobservable in them; in Sleep-EDF (whole days, no heart rate) such gaps occur in 13.8 % of the recordings of people
+under 60 and 45.2 % from 60 on. The developer's histories, session boundaries only: OHealth gaps under 4 h of 21–38 min
+and then 126 and 195 min, nothing between 39 and 125, so every merge gap from 39 to 126 min and arm C group the 33 days
+identically and differ from A in exactly three fragments after the main sleep (30 Sep, 10 Oct, 21 Oct); no daytime or
+evening session ended less than 465 min before a night; Apple Watch and mobvoi histories (section 2.4 of the text). The
+label of 21 Oct. The rule's operating characteristics (synthetic, planning only): without harm, at the planning SD, it
+adopts B about two times in three and keeps A about one time in four. **Stated in advance:** V4 is known (A fails, the
+others hold) and V3a is a regression check; C merges no START or DOZE construct, so those cells are not cells of C; the
+most likely outcomes were C or A; and a failure of V2b-nap is plausible because the nap is a copy of a sleep onset,
+which favours the nap model's own staging.
+
+**Data and constructs** (sections 4–5 of the text). The 284 night files of `walch+bid-zero` (31 Walch, PSG; 47
+BIDSleep, headband), both sampling variants, decoded at fold level by the model in effect: each held-out subject's N1
+fold bundle of section 13.13's gate G1 (the `bias-base` night bundle with b and the nap model of section 13.12). Every
+construct is a labelled night with its OHealth-like session [t0, t1] (5-min margins) and one change:
+
+- **V1**: one real awakening of 2–40 min stretched so that the two sessions are g min apart, followed by the night's
+  own continuation. **END-F**: a fragment of about F = 25, 60, 100 or 140 min after at least 180 min (a re-doze: 30 Sep,
+  10 and 21 Oct). **MID**: both pieces at least 180 min (a night split in two). **START-F**: a first piece of about F
+  min before at least 180 min (18 Oct had a first piece of 107 min, at a gap of 23).
+- **V2a, DOZE-F** (F = 25, 60, 100): a copy of the night's first F min, with its pre-sleep heart rate, placed g min
+  before the night (an evening doze).
+- **V2b, NAPAFTER-F** (F = 60, 100): the same copy placed g min after the night's end (a separate nap).
+- **Gaps** g = 35, 45 and 59 min (decisive), 75 and 89 min (R90, reported). **Heart rate in the gap**: the night's own
+  in-night wake heart rate (`base`) and that + 10 bpm (`hr10`), decisive; no heart rate (`nohr`, the watch off), the
+  night's pre-sleep heart rate (`presleep`) and `base` with walking steps (`walk`), at g = 45, reported.
+- **Arms.** Each construct is decoded **M** (one merged session, the gap forced AWAKE: what B and C do) and **S** (each
+  piece on its own: under 90 min ignored, 90–180 min a nap, otherwise a night: what A does); for V2b also **S′** (the
+  nap piece decoded alone as a nap with stages: a staging reference, which A never writes). B merges every construct
+  with g < 60; C merges END, MID and NAPAFTER (the group before the gap covers at least 180 min) and no START or DOZE;
+  A merges none.
+- **Positive control**: the host night with its session start 15 min late (section 13.8's late-start-15) against the
+  night as it is.
+- Hosting nights, Walch / BIDSleep, exactly as counted for the text (gate G7): END-25, -60, -100, -140 4 / 36, 4 / 63,
+  2 / 35, 7 / 62; MID 8 / 61; START-25, -60, -100, -140 2 / 48, 7 / 87, 4 / 49, 4 / 84; DOZE-25, -60, -100 2 / 48,
+  7 / 87, 5 / 51; NAPAFTER-60, -100 7 / 87, 5 / 51.
+
+**Cells and the rule** (sections 6–11 of the text):
+
+| cell | designs | region, metric | margin | arms |
+|---|---|---|---|---|
+| V1a-late | END-25, -60, -100, -140, MID | the night part, 4-class κ, merged (M) − split (S) | −0.02 | B, C |
+| V1a-early | START-25, -60, -100, -140 | the night part, 4-class κ | −0.02 | B |
+| V1b-late | END-100, END-140 | the fragment (a nap under S), sleep / wake accuracy | −0.05 | B, C |
+| V1b-early | START-100, START-140 | the fragment, sleep / wake accuracy | −0.05 | B |
+| V2a | DOZE-25, -60, -100 | the night, 4-class κ | −0.02 | B |
+| V2b-night | NAPAFTER-60, -100 | the night, 4-class κ | −0.02 | B, C |
+| V2b-nap | NAPAFTER-60, -100 | the nap, 4-class κ, merged (M) − the nap model staging it alone (S′) | −0.05 | B, C |
+
+Per subject, the change between the arms' summed confusion matrices, averaged over the three gaps; each subject one
+unit; a dataset with fewer than 10 subjects in a cell is left out of it (Walch in the V1b cells); a 95 % subject
+bootstrap stratified by dataset (seed 0, 10 000 resamples). The decisive value is the lowest lower bound over the two
+sampling variants and the two gap heart rates. **Pass**: that bound at least the margin, every point check (each gap,
+for V1a-late also the END and the MID position, BIDSleep's own mean) at least the margin, and for a κ cell the positive
+control detected (its lower bound below −0.02 in both variants). **Harm shown**: a mean or a point check below the
+margin. Rule, verbatim (section 11 of the text): "Adopt B (`sources.mergeGapMin` = 60 min) if every cell of V1 and V2
+passes for B, the Sleep as Android regression check V3a passes for B and B's measured added delay is within the limit
+the developer set before the run (U1). Otherwise adopt C (merge gap 30 min, and 60 min after a group that already covers
+at least 180 min of session time) if every cell of V1 and V2 that C merges passes, V3a passes for C and C's added delay
+is within the limit. Otherwise keep A (30 min). […] V4 (the labelled pair grouped as labelled) holds for B and C by
+construction and is checked as a gate. 45 and 90 min are reported, never adopted. A failed technical gate (G0–G6) stops
+the run and keeps A." Operationally E = V1a-late ∧ V1b-late, S_t = V1a-early ∧ V1b-early, P2 = V2a, N = V2b-night ∧
+V2b-nap, SC = E ∧ N (every cell C merges), SB = S_t ∧ P2; case 4 is "not SC → A".
+
+**Gates** (every fatal gate passed; `out/mergegap/gates.json`):
+
+| gate | check | outcome |
+|---|---|---|
+| G0 provenance | `meta.code`, `algo-cli` fingerprint, the text's digest, one U1 line after the text and before the first START | passed (U1 at 14:08:15; the amendment of 14:15:21 is not a U1 line, deviation 2) |
+| G1 model reproduced | the N1 fold bundles reproduce every stored N1 decode of `nap-model` and candidate B of `bias-base/bias` | 3708 / 3708 and 568 / 568 |
+| G2 build neutral | (a) core-algo, algo-cli and the bundle as in `e7caaf4`; the 568 whole nights decoded as phase A's references, per-epoch CSV byte for byte; `gradlew test` passes; every existing test method and assertion unchanged (b) the replays under arm A as the scenario tests assert | passed (284 / 284 per variant, 568 night-variants; 11 / 11 test methods and 53 / 53 assertions; `gradlew test` relied on Gradle's up-to-date checks for unchanged modules) |
+| G3 constructs | every construct as sections 5.1–5.6 of the text state, both variants with identical boundaries and labels, the positive control's cuts | passed |
+| G4 grouping parity | `mergegap.group` and `NightCandidateBuilder` (and `SourceSettlement`'s per-session margins) on the 43 cases of the fixture under every arm | passed (Python and the two data-hc tests) |
+| G5 scoring parity | the chunk scoring reproduces `algo-cli`'s per-session matrices; every epoch in a forced span predicted AWAKE | passed (53 613 sessions; 1 055 608 forced epochs) |
+| G6 arm map | every construct grouped as section 5.6 of the text states; V4 as known | passed |
+| G7 counts | hosts and constructs against section 2.8 of the text | reported: hosts identical; 33 BIDSleep nights without a host against the text's 31 (inference: the two nights without a wake heart-rate pool, which the text counts apart) |
+| G8 determinism | seeds, decode blocks by id | reported (68 construct decode calls, 10 at a time) |
+
+**Results: case 4 → A.** Mean change per subject, merged − split (S′ for V2b-nap), averaged over g = 35, 45 and 59
+min, [95 % CI] (`out/mergegap/report.md` and `cells.json`):
+
+| cell | instantaneous, `base` | instantaneous, `hr10` | mean2min, `base` | mean2min, `hr10` |
+|---|---|---|---|---|
+| V1a-late | +0.027 [+0.006, +0.049] | +0.027 [+0.006, +0.050] | +0.038 [+0.018, +0.060] | +0.042 [+0.022, +0.064] |
+| V1a-early | −0.022 [−0.044, −0.001] | −0.023 [−0.044, −0.004] | −0.043 [−0.065, −0.020] | −0.038 [−0.063, −0.013] |
+| V1b-late | +0.009 [−0.019, +0.044] | +0.021 [−0.009, +0.057] | +0.013 [−0.014, +0.046] | +0.023 [−0.004, +0.058] |
+| V1b-early | −0.019 [−0.035, −0.001] | −0.022 [−0.038, −0.005] | −0.022 [−0.042, −0.001] | −0.023 [−0.043, −0.003] |
+| V2a | −0.093 [−0.114, −0.072] | −0.089 [−0.110, −0.067] | −0.099 [−0.119, −0.078] | −0.094 [−0.115, −0.072] |
+| V2b-night | −0.042 [−0.062, −0.022] | −0.040 [−0.059, −0.023] | −0.035 [−0.054, −0.016] | −0.031 [−0.051, −0.010] |
+| V2b-nap | −0.289 [−0.330, −0.250] | −0.266 [−0.311, −0.223] | −0.326 [−0.380, −0.271] | −0.309 [−0.372, −0.244] |
+
+Per cell, over the four columns (point checks: the mean at each gap, for V1a-late at each position, and BIDSleep's own
+mean; failing outcomes in bold):
+
+| cell | arms | subjects (BIDSleep, Walch) | point checks (gaps, positions, BIDSleep) | positive control, instantaneous / mean2min | outcome |
+|---|---|---|---|---|---|
+| V1a-late | B, C | 64 (47, 17) | +0.004 … +0.108; END +0.004 … +0.008, MID +0.075 … +0.108 | −0.014 [−0.024, −0.004] / −0.016 [−0.025, −0.008] | pass |
+| V1a-early | B | 57 (46, 11) | −0.059 … −0.015; 13 of 16 below −0.02 | −0.017 [−0.026, −0.008] / −0.017 [−0.029, −0.006] | **harm shown** |
+| V1b-late | B, C | 39 (39, Walch's 9 left out) | +0.007 … +0.025 | — | pass |
+| V1b-early | B | 41 (41, Walch's 7 left out) | −0.025 … −0.018 | — | pass |
+| V2a | B | 57 (46, 11) | −0.114 … −0.086; all 16 below −0.02 | −0.019 [−0.030, −0.009] / −0.016 [−0.028, −0.004] | **harm shown** |
+| V2b-night | B, C | 55 (44, 11) | −0.050 … −0.026; all 16 below −0.02 | −0.021 [−0.032, −0.011] / −0.018 [−0.031, −0.005] | **harm shown** |
+| V2b-nap | B, C | 55 (44, 11) | −0.330 … −0.261; all 16 below −0.05 | — | **harm shown** |
+
+Booleans: G yes, E yes, S_t no, P2 no, N no, **SC no**, SB no, R_B yes, R_C yes, U_B yes, U_C yes, L_B yes, L_C yes.
+Reasons generated from `summary.json` (abridged; the full lists name every failing mean and point check): "B and C not
+adopted: V2b-night: harm shown (instantaneous/base/mean = -0.0416 < -0.02; …)"; "B and C not adopted: V2b-nap: harm
+shown (instantaneous/base/mean = -0.2895 < -0.05; …)"; "B not adopted: V1a-early: harm shown (instantaneous/base/mean =
+-0.0217 < -0.02; …)"; "B not adopted: V2a: harm shown (instantaneous/base/mean = -0.0927 < -0.02; …)"; "coverage A keeps
+losing against B: Cov_staged 0.836 vs 1.000, Cov_any 0.941 vs 1.000, E2E 0.464 vs 0.551"; "coverage A keeps losing
+against C: Cov_staged 0.836 vs 0.911, Cov_any 0.941 vs 0.969, E2E 0.464 vs 0.502". In the decisive cells 0–12 of the
+318–855 constructs per (variant, gap heart rate) had a decode not estimated under one arm (a split piece with too
+little coverage or no heart rate); as the text provides, they count as predicted AWAKE for that arm.
+
+**Sleep as Android, the label and coverage** (V3a and U enter the rule and gate G6 checks V4; the rest is reported). 255
+replays (5 arms × 51), none threw. V3c is the share of the 30 back-to-sleep replays (fragment gaps 25–59 min) in which
+Sleep as Android ends with the night up to the fragment's end, the alternative being the night up to the first piece's
+end; none ended with a changed-night notice. Coverage is the share of the constructs' true sleep (outside the gap)
+written with stages (Cov_staged), written at all (Cov_any) and written with the correct stage (E2E):
+
+| arm | V3a | V3b: median added delay at hourly uploads (6 replays) | U at D_max 90 (at 60) | V3c: to the fragment's end / the first piece's end | V4: 21 Oct | Cov_staged | Cov_any | E2E | separate sleep counted in a night |
+|---|---|---|---|---|---|---|---|---|---|
+| A | passed | 0 min | yes (yes) | 20 / 80 % | split | 0.836 | 0.941 | 0.464 | 0 |
+| B | passed | 60 min (60, 60, 60, 60, 45, 60) | yes (yes) | 100 / 0 % | one night | 1.000 | 1.000 | 0.551 | 0.057 |
+| C | passed | 60 min | yes (yes) | 100 / 0 % | one night | 0.911 | 0.969 | 0.502 | 0.028 |
+| *R45* | passed | 60 min | yes (yes) | 60 / 40 % | one night | 0.891 | 0.961 | 0.494 | 0.019 |
+| *R90* | passed | 60 min | yes (yes) | 100 / 0 % | one night | 1.000 | 1.000 | 0.551 | 0.057 |
+
+**Reported: other gap heart rates and longer gaps** (no decision; mean change, instantaneous / mean2min; g = 45 for
+the stretch variants, g = 75 and 89 pooled for R90, `base`):
+
+| cell | no heart rate (`nohr`) | pre-sleep heart rate | walking | g = 75 and 89 (R90) |
+|---|---|---|---|---|
+| V1a-late | +0.052 / +0.060 | +0.026 / +0.048 | +0.029 / +0.044 | +0.020 / +0.034 |
+| V1a-early | +0.006 / −0.020 | −0.017 / −0.055 | −0.006 / −0.030 | −0.037 / −0.073 |
+| V1b-late | +0.051 / +0.050 | +0.018 / +0.019 | +0.025 / +0.023 | +0.007 / +0.010 |
+| V1b-early | −0.027 / −0.031 | −0.028 / −0.031 | −0.015 / −0.014 | −0.017 / −0.029 |
+| V2a | −0.083 / −0.109 | −0.090 / −0.105 | −0.090 / −0.098 | −0.118 / −0.125 |
+| V2b-night | −0.035 / −0.027 | −0.040 / −0.036 | −0.039 / −0.035 | −0.052 / −0.052 |
+| V2b-nap | −0.266 / −0.268 | −0.306 / −0.332 | −0.269 / −0.320 | −0.285 / −0.332 |
+
+R45 merges only g = 35 of the decisive gaps; its reading is each cell's g = 35 point check (`report.md`).
+
+**Independent verification and what the cells mean** (after the run; post hoc, reporting only; its scripts and outputs
+are not committed and are kept in `tools/train/out/mergegap-verify/`, and nothing of it changes the decision or a
+default):
+
+- **Reproduction.** All 28 (cell, variant, gap heart rate) means and intervals and the positive controls were
+  recomputed from `regions.jsonl` with an independent κ, sleep / wake accuracy, estimator rule and stratified bootstrap
+  (agreement to 1.1 × 10⁻¹⁶); the booleans give case 4; the 2412 region matrices of g = 45, `base`, instantaneous
+  re-decode identically; `report.md` re-renders byte-identical. The decision rests on one boolean, SC = false: with SC
+  false all 16 combinations of R_B, R_C, U_B and U_C give case 4, and N is false from V2b-night alone.
+- **V2b-night is the robust deciding harm.** A separate nap that starts 35–59 min after the night, merged into it,
+  costs the night 0.03–0.04 κ, more than a session start 15 min late (section 13.8: −0.025 / −0.023; this cell's
+  positive control on the same hosts: −0.021 / −0.018). Every mean and every gap and dataset check is below −0.02.
+  Post hoc, the harm kept that size with the nap forced AWAKE (−0.041) or without its heart rate (−0.039), with a
+  REM-rich late-night window instead of the onset copy as the nap (−0.040 / −0.041), whatever the nap's true DEEP
+  share (−0.025 to −0.054) and whatever the gap within 35–59 min; it grows at 75–89 min (−0.052). In the reported gap
+  variants at g = 45 (no heart rate, pre-sleep heart rate, walking) its means were −0.027 to −0.040.
+- **The night model ties its stages to the session's edges.** Its session-time features (`t`, `hoursSinceStart`,
+  `hoursToEnd`) are measured from the merged session's boundaries, and it places DEEP almost only in the first 2–3 h of
+  a session and REM near its end, so moving either edge moves the stages: with a nap appended, the night's predicted REM
+  share falls (NAPAFTER-60, pooled, instantaneous: 0.14 merged against 0.19 split, truth 0.27) and LIGHT rises. This
+  one trait explains every sign below. Inference: it matters beyond the merge gap, for example for OHealth's provisional
+  sessions cut at 07:29.
+- **V2b-nap mostly measures how the nap was built.** Its −0.27 to −0.33 is the 4-class κ of the merged nap against S′,
+  the nap model staging the nap alone, not a sleep / wake accuracy: on sleep / wake accuracy the merged nap loses at
+  most about 0.04. The nap is a copy of the night's onset (true DEEP 38–49 % of its chunks); the night model, reading a
+  late position in a long session, gives it no DEEP, while S′, built for a session start, gives it 27–32 %. The change
+  is −0.31 to −0.38 for naps with at least 25 % true DEEP (49 subjects) and −0.03 to −0.16 below that (13 subjects,
+  pooled, no interval), and with a REM-rich late-night window as the nap its sign reverses (+0.09 / +0.14, exploratory).
+  Section 13 of the text predicted this bias. The number is not the effect of merging a real morning nap, which is
+  lighter; S′ is never written under A (A ignores naps under 90 min and writes longer ones as asleep / awake); and the
+  decision does not need it.
+- **V1a-late's gain comes from the middle of the night.** The pre-registered position checks give MID (a night split in
+  the middle) +0.075 to +0.108 and END (a fragment after the main sleep, the re-doze case) +0.004 to +0.008. Post hoc,
+  END's intervals are about [−0.02, +0.03] (59 subjects) and include 0 for every fragment length from 25 to 140 min,
+  while MID's lie above 0 (+0.077 to +0.112, 33 subjects): split in the middle, S decodes two half-nights, each from
+  its own onset; a re-doze merged at the end leaves the night's staging as it was. In a post-hoc subgroup with 400 min
+  or more of sleep before the gap, END merges cost the night about 0.02–0.06 κ (15 subjects, thresholds chosen after
+  seeing the data: a hypothesis). The fragment itself is staged poorly under M (κ against the truth 0.06–0.22; END-25
+  0.06–0.12).
+- **V1a-early's harm comes from short first pieces.** Post hoc, with the cells' dataset rule: first pieces under 125
+  min (START-25, -60 and -100 pooled) −0.033 to −0.065 (56 subjects, every interval below 0), START-140 +0.005 to
+  +0.030 (38 subjects, every interval including 0). A short piece in front moves the session's start before the main
+  sleep, and the model, which puts DEEP near a session's start, stages the main sleep's first hours worse, much as with
+  an evening doze (V2a −0.089 to −0.099, whose harm lies in the first 120 min of the night; for START an inference).
+  This is the direction of arm C's rule (its 60-min threshold applies only after a group that already covers at least
+  180 min, so a short first piece is never merged onto the main sleep across a gap of 30 min or more); that a lower
+  threshold of about 125 min would do is post hoc.
+- **The gap's content, reported only.** The two decisive gap heart rates (in-bed, + 10 bpm) gave the same verdicts. In
+  the reported variants at g = 45 (no heart rate, pre-sleep heart rate, walking), the means of V2a, V2b-night and
+  V2b-nap stayed below their margins, V1a-early's ranged from −0.055 to +0.006, and the cells that passed stayed above
+  their margins (table above); section 18 of the text allows no claim about a gap spent up and walking or without heart
+  rate. That a veto on steps in the gap could help, by grouping sessions correctly rather than by better staging, is a
+  hypothesis for a later pre-registration.
+- **How often the developer meets each pattern** (session boundaries, section 2.4 of the text; inference except 21
+  Oct): 3 of 23 OHealth nights group differently under A and under B or C, all three fragments after the main sleep.
+  None of the patterns where B or C showed harm occurred: the two separate naps started 126 and 195 min after waking, no
+  evening session ended within 465 min of a night, and the two early splits (first pieces of 107 and 147 min) had gaps
+  of 23 min, which A merges as well.
+
+**What it means.** Merging across a gap of 35–59 min helps the staging of a night only when the watch split the night
+in the middle. At the end of the night, the re-doze case that motivated the experiment, merging neither helped nor
+harmed the night's staging on average; there it buys coverage: the fragment is written, the night ends when the user
+got up (21 Oct at 08:19, as labelled), and a continuation like 30 Sep's is staged as part of the night instead of being
+written as a nap without stages. Gluing on sleep that is not part of the night harms it: a separate nap 35–59 min after
+the night (B and C) and an evening doze 35–59 min before it (B only). Merging a short first piece of the night's own
+sleep onto the main sleep (B only) harmed it too (V1a-early; first pieces under about 125 min, post hoc). The night
+model ties its stages to the session's edges: moving a session edge away from the true sleep (a glued-on nap or doze, a
+short piece in front, a cut session) costs staging, while merging a re-doze at the end left it unchanged and rejoining
+a night split in the middle improved it. Session boundaries alone cannot tell a re-doze after the night from a separate
+nap: END and NAPAFTER constructs have the same gap, covered time and sleep before the gap, yet merging leaves the
+night's κ unchanged for END and lowers it for NAPAFTER; a rule that tells them apart needs information beyond the
+boundaries, or has to avoid the merge decision.
+
+**Decision and what it changes.** Case 4: **A is kept, `sources.mergeGapMin` stays 30 min.** In the words section 18
+of the text allows: 30 min stays the default because a separate nap starting 35–59 min after the night, merged into
+it, made the night's staging worse (V2b-night, harm shown, −0.031 to −0.042 κ) and was staged worse than the nap model
+would stage it (V2b-nap, harm shown), which rules out B and C; B also showed harm at the start of the night (V1a-early)
+and with a doze before it (V2a). Under A, 83.6 % of the true sleep of these constructs is written with stages, against
+100 % under B and 91.1 % under C (Cov_any 94.1 / 100 / 96.9 %, E2E 46.4 / 55.1 / 50.2 %). Users whose watch splits
+nights at longer awakenings can raise "Merge gap", at the cost of a later Sleep as Android request (and of the harms
+above when a separate nap or doze falls within the gap). **Not claimed:** that 30 min is validated (the rule keeps A
+whenever B and C are not shown safe in every scenario, and it never trades coverage for staging, so B and C were
+rejected on scenarios the developer's data never showed); that merging harms staging beyond the cells that showed harm;
+that the labelled night of 21 Oct is handled correctly (under A it is split); and anything about a gap spent walking or
+without heart rate, which was reported only. Nothing was installed (section 17 of the text applies only after an
+adoption): the default, the bundle, `TrainedDefaults` and the core-algo and algo-cli sources are unchanged, so no
+estimate changes.
+
+**Arm C's setting removed afterwards.** `sources.continuationGapMin` ("Merge gap after a long session", 0 = off) existed
+only for the experiment, on main from `c076017`, and was never in a release. On 2026-10-22 the developer decided not to
+keep it as a personal option, and it was removed with its grouping and margin code (`NightCandidateBuilder`'s
+continuation thresholds, `SourceSettlement`'s per-session Sleep as Android margins) and their tests
+(`SourceSettlementMergeGapTest`, arm C's part of `MergeGapGroupingFixtureTest`): the main sources of every module are
+again those of `e7caaf4`, and a settings file or export that still lists the key loads with it ignored. The experiment
+ran at `a55aa55`, before the removal: `mergegap-gates` and `mergegap` reproduce it only at that commit. At later ones
+the replay test covers A, B, R45 and R90, `MergeGapGroupingFixtureTest` still checks `NightCandidateBuilder` against
+the fixture under those four arms, and `mergegap-report`, the Python side of G4 and `tests/test_mergegap.py` run
+unchanged (`tools/train/README.md`).
+
+**Limitations.** Every gap, doze and nap is constructed in a labelled night: a real awakening of 2–40 min stretched to
+35–89 min and followed by the night's continuation after a short awakening (sleep after a long awakening may restart
+with light sleep), and dozes and naps copied from the night's own onset; the 5-min session margins are an assumption.
+Walch has few hosts, so BIDSleep (headband) carries most of the weight, and it alone makes up the V1b cells. The rule is
+conservative by design: it rejected B and C on scenarios (a nap 35–59 min after waking, an evening doze 35–59 min
+before the night) that never occurred in the developer's data, so keeping 30 min means that B and C were not shown to
+be safe in every scenario, not that 30 min is right for this user. V1a-late's positive control was detected only
+narrowly (−0.014 / −0.016 with lower bounds −0.024 / −0.025, against section 13.8's −0.025 / −0.023); scoring a
+decode that was not estimated as AWAKE favours M (it changes no outcome, but V1b-late's positive sign depends on it);
+G7 does not record why its count of BIDSleep nights without a host differs from the text's. The replays use synthetic
+timelines; one person's label and limit. The decision is for the night model and N1 as they are. A follow-up
+pre-registration (one night grouped but staged as split, a rule that tells a re-doze from a separate nap, a steps veto)
+must list every V1 and V2 cell of this run as known and keep this experiment's margins (section 20 of the text), and
+should also list the post-hoc splits above as known.
+
 ## 14. Published results for context
 
 None of these is directly comparable (other inputs, class sets, protocols); they calibrate expectations. Read from the
@@ -2272,6 +2630,14 @@ real PSG κ in section 13.
   `napMode.maxSessionMin` = 120, sessions of 2 h or more are nights and use the night model; the baseline and
   stage-share rules then follow the 120-min threshold too. Under the default nap output policy a short night shorter
   than the threshold is written as asleep / awake only (section 13.13).
+- **Nights split at a long awakening.** A watch app that records no sleep for a while writes one night as several
+  sessions. With the default merge gap of 30 min, a piece after a gap of 30 min or more is not written when it is
+  shorter than 90 min, is written as a nap when it is shorter than 180 min, and the night then ends at the earlier
+  piece's end. The pre-registered experiment of section 13.14 kept 30 min because a larger gap also glues on separate
+  naps and evening dozes, which harmed the night's staging on labelled nights; merging a re-doze after the main sleep
+  neither helped nor harmed the night's staging. The night model ties its stages to the session's edges: moving an edge
+  away from the true sleep (a glued-on nap or doze, a cut session) costs staging, while rejoining a night split in the
+  middle improved it.
 - **Selection and seed optimism.** Configuration, classifier, BIDSleep step handling and the experiments were chosen
   by the same outer-LOSO score, and their differences are within the paired CIs; the shipped seed scored best of four
   (0.334 vs a mean of 0.317, without b). Read 0.32 as the expected κ of the procedure. The stage-proportion candidate
@@ -2403,6 +2769,24 @@ mise exec -- python -I tools/train/train.py defaults --run naps-realistic-final 
 mise exec -- ./gradlew :algo-cli:installDist      # newest file 08:50:11, fingerprint 33232722..., no line in the log
 JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py naps-realistic-verify --exp naps-realistic \
     --final naps-realistic-final --out-run naps-realistic-verify
+# 6d. the merge gap (pre-registered, section 13.14; the commands of section 19 of the pre-registration, the train.py
+#     steps in the order they ran, steps without a line in the log marked; nothing was adopted, so nothing is
+#     installed). Commit the pre-registration on its own first; phase A decodes with core-algo, algo-cli and the bundle
+#     of the base commit (here e7caaf4, the build of 6c's verification). No Gradle step of this block has a line in the
+#     log; every run recorded the same algo-cli build (fingerprint 33232722..., newest file 2026-10-15 08:50:11), so no
+#     rebuild changed it. The runs that call Gradle (mergegap-gates, mergegap) need arm C's code, so they reproduce the
+#     run only at a55aa55 (tools/train/README.md)
+mise exec -- ./gradlew :algo-cli:installDist                                  # no line in the log
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py mergegap-base --out-run mergegap-base --jobs 10
+mise exec -- ./gradlew test ktlintCheck detekt :algo-cli:installDist          # no line in the log
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py mergegap-gates --out-run mergegap-gates --jobs 10
+#     the developer's limit U1 logged; the experiment ran twice, each time after a build of its commit: at 8f43fb3
+#     with the logged limit of 60 min (its output moved to tools/train/out/mergegap-withdrawn-limit60) and, after the
+#     amendment to 90 min, at a55aa55
+mise exec -- ./gradlew :algo-cli:installDist      # at 8f43fb3 and at a55aa55; no line in the log; still 33232722...
+JAVA_OPTS=-Xmx2g mise exec -- python -I tools/train/train.py mergegap --out-run mergegap --jobs 10
+#     not run here (the experiment writes report.md itself); re-renders the report without algo-cli:
+#     mise exec -- python -I tools/train/train.py mergegap-report --out-run mergegap
 # 7. rebuild with the new defaults and check
 mise exec -- ./gradlew :core-algo:test :algo-cli:test :algo-cli:installDist ktlintCheck detekt
 mise exec -- python -I -m pytest tools/train/tests -q
@@ -2426,8 +2810,9 @@ recorded in `summary.json` as `runAlgoCliSha256`; BASE must still reproduce the 
 are not committed: keep `tools/train/out/{bias-base, bias-final, naps, naps-final, naps-verify, naps-verify-merge,
 naps-verify-modes, naps-rerun, naps-posthoc, nap-model, nap-model-final, nap-model-verify, naps-realistic-base,
 naps-realistic-g2-manual, naps-realistic-timing, naps-realistic-gates, naps-realistic-gates-a1, naps-realistic,
-naps-realistic-final, naps-realistic-external, naps-realistic-verify}` (and the worktrees' `commands.log` files) with
-the other runs; the
+naps-realistic-final, naps-realistic-external, naps-realistic-verify, mergegap-base, mergegap-gates,
+mergegap-withdrawn-limit60, mergegap, mergegap-verify}` (and the worktrees' `commands.log` files) with the other
+runs; the
 pre-registration and that log are also committed under `docs/prereg/`. `train.py naps` writes `out/<out-run>/` (`repro/`
 — the night-level reproduction, `fits.json` — every b_short fit with its trace, `results.jsonl` — every decoded session
 per decoding kind, `summary.json`, `report.md`, `algocli.log`; `commands.log` holds the pre-registration and the START /
@@ -2458,7 +2843,12 @@ pre-registration estimated 45–75 min); `naps-realistic-final` writes `final/{h
 and the decodes, `naps-realistic-install` writes `trained_defaults.json` into the final run, and
 `naps-realistic-verify` writes `summary.json`. The ds006576 data (`tools/train/data/external/ds006576`, CC0; the fetch
 took 2401 s) and the environment `tools/train/.venv-external` are never committed; the pre-registration, its digest
-and the log are committed under `docs/prereg/`. The full per-subject nested selection (`--selection per-subject`,
+and the log are committed under `docs/prereg/`. `train.py mergegap` writes `out/mergegap/` (`gates.json`;
+`constructs/` — hosts and construct digests, the session files deleted after decoding; `regions.jsonl` — the matrices
+of every construct, arm and region; `pc.jsonl` — the positive controls; `v3/` — the replay report and its Gradle
+record; `cells.json`; `summary.json` — V1–V4, U1, the case of the rule and its generated reasons; `report.md`;
+`algocli.log`) in 475 s at 10 jobs (the pre-registration estimated 45–120 min); `mergegap-base` writes the phase-A
+references to `out/mergegap-base/ref/`. The full per-subject nested selection (`--selection per-subject`,
 1504 inner-CV runs) was started once and stopped; the logged projection was more than 2.5 h for the nested selection
 alone.
 
